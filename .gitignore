@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+
+# Environment files
+.env
+.env.*
+
+# IDE / Editor settings
+.vscode/
+.idea/
+*.swp
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Logs / temporary
+*.log
+*.tmp
+
+# Build outputs
+build/
+dist/
+*.egg-info/
