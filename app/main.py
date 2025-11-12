@@ -1,16 +1,18 @@
-"""
-📄 파일명: main.py
-📌 역할: FastAPI 애플리케이션 진입점. 앱 생성, 라우터 등록, 미들웨어 설정.
-🧩 관련 모듈:
-  - app.core.security / app.core.exceptions
-  - app.health.router 등 주요 라우터
-"""
+"""FastAPI application entrypoint where routers and services are wired."""
 
 from fastapi import FastAPI
+
+from app.core.exceptions import register_exception_handlers
+from app.core.logging import setup_logging
 from app.health.router import router as health_router
 
+setup_logging()
+
 app = FastAPI(title="Backend Skeleton")
+register_exception_handlers(app)
+
 app.include_router(health_router, prefix="/health", tags=["health"])
+
 
 @app.get("/")
 async def root():
