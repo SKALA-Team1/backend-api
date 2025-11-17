@@ -31,6 +31,17 @@ class SlackMessageDto(BaseModel):
     timestamp: datetime = Field(..., description="메시지 전송 시각 (ISO 8601)")
     senderName: str = Field(..., description="메시지 발신자 이름")
     text: str = Field(..., description="메시지 내용")
+    myMessage: bool | None = Field(
+        default=False,
+        description="해당 메시지가 사용자 본인의 발화인지 여부"
+    )
+
+
+class MessageRole(BaseModel):
+    """LLM 처리를 위한 메시지 역할 정보"""
+    content: str = Field(..., description="메시지 텍스트")
+    sender: str = Field(..., description="발화자 이름")
+    mine: bool = Field(default=False, description="사용자 본인 발화 여부")
 
 
 class AnalysisRequestDto(BaseModel):
@@ -55,10 +66,10 @@ class ScenarioInfoDto(BaseModel):
     aiRole: str = Field(..., description="AI 역할 (Project Manager, Tech Lead, QA Engineer)")
     topicType: str = Field(..., description="토픽 타입 (overview, detail)")
     title: str = Field(..., max_length=200, description="시나리오 제목")
-    fixedQuestions: List[str] = Field(..., min_items=3, max_items=5, description="고정 질문 목록 (3-5개)")
+    fixedQuestions: List[str] = Field(..., min_items=3, max_items=3, description="고정 질문 목록 (3개)")
 
 
 class AnalysisResultDto(BaseModel):
     """Slack 대화 분석 결과 DTO (FastAPI → Spring 2)"""
     subject: SubjectInfoDto = Field(..., description="대화 주제 정보")
-    scenarios: List[ScenarioInfoDto] = Field(..., min_items=6, max_items=6, description="생성된 시나리오 목록 (정확히 6개)")
+    scenarios: List[ScenarioInfoDto] = Field(..., min_items=4, max_items=4, description="생성된 시나리오 목록 (4개 - overview, project manager detail, tech lead detail, qa engineer detail)")

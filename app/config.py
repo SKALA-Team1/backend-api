@@ -6,18 +6,23 @@ Application-wide configuration helpers built on Pydantic Settings.
 
 역할:
     - 환경변수(.env) 기반 설정값을 중앙에서 관리
-    - DATABASE_URL, OPENAI_API_KEY, ENVIRONMENT 등 환경별 주요 설정 로드
+    - Redis, S3(MinIO/AWS S3), Spring2 API, Database, OpenAI 등
+      SKALA FastAPI가 필요로 하는 모든 설정을 단일 클래스로 관리
     - Settings 인스턴스를 전역에서 재사용하도록 캐싱 처리
 
 사용예시:
     from app.config import settings
 
+    print(settings.REDIS_URL)
+    print(settings.S3_BUCKET_NAME)
     print(settings.database_url)
     if settings.debug:
         print("Running in development mode")
+
 --------------------------------------------------------------
 Author: 정도현
 Created: 2025-11-12
+Modified: 2025-11-17
 --------------------------------------------------------------
 """
 
@@ -34,53 +39,65 @@ class Settings(BaseSettings):
 
     역할:
         - .env 파일 혹은 시스템 환경변수에서 설정값을 자동 로드
-        - 환경별 설정(개발, 운영, 로컬 등)을 구분 관리
-        - FastAPI, SQLAlchemy, 외부 API 클라이언트 등에서 공통 사용
-
-    주요 필드:
-        database_url (str): 데이터베이스 연결 URL
-        environment (str): 실행 환경 ("development", "production", "local" 등)
-        openai_api_key (Optional[str]): OpenAI API 키 (없으면 None)
-        필드는 지속적으로 추가 예정
-
-    참고:
-        - Pydantic SettingsConfigDict를 통해 env_file, 인코딩, extra 옵션 지정
+        - 개발(local), 스테이징, 프로덕션 환경까지 구분 관리
+        - FastAPI 전역에서 import하여 공통 설정으로 사용
     """
 
-    # 환경변수 로드 설정
+    # -------------------------------------
+    # Base Config
+    # -------------------------------------
     model_config = SettingsConfigDict(
-        env_file=".env",               # 환경변수 파일 경로
-        env_file_encoding="utf-8",     # 인코딩
-        extra="ignore"                 # 정의되지 않은 변수 무시
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
-    # 환경변수 매핑
+    # -------------------------------------
+    # DB 환경변수
+    # -------------------------------------
     database_url: str = Field(..., alias="DATABASE_URL")
     environment: str = Field("development", alias="ENVIRONMENT")
+
+    # -------------------------------------
+    # OpenAI
+    # -------------------------------------
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
 
+    # -------------------------------------
+    # Redis
+    # -------------------------------------
+    REDIS_URL: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
+
+    # -------------------------------------
+    # S3 (MinIO 또는 AWS S3)
+    # -------------------------------------
+    S3_ENDPOINT_URL: str = Field("http://localhost:9000", alias="S3_ENDPOINT_URL")
+    S3_ACCESS_KEY: str = Field("minioadmin", alias="S3_ACCESS_KEY")
+    S3_SECRET_KEY: str = Field("minioadmin123", alias="S3_SECRET_KEY")
+    S3_BUCKET_NAME: str = Field("skala", alias="S3_BUCKET_NAME")
+    S3_REGION: str = Field("us-east-1", alias="S3_REGION")
+
+    # -------------------------------------
+    # Spring 2 Backend
+    # -------------------------------------
+    SPRING2_BASE_URL: str = Field("http://localhost:8082", alias="SPRING2_BASE_URL")
+
+    # -------------------------------------
+    # Convenience Property
+    # -------------------------------------
     @property
     def debug(self) -> bool:
-        """
-        개발모드 여부를 반환하는 속성.
-
-        Returns:
-            bool: ENVIRONMENT가 "development" 또는 "local"이면 True
-        """
+        """개발모드 여부"""
         return self.environment.lower() in {"development", "local"}
 
 
+# -------------------------------------
+# Cached global settings instance
+# -------------------------------------
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """
-    Return a cached Settings instance.
-
-    설명:
-        - Settings 객체를 프로세스당 한 번만 생성
-        - 매번 새로 환경변수를 읽는 오버헤드 방지
-    """
     return Settings()
 
 
-# 전역에서 import하여 사용할 설정 인스턴스
+# 전역에서 import 후 재사용
 settings = get_settings()
