@@ -214,10 +214,53 @@ AI 롤플레잉(시나리오 기반 대화) 관련 API 엔드포인트를 정의
             }
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+import logging
+
+from app.roleplaying.schemas import AnalysisRequestDto, AnalysisResultDto
+from app.roleplaying.services.slack_scenario_service import SlackScenarioService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.get("/health/ping")
 async def ping():
     return {"status": "ok"}
+
+
+@router.post("/internal/scenarios/analyze-conversation", response_model=AnalysisResultDto)
+async def analyze_conversation(request: AnalysisRequestDto):
+    """
+    Slack 대화를 분석하고 영어 연습 시나리오를 생성합니다.
+
+    Spring 2 서버에서 호출하는 내부 API입니다.
+
+    Args:
+        request: Slack 메시지 및 사용자 정보
+
+    Returns:
+        분석된 주제 정보 + 6개의 시나리오
+
+    Raises:
+        400: 메시지가 비어있을 때
+        500: LLM 분석 실패 또는 기타 서버 오류
+    """
+    # 입력 검증
+    if not request.messages:
+        logger.warning(f"Empty messages received for user {request.userId}")
+        raise HTTPException(status_code=400, detail="No messages provided")
+
+    try:
+        # 시나리오 서비스 실행
+        service = SlackScenarioService()
+        result = await service.analyze_and_generate(request)
+
+        logger.info(f"Successfully generated scenarios for user {request.userId}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to analyze conversation for user {request.userId}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to analyze conversation: {str(e)}"
+        )

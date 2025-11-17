@@ -11,7 +11,54 @@ Roleplaying Schemas
     - ScenarioCreateSchema / ScenarioResponseSchema
     - MessageSchema / TurnSchema
     - ScenarioStatusSchema
+    - Slack 시나리오 생성 관련 스키마
 
 의존성:
     - Models.py
 """
+
+from datetime import date, datetime
+from typing import List
+from pydantic import BaseModel, Field
+
+
+# =====================================================
+# Slack 시나리오 생성 관련 스키마
+# =====================================================
+
+class SlackMessageDto(BaseModel):
+    """Slack 메시지 DTO"""
+    timestamp: datetime = Field(..., description="메시지 전송 시각 (ISO 8601)")
+    senderName: str = Field(..., description="메시지 발신자 이름")
+    text: str = Field(..., description="메시지 내용")
+
+
+class AnalysisRequestDto(BaseModel):
+    """Slack 대화 분석 요청 DTO (Spring 2 → FastAPI)"""
+    userId: int = Field(..., description="사용자 ID")
+    myRole: str = Field(..., description="사용자의 직무 역할 (DB에서 제공, LLM 분석 불필요)")
+    conversationDate: date = Field(..., description="대화 날짜 (LocalDate)")
+    messages: List[SlackMessageDto] = Field(..., description="해당 날짜의 Slack 메시지 목록")
+    aiRoles: List[str] = Field(..., description="시나리오 생성할 AI 역할 목록")
+
+
+class SubjectInfoDto(BaseModel):
+    """대화 주제 정보 DTO"""
+    myRole: str = Field(..., description="대화에서 유추한 사용자 역할")
+    situation: str = Field(..., description="대화 주제 및 상황 (1-2문장)")
+    conversationDate: date = Field(..., description="대화 날짜")
+    messageCount: int = Field(..., description="메시지 개수")
+
+
+class ScenarioInfoDto(BaseModel):
+    """생성된 시나리오 정보 DTO"""
+    aiRole: str = Field(..., description="AI 역할 (Project Manager, Tech Lead, QA Engineer)")
+    topicType: str = Field(..., description="토픽 타입 (overview, detail)")
+    title: str = Field(..., max_length=200, description="시나리오 제목")
+    fixedQuestions: List[str] = Field(..., min_items=3, max_items=5, description="고정 질문 목록 (3-5개)")
+
+
+class AnalysisResultDto(BaseModel):
+    """Slack 대화 분석 결과 DTO (FastAPI → Spring 2)"""
+    subject: SubjectInfoDto = Field(..., description="대화 주제 정보")
+    scenarios: List[ScenarioInfoDto] = Field(..., min_items=6, max_items=6, description="생성된 시나리오 목록 (정확히 6개)")
