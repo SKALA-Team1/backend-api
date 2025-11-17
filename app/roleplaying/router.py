@@ -217,7 +217,7 @@ AI 롤플레잉(시나리오 기반 대화) 관련 API 엔드포인트를 정의
 from fastapi import APIRouter, HTTPException
 import logging
 
-from app.roleplaying.schemas import AnalysisRequestDto, AnalysisResultDto
+from app.roleplaying.schemas import AnalysisRequestDto, AnalysisResultDto, MessageRole
 from app.roleplaying.services.slack_scenario_service import SlackScenarioService
 
 router = APIRouter()
@@ -250,10 +250,22 @@ async def analyze_conversation(request: AnalysisRequestDto):
         logger.warning(f"Empty messages received for user {request.userId}")
         raise HTTPException(status_code=400, detail="No messages provided")
 
+    conversation_roles = [
+        MessageRole(
+            content=message.text,
+            sender=message.senderName,
+            mine=bool(message.myMessage)
+        )
+        for message in request.messages
+    ]
+
     try:
         # 시나리오 서비스 실행
         service = SlackScenarioService()
-        result = await service.analyze_and_generate(request)
+        result = await service.analyze_and_generate(
+            request=request,
+            conversation_roles=conversation_roles
+        )
 
         logger.info(f"Successfully generated scenarios for user {request.userId}")
         return result
