@@ -1,215 +1,240 @@
-CREATE DATABASE skuseme_db
-  DEFAULT CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
+create table if not exists reference_doc
+(
+    reference_id bigint unsigned auto_increment
+        primary key,
+    document     text                                not null,
+    created_at   timestamp default CURRENT_TIMESTAMP not null
+)
+    charset = utf8mb4;
 
-USE skuseme_db;
+create table if not exists user
+(
+    user_id           bigint unsigned auto_increment
+        primary key,
+    email             varchar(255)                        not null,
+    name              varchar(100)                        not null,
+    profile_image_url varchar(512)                        null,
+    auth_provider     varchar(50)                         not null,
+    provider_user_id  varchar(255)                        null,
+    job_role          varchar(100)                        null,
+    team_name         varchar(100)                        null,
+    created_at        timestamp default CURRENT_TIMESTAMP not null,
+    updated_at        timestamp default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    constraint uk_user_email
+        unique (email)
+)
+    charset = utf8mb4;
 
- CREATE TABLE `user` (
-  user_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  email VARCHAR(255) NOT NULL,
-  name VARCHAR(100) NOT NULL,
-  profile_image_url VARCHAR(512),
-  auth_provider VARCHAR(50) NOT NULL,
-  provider_user_id VARCHAR(255),
-  job_role VARCHAR(100),
-  team_name VARCHAR(100),
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (user_id),
-  UNIQUE KEY uk_user_email (email)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists github_issue
+(
+    github_issue_id     bigint unsigned auto_increment
+        primary key,
+    user_id             bigint unsigned                     not null,
+    repo_owner          varchar(100)                        not null,
+    repo_name           varchar(200)                        not null,
+    issue_number        int                                 not null,
+    title               varchar(255)                        not null,
+    body                text                                null,
+    state               varchar(30)                         null,
+    external_created_at timestamp                           null,
+    external_updated_at timestamp                           null,
+    closed_at           timestamp                           null,
+    created_at          timestamp default CURRENT_TIMESTAMP not null,
+    updated_at          timestamp default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    constraint uk_github_issue_repo_number
+        unique (repo_owner, repo_name, issue_number),
+    constraint fk_github_issue_user
+        foreign key (user_id) references user (user_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE notification (
-  notification_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id BIGINT UNSIGNED NOT NULL,
-  push_token VARCHAR(512),
-  on_off TINYINT(1) NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (notification_id),
-  CONSTRAINT fk_notification_user
-    FOREIGN KEY (user_id) REFERENCES `user`(user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists integration
+(
+    integration_id   bigint unsigned auto_increment
+        primary key,
+    user_id          bigint unsigned                      not null,
+    provider         varchar(50)                          not null,
+    access_token     text                                 null,
+    refresh_token    text                                 null,
+    token_expires_at timestamp                            null,
+    is_active        tinyint(1) default 1                 not null,
+    created_at       timestamp  default CURRENT_TIMESTAMP not null,
+    updated_at       timestamp  default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    constraint fk_integration_user
+        foreign key (user_id) references user (user_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE integration (
-  integration_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id BIGINT UNSIGNED NOT NULL,
-  provider VARCHAR(50) NOT NULL,     -- 'slack', 'github'
-  access_token TEXT,
-  refresh_token TEXT,
-  token_expires_at TIMESTAMP NULL,
-  is_active TINYINT(1) NOT NULL DEFAULT 1,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (integration_id),
-  CONSTRAINT fk_integration_user
-    FOREIGN KEY (user_id) REFERENCES `user`(user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists notification
+(
+    notification_id bigint unsigned auto_increment
+        primary key,
+    user_id         bigint unsigned                     not null,
+    push_token      varchar(512)                        null,
+    on_off          tinyint(1)                          not null,
+    created_at      timestamp default CURRENT_TIMESTAMP not null,
+    constraint fk_notification_user
+        foreign key (user_id) references user (user_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE project (
-  project_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id BIGINT UNSIGNED NOT NULL,
-  creation_type VARCHAR(50) NOT NULL, -- 'prompt', 'slack_auto', 'github_auto'
-  project_name VARCHAR(200) NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (project_id),
-  CONSTRAINT fk_project_user
-    FOREIGN KEY (user_id) REFERENCES `user`(user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists project
+(
+    project_id    bigint unsigned auto_increment
+        primary key,
+    user_id       bigint unsigned                     not null,
+    creation_type varchar(50)                         not null,
+    project_name  varchar(200)                        not null,
+    created_at    timestamp default CURRENT_TIMESTAMP not null,
+    updated_at    timestamp default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    constraint fk_project_user
+        foreign key (user_id) references user (user_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE slack_message (
-  slack_message_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id BIGINT UNSIGNED NOT NULL,
-  message_ts TIMESTAMP NOT NULL,
-  sender_name VARCHAR(100),
-  text TEXT NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (slack_message_id),
-  CONSTRAINT fk_slack_message_user
-    FOREIGN KEY (user_id) REFERENCES `user`(user_id),
-  KEY idx_slack_message_user_date (user_id, message_ts)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists slack_message
+(
+    slack_message_id bigint unsigned auto_increment
+        primary key,
+    user_id          bigint unsigned                     not null,
+    message_ts       timestamp                           not null,
+    sender_name      varchar(100)                        null,
+    text             text                                not null,
+    created_at       timestamp default CURRENT_TIMESTAMP not null,
+    constraint fk_slack_message_user
+        foreign key (user_id) references user (user_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE github_issue (
-  github_issue_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id BIGINT UNSIGNED NOT NULL,
-  repo_owner VARCHAR(100) NOT NULL,
-  repo_name VARCHAR(200) NOT NULL,
-  issue_number INT NOT NULL,
-  title VARCHAR(255) NOT NULL,
-  body TEXT,
-  state VARCHAR(30),
-  external_created_at TIMESTAMP NULL,
-  external_updated_at TIMESTAMP NULL,
-  closed_at TIMESTAMP NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (github_issue_id),
-  CONSTRAINT fk_github_issue_user
-    FOREIGN KEY (user_id) REFERENCES `user`(user_id),
-  UNIQUE KEY uk_github_issue_repo_number (repo_owner, repo_name, issue_number)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create index idx_slack_message_user_date
+    on slack_message (user_id, message_ts);
 
-CREATE TABLE subject (
-  subject_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id BIGINT UNSIGNED NOT NULL,
-  slack_message_id BIGINT UNSIGNED NULL,
-  github_issue_id BIGINT UNSIGNED NULL,
-  creation_type VARCHAR(50) NOT NULL,       -- 'prompt', 'slack', 'github'
-  creation_type_detail VARCHAR(100),
-  my_role TEXT,
-  ai_role TEXT,
-  situation TEXT,
-  topic_type ENUM('overview', 'detail'),
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (subject_id),
-  CONSTRAINT fk_subject_user
-    FOREIGN KEY (user_id) REFERENCES `user`(user_id),
-  CONSTRAINT fk_subject_slack_message
-    FOREIGN KEY (slack_message_id) REFERENCES slack_message(slack_message_id),
-  CONSTRAINT fk_subject_github_issue
-    FOREIGN KEY (github_issue_id) REFERENCES github_issue(github_issue_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists subject
+(
+    subject_id           bigint unsigned auto_increment
+        primary key,
+    user_id              bigint unsigned                     not null,
+    creation_type        varchar(50)                         not null,
+    creation_type_detail varchar(100)                        null,
+    my_role              text                                null,
+    situation            text                                null,
+    created_at           timestamp default CURRENT_TIMESTAMP not null,
+    updated_at           timestamp default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    conversation_date    date                                null,
+    message_count        int                                 null,
+    constraint fk_subject_user
+        foreign key (user_id) references user (user_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE scenario (
-  scenario_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  subject_id BIGINT UNSIGNED NOT NULL,
-  user_id BIGINT UNSIGNED NOT NULL,
-  title VARCHAR(200) NOT NULL,
-  status VARCHAR(50) NOT NULL DEFAULT 'draft',   -- 'draft', 'ready', 'archived'
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (scenario_id),
-  CONSTRAINT fk_scenario_subject
-    FOREIGN KEY (subject_id) REFERENCES subject(subject_id),
-  CONSTRAINT fk_scenario_user
-    FOREIGN KEY (user_id) REFERENCES `user`(user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists scenario
+(
+    scenario_id bigint unsigned auto_increment
+        primary key,
+    subject_id  bigint unsigned                                       not null,
+    user_id     bigint unsigned                                       not null,
+    title       varchar(200)                                          not null,
+    ai_role     varchar(100)                                          null,
+    topic_type  enum ('overview', 'detail') default 'detail'          not null,
+    status      varchar(50)                 default 'draft'           not null,
+    created_at  timestamp                   default CURRENT_TIMESTAMP not null,
+    updated_at  timestamp                   default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    constraint fk_scenario_subject
+        foreign key (subject_id) references subject (subject_id),
+    constraint fk_scenario_user
+        foreign key (user_id) references user (user_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE scenario_session (
-  session_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  scenario_id BIGINT UNSIGNED NOT NULL,
-  user_id BIGINT UNSIGNED NOT NULL,
-  status VARCHAR(30) NOT NULL, -- 'IN_PROGRESS', 'FINISHED'
-  total_turns_planned INT NOT NULL,
-  played_turns INT NOT NULL DEFAULT 0,
-  completed_all_turns TINYINT(1) NOT NULL DEFAULT 0,
-  finish_reason VARCHAR(50),
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  finished_at TIMESTAMP NULL,
-  PRIMARY KEY (session_id),
-  CONSTRAINT fk_scenario_session_scenario
-    FOREIGN KEY (scenario_id) REFERENCES scenario(scenario_id),
-  CONSTRAINT fk_scenario_session_user
-    FOREIGN KEY (user_id) REFERENCES `user`(user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists scenario_reference
+(
+    scenario_id  bigint unsigned                     not null,
+    reference_id bigint unsigned                     not null,
+    created_at   timestamp default CURRENT_TIMESTAMP not null,
+    primary key (scenario_id, reference_id),
+    constraint fk_scenario_reference_reference
+        foreign key (reference_id) references reference_doc (reference_id),
+    constraint fk_scenario_reference_scenario
+        foreign key (scenario_id) references scenario (scenario_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE scenario_message (
-  message_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  session_id BIGINT UNSIGNED NOT NULL,
-  turn_index INT NOT NULL,
-  speaker VARCHAR(30) NOT NULL,  -- 'ai', 'user'
-  message_text TEXT NOT NULL,
-  audio_url TEXT,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (message_id),
-  CONSTRAINT fk_scenario_message_session
-    FOREIGN KEY (session_id) REFERENCES scenario_session(session_id),
-  KEY idx_scenario_message_session_turn (session_id, turn_index)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists scenario_session
+(
+    session_id          bigint unsigned auto_increment
+        primary key,
+    scenario_id         bigint unsigned                      not null,
+    user_id             bigint unsigned                      not null,
+    status              varchar(30)                          not null,
+    total_turns_planned int                                  not null,
+    played_turns        int        default 0                 not null,
+    completed_all_turns tinyint(1) default 0                 not null,
+    finish_reason       varchar(50)                          null,
+    created_at          timestamp  default CURRENT_TIMESTAMP not null,
+    updated_at          timestamp  default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    finished_at         timestamp                            null,
+    constraint fk_scenario_session_scenario
+        foreign key (scenario_id) references scenario (scenario_id),
+    constraint fk_scenario_session_user
+        foreign key (user_id) references user (user_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE scenario_message_feedback (
-  feedback_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  message_id BIGINT UNSIGNED NOT NULL,
-  session_id BIGINT UNSIGNED NOT NULL,
-  original_expression TEXT,
-  suggested_expression TEXT,
-  pronunciation DECIMAL(5,2),
-  grammar DECIMAL(5,2),
-  diversity DECIMAL(5,2),
-  score DECIMAL(5,2),
-  criterion VARCHAR(50),
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (feedback_id),
-  CONSTRAINT fk_scenario_message_feedback_message
-    FOREIGN KEY (message_id) REFERENCES scenario_message(message_id),
-  CONSTRAINT fk_scenario_message_feedback_session
-    FOREIGN KEY (session_id) REFERENCES scenario_session(session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists scenario_feedback
+(
+    feedback_id         bigint unsigned auto_increment
+        primary key,
+    session_id          bigint unsigned                     not null,
+    scenario_id         bigint unsigned                     not null,
+    total_pronunciation decimal(5, 2)                       null,
+    total_grammar       decimal(5, 2)                       null,
+    total_diversity     decimal(5, 2)                       null,
+    total_score         decimal(5, 2)                       null,
+    comment             text                                null,
+    created_at          timestamp default CURRENT_TIMESTAMP not null,
+    constraint fk_scenario_feedback_scenario
+        foreign key (scenario_id) references scenario (scenario_id),
+    constraint fk_scenario_feedback_session
+        foreign key (session_id) references scenario_session (session_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE scenario_feedback (
-  feedback_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  session_id BIGINT UNSIGNED NOT NULL,
-  scenario_id BIGINT UNSIGNED NOT NULL,
-  total_pronunciation DECIMAL(5,2),
-  total_grammar DECIMAL(5,2),
-  total_diversity DECIMAL(5,2),
-  total_score DECIMAL(5,2),
-  comment TEXT,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (feedback_id),
-  CONSTRAINT fk_scenario_feedback_session
-    FOREIGN KEY (session_id) REFERENCES scenario_session(session_id),
-  CONSTRAINT fk_scenario_feedback_scenario
-    FOREIGN KEY (scenario_id) REFERENCES scenario(scenario_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists scenario_message
+(
+    message_id   bigint unsigned auto_increment
+        primary key,
+    session_id   bigint unsigned                     not null,
+    turn_index   int                                 not null,
+    speaker      varchar(30)                         not null,
+    message_text text                                not null,
+    audio_url    text                                null,
+    created_at   timestamp default CURRENT_TIMESTAMP not null,
+    constraint fk_scenario_message_session
+        foreign key (session_id) references scenario_session (session_id)
+)
+    charset = utf8mb4;
 
-CREATE TABLE reference_doc (
-  reference_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  document TEXT NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (reference_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create index idx_scenario_message_session_turn
+    on scenario_message (session_id, turn_index);
 
-CREATE TABLE scenario_reference (
-  scenario_id BIGINT UNSIGNED NOT NULL,
-  reference_id BIGINT UNSIGNED NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (scenario_id, reference_id),
-  CONSTRAINT fk_scenario_reference_scenario
-    FOREIGN KEY (scenario_id) REFERENCES scenario(scenario_id),
-  CONSTRAINT fk_scenario_reference_reference
-    FOREIGN KEY (reference_id) REFERENCES reference_doc(reference_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+create table if not exists scenario_message_feedback
+(
+    feedback_id          bigint unsigned auto_increment
+        primary key,
+    message_id           bigint unsigned                     not null,
+    session_id           bigint unsigned                     not null,
+    original_expression  text                                null,
+    suggested_expression text                                null,
+    pronunciation        decimal(5, 2)                       null,
+    grammar              decimal(5, 2)                       null,
+    diversity            decimal(5, 2)                       null,
+    score                decimal(5, 2)                       null,
+    criterion            varchar(50)                         null,
+    created_at           timestamp default CURRENT_TIMESTAMP not null,
+    constraint fk_scenario_message_feedback_message
+        foreign key (message_id) references scenario_message (message_id),
+    constraint fk_scenario_message_feedback_session
+        foreign key (session_id) references scenario_session (session_id)
+)
+    charset = utf8mb4;
+

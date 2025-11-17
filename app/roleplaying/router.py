@@ -214,11 +214,20 @@ AI 롤플레잉(시나리오 기반 대화) 관련 API 엔드포인트를 정의
             }
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
 import logging
 
-from app.roleplaying.schemas import AnalysisRequestDto, AnalysisResultDto, MessageRole
+from app.roleplaying.schemas import (
+    AnalysisRequestDto,
+    AnalysisResultDto,
+    MessageRole,
+    SessionCreateRequest,
+    SessionCreateResponse
+)
 from app.roleplaying.services.slack_scenario_service import SlackScenarioService
+from app.roleplaying.services.session_service import session_service
+from app.core.deps import get_db
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -275,4 +284,64 @@ async def analyze_conversation(request: AnalysisRequestDto):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to analyze conversation: {str(e)}"
+        )
+
+
+@router.post("/sessions", response_model=SessionCreateResponse)
+async def create_session(
+    request: SessionCreateRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    롤플레잉 세션을 생성합니다.
+
+    DB에서 시나리오를 조회하고, Redis에 세션 정보를 저장한 후,
+    WebSocket 연결 URL을 반환합니다.
+
+    Args:
+        request: 사용자 ID와 시나리오 ID
+        db: DB 세션 (dependency injection)
+
+    Returns:
+        세션 ID, WebSocket URL, 시나리오 정보, 만료 시각
+
+    Raises:
+        404: 시나리오를 찾을 수 없는 경우
+        500: Redis 연결 실패 또는 기타 서버 오류
+    """
+    try:
+        # SessionService를 사용하여 세션 생성
+        # (DB 시나리오 조회 + Redis 세션 저장)
+        session_id, scenario, expires_at = await session_service.create_session(
+            user_id=request.userId,
+            scenario_id=request.scenarioId,
+            db=db
+        )
+
+        # WebSocket URL 생성 (프로덕션에서는 환경 변수로 설정)
+        ws_url = f"ws://localhost:8001/ws/roleplaying/{session_id}"
+
+        logger.info(
+            f"Session created successfully: session_id={session_id}, "
+            f"user_id={request.userId}, scenario_id={request.scenarioId}"
+        )
+
+        return SessionCreateResponse(
+            session_id=session_id,
+            ws_url=ws_url,
+            scenario=scenario,
+            expires_at=expires_at
+        )
+
+    except ValueError as e:
+        # 시나리오를 찾을 수 없는 경우
+        logger.warning(f"Scenario not found: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+
+    except Exception as e:
+        # 기타 서버 오류
+        logger.error(f"Failed to create session: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create session: {str(e)}"
         )

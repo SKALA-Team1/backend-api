@@ -371,6 +371,32 @@ class LLMService:
                 "What is the next concrete step you plan to take?"
             ]
 
+    async def generate_followup_question(self, prompt: str) -> str:
+        """
+        General helper to generate a single conversational follow-up question.
+
+        Args:
+            prompt: 이미 구성된 사용자 프롬프트 (역할/히스토리 포함)
+        """
+        try:
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'You are a helpful AI tutor that only outputs one concise English question.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ]
+            )
+            return response['message']['content'].strip()
+        except Exception as error:
+            logger.error(f"Failed to generate follow-up question: {error}")
+            raise
+
     async def generate_additional_questions(
         self,
         existing_questions: List[str],

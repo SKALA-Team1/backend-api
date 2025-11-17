@@ -89,7 +89,18 @@ class SessionState:
         """세션 만료 여부 확인"""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+
+        # UTC 기준 현재 시각 (timezone-aware)
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+
+        # expires_at이 timezone-aware가 아니면 UTC로 간주
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            from datetime import timezone
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        return now > expires_at
 
     def get_ai_turn_number(self) -> int:
         """

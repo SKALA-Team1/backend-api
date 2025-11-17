@@ -73,3 +73,32 @@ class AnalysisResultDto(BaseModel):
     """Slack 대화 분석 결과 DTO (FastAPI → Spring 2)"""
     subject: SubjectInfoDto = Field(..., description="대화 주제 정보")
     scenarios: List[ScenarioInfoDto] = Field(..., min_items=4, max_items=4, description="생성된 시나리오 목록 (4개 - overview, project manager detail, tech lead detail, qa engineer detail)")
+
+
+# =====================================================
+# 롤플레잉 세션 생성 관련 스키마
+# =====================================================
+
+class SessionCreateRequest(BaseModel):
+    """세션 생성 요청 DTO"""
+    userId: int = Field(..., description="사용자 ID", gt=0)
+    scenarioId: int = Field(..., description="시나리오 ID (DB에 저장된 시나리오)", gt=0)
+
+
+class ScenarioDetail(BaseModel):
+    """세션 생성 응답에 포함되는 시나리오 상세 정보"""
+    scenarioId: int = Field(..., description="시나리오 ID")
+    subjectId: int = Field(..., description="주제 ID")
+    myRole: str = Field(..., description="사용자 역할")
+    aiRole: str = Field(..., description="AI 역할")
+    title: str = Field(..., description="시나리오 제목")
+    topicType: str = Field(..., description="토픽 타입 (overview, detail)")
+    fixedQuestions: List[str] = Field(..., description="고정 질문 3개", min_length=3, max_length=3)
+
+
+class SessionCreateResponse(BaseModel):
+    """세션 생성 응답 DTO"""
+    session_id: str = Field(..., description="생성된 세션 ID")
+    ws_url: str = Field(..., description="WebSocket 연결 URL")
+    scenario: ScenarioDetail = Field(..., description="선택된 시나리오 정보")
+    expires_at: datetime = Field(..., description="세션 만료 시각")
