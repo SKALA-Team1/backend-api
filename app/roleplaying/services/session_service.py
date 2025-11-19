@@ -54,7 +54,8 @@ class SessionService:
         self,
         user_id: int,
         scenario_id: int,
-        db: Session
+        db: Session,
+        provided_session_id: Optional[int] = None
     ) -> tuple[str, ScenarioDetail, datetime]:
         """
         세션 생성 (DB 시나리오 조회 + Redis 저장)
@@ -76,8 +77,11 @@ class SessionService:
         if not scenario_detail:
             raise ValueError(f"Scenario {scenario_id} not found for user {user_id}")
 
-        # Step 2: session_id 생성 (UUID)
-        session_id = str(uuid.uuid4())
+        # Step 2: session_id 생성 (주어진 값 사용, 없으면 UUID)
+        if provided_session_id is not None:
+            session_id = str(provided_session_id)
+        else:
+            session_id = str(uuid.uuid4())
 
         # Step 3: Redis에 세션 저장 (TTL 2시간)
         expires_at = datetime.utcnow() + timedelta(hours=2)
@@ -123,7 +127,7 @@ class SessionService:
                 JOIN subject sub ON sc.subject_id = sub.subject_id
                 WHERE sc.scenario_id = :scenario_id
                   AND sc.user_id = :user_id
-                  AND sc.status = 'generated'
+                  AND LOWER(sc.status) = 'generated'
             """)
 
             result = db.execute(

@@ -83,6 +83,10 @@ class SessionCreateRequest(BaseModel):
     """세션 생성 요청 DTO"""
     userId: int = Field(..., description="사용자 ID", gt=0)
     scenarioId: int = Field(..., description="시나리오 ID (DB에 저장된 시나리오)", gt=0)
+    sessionId: str | None = Field(
+        default=None,
+        description="기존에 발급된 세션 ID (UUID 문자열). 없으면 FastAPI가 UUID를 생성"
+    )
 
 
 class ScenarioDetail(BaseModel):

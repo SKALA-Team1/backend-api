@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     # Spring 2 Backend
     # -------------------------------------
     SPRING2_BASE_URL: str = Field("http://localhost:8082", alias="SPRING2_BASE_URL")
+    WS_BASE_URL: str = Field("ws://localhost:8001", alias="WS_BASE_URL")
 
     # -------------------------------------
     # Convenience Property

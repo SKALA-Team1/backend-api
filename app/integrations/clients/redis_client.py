@@ -24,6 +24,9 @@ import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
 
+# Lazy Redis client cache for utility helpers
+_redis_client_cache: Optional[redis.Redis] = None
+
 
 class RedisSessionValidator:
     """
@@ -116,3 +119,26 @@ class RedisSessionValidator:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """async with 지원"""
         await self.close()
+
+
+async def get_redis_client(redis_url: Optional[str] = None) -> redis.Redis:
+    """
+    Redis 클라이언트 단일 인스턴스 반환 (캐싱)
+
+    Args:
+        redis_url: 커스텀 Redis URL (없으면 settings.REDIS_URL 사용)
+    """
+    from app.config import settings  # 지연 임포트 (순환 참조 방지)
+
+    global _redis_client_cache
+
+    if _redis_client_cache is None:
+        url = redis_url or settings.REDIS_URL
+        _redis_client_cache = await redis.from_url(
+            url,
+            encoding="utf-8",
+            decode_responses=True
+        )
+        logger.info(f"Redis client initialized for caching: {url}")
+
+    return _redis_client_cache
