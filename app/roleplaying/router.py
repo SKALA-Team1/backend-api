@@ -226,6 +226,7 @@ from app.roleplaying.schemas import (
     SessionCreateResponse
 )
 from app.roleplaying.services.slack_scenario_service import SlackScenarioService
+from app.config import settings
 from app.roleplaying.services.session_service import session_service
 from app.core.deps import get_db
 
@@ -297,29 +298,17 @@ async def create_session(
 
     DB에서 시나리오를 조회하고, Redis에 세션 정보를 저장한 후,
     WebSocket 연결 URL을 반환합니다.
-
-    Args:
-        request: 사용자 ID와 시나리오 ID
-        db: DB 세션 (dependency injection)
-
-    Returns:
-        세션 ID, WebSocket URL, 시나리오 정보, 만료 시각
-
-    Raises:
-        404: 시나리오를 찾을 수 없는 경우
-        500: Redis 연결 실패 또는 기타 서버 오류
     """
     try:
-        # SessionService를 사용하여 세션 생성
-        # (DB 시나리오 조회 + Redis 세션 저장)
         session_id, scenario, expires_at = await session_service.create_session(
             user_id=request.userId,
             scenario_id=request.scenarioId,
-            db=db
+            db=db,
+            provided_session_id=request.sessionId
         )
 
-        # WebSocket URL 생성 (프로덕션에서는 환경 변수로 설정)
-        ws_url = f"ws://localhost:8001/ws/roleplaying/{session_id}"
+        base_ws_url = settings.WS_BASE_URL.rstrip("/")
+        ws_url = f"{base_ws_url}/ws/roleplaying/{session_id}"
 
         logger.info(
             f"Session created successfully: session_id={session_id}, "
@@ -334,12 +323,10 @@ async def create_session(
         )
 
     except ValueError as e:
-        # 시나리오를 찾을 수 없는 경우
         logger.warning(f"Scenario not found: {e}")
         raise HTTPException(status_code=404, detail=str(e))
 
     except Exception as e:
-        # 기타 서버 오류
         logger.error(f"Failed to create session: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
