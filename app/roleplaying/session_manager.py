@@ -84,6 +84,7 @@ class SessionState:
     current_utterance_audio: bytes = b""
     utterance_index: int = 0
     ai_turn_count: int = 0  # AI가 질문한 횟수 (1부터 시작)
+    user_turn_count: int = 0  # 사용자가 답한 횟수
 
     def is_expired(self) -> bool:
         """세션 만료 여부 확인"""
@@ -135,6 +136,19 @@ class SessionState:
             10: 2   # 대화 마무리
         }
         return fixed_question_map.get(next_turn)
+
+    def has_reached_turn_limit(self, max_turns: int) -> bool:
+        """
+        주어진 턴 수(사용자+AI 쌍) 이상 진행되었는지 판단
+
+        Args:
+            max_turns: 허용된 최대 턴 수 (AI+사용자 = 2개의 메시지)
+        """
+        turn_pair_limit = (
+            self.ai_turn_count >= max_turns and self.user_turn_count >= max_turns
+        )
+        message_limit = self.utterance_index >= max_turns * 2
+        return turn_pair_limit or message_limit
 
 
 class SessionManager:
@@ -252,6 +266,8 @@ class SessionManager:
         # AI 턴인 경우 카운트 증가
         if speaker == "ai":
             session.ai_turn_count += 1
+        elif speaker == "user":
+            session.user_turn_count += 1
 
         logger.debug(
             f"Message added to session {session_id}: {speaker} "
