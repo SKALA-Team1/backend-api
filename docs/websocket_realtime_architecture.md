@@ -812,6 +812,195 @@ logger.info(f"Session ended: {session_id}, reason={reason}")
 
 ---
 
+## 🧪 텍스트 기반 테스트 (STT 없이)
+
+### 개요
+
+개발 및 디버깅 목적으로 **오디오/STT 없이 텍스트만으로** 롤플레잉 세션을 테스트할 수 있습니다.
+
+**사용 시나리오:**
+- AI 응답 생성 로직 테스트
+- 고정 질문 vs 동적 질문 전략 검증
+- LLM 프롬프트 튜닝
+- WebSocket 연결 및 메시지 흐름 디버깅
+- 빠른 프로토타이핑 (STT 설정 불필요)
+
+### USER_TEXT 메시지
+
+오디오 대신 텍스트를 직접 전송하는 메시지 타입:
+
+```json
+{
+  "type": "USER_TEXT",
+  "text": "I am working on the authentication refactoring."
+}
+```
+
+**서버 처리:**
+1. 세션 히스토리에 텍스트 추가
+2. AI 응답 생성 (고정/동적)
+3. AI_TEXT 메시지 전송
+
+**차이점:**
+- ❌ 오디오 처리 없음
+- ❌ STT 처리 없음
+- ❌ Spring 2 발화 저장 없음
+- ✅ AI 응답 생성 (Ollama)
+- ✅ 대화 히스토리 추적
+- ✅ 고정 질문 전략 적용
+
+### 테스트 스크립트 사용법
+
+#### 기본 사용
+
+```bash
+# 기본값으로 실행 (user_id=1, scenario_id=1)
+python scripts/test_text_roleplay.py
+
+# 사용자/시나리오 지정
+python scripts/test_text_roleplay.py --user-id 1 --scenario-id 2
+
+# API URL 지정 (다른 서버 테스트)
+python scripts/test_text_roleplay.py --api-url http://localhost:8000/roleplaying/sessions
+```
+
+#### 대화 예시
+
+```
+============================================================
+Text-based Roleplaying Session Started
+============================================================
+Scenario: Authentication Module Refactoring Discussion
+Your Role: Software Engineer
+AI Role: Tech Lead
+
+Type your responses in English, or '/quit' to end session.
+============================================================
+
+[AI] Can you walk me through the current authentication flow?
+     (Fixed Question)
+
+[You] We're using session-based auth with cookies.
+
+[AI is typing...]
+
+[AI] What challenges have you encountered with the current approach?
+
+[You] Session management is complex with multiple servers.
+
+[AI is typing...]
+
+[AI] Have you considered using stateless authentication like JWT?
+
+[You] Yes, we're planning to migrate to JWT.
+
+[AI is typing...]
+
+[AI] What's your migration strategy for existing users?
+     (Fixed Question)
+
+[You] /quit
+
+Ending session...
+[SESSION ENDED] Reason: user_end
+
+Session ended successfully.
+```
+
+#### 명령어
+
+| 명령어 | 설명 |
+|--------|------|
+| 일반 텍스트 | 사용자 발화로 전송 (영어 권장) |
+| `/quit` | 세션 종료 (END_SESSION 전송) |
+| `Ctrl+C` | 강제 종료 |
+
+### 스크립트 구조
+
+**주요 기능:**
+1. **세션 생성** (`POST /roleplaying/sessions`)
+   - HTTP API로 세션 생성
+   - WebSocket URL 및 시나리오 정보 수신
+
+2. **WebSocket 연결**
+   - `ws://` 또는 `wss://` 연결
+   - INIT 메시지 전송
+
+3. **대화형 루프**
+   - 사용자 입력 받기
+   - USER_TEXT 메시지 전송
+   - AI 응답 수신 및 출력
+
+4. **세션 종료**
+   - END_SESSION 메시지 전송
+   - WebSocket 정상 종료
+
+**에러 핸들링:**
+- HTTP 요청 실패 → 에러 로그 및 종료
+- WebSocket 연결 실패 → 에러 로그 및 종료
+- 서버 에러 메시지 → 화면 출력 및 로그
+- 타임아웃 (30초) → 경고 및 재시도
+
+### 오디오 vs 텍스트 모드 비교
+
+| 기능 | 오디오 모드 | 텍스트 모드 |
+|------|------------|------------|
+| **메시지 타입** | AUDIO_CHUNK | USER_TEXT |
+| **STT 처리** | ✅ | ❌ |
+| **AI 응답 생성** | ✅ | ✅ |
+| **고정 질문** | ✅ | ✅ |
+| **동적 질문** | ✅ | ✅ |
+| **Spring 2 저장** | ✅ (오디오+텍스트) | ❌ |
+| **대화 히스토리** | ✅ | ✅ |
+| **프로덕션 사용** | ✅ | ❌ (테스트 전용) |
+
+### 주의사항
+
+**텍스트 모드 제약:**
+- 프로덕션 환경에서는 사용 권장하지 않음
+- 발화 오디오가 저장되지 않음 (평가/피드백 불가)
+- STT 정확도 테스트 불가
+- 실제 사용자 경험과 차이 있음
+
+**권장 사용 사례:**
+- ✅ AI 로직 개발 및 디버깅
+- ✅ 프롬프트 엔지니어링
+- ✅ WebSocket 통신 테스트
+- ✅ 로컬 개발 환경에서 빠른 반복
+- ❌ 프로덕션 테스트
+- ❌ 사용자 경험 검증
+
+### 문제 해결
+
+**세션 생성 실패:**
+```
+Failed to create session. Exiting.
+```
+→ 확인 사항:
+- FastAPI 서버 실행 중인지 확인
+- PostgreSQL/Redis 연결 확인
+- scenario_id가 DB에 존재하는지 확인
+
+**WebSocket 연결 실패:**
+```
+WebSocket connection failed: ...
+```
+→ 확인 사항:
+- WebSocket 엔드포인트 확인 (`/ws/roleplaying/{session_id}`)
+- Redis 세션 유효성 확인
+- 방화벽 설정 확인
+
+**AI 응답 없음:**
+```
+No response from server (timeout)
+```
+→ 확인 사항:
+- Ollama 서버 실행 중인지 확인
+- LLM 모델 다운로드 확인
+- FastAPI 로그에서 에러 확인
+
+---
+
 **작성자:** Claude Code
 **검토자:** SKALA Team
 **문서 위치:** `/docs/websocket_realtime_architecture.md`

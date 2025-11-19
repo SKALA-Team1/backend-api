@@ -20,7 +20,7 @@ from typing import Any, Dict
 import httpx
 import websockets
 
-FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://localhost:8001")
+FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://localhost:8082")
 
 
 async def create_session(user_id: int, scenario_id: int) -> Dict[str, Any]:
