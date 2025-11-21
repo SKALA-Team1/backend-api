@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 logger = logging.getLogger(__name__)
 
 from deepgram import DeepgramClient  # type: ignore
+from app.config import settings
 
 
 class StreamingSTTSession:
@@ -119,12 +120,12 @@ class STTService:
     def __init__(self, api_key: Optional[str] = None):
         """
         Args:
-            api_key: Deepgram API Key. 없으면 DEEPGRAM_API_KEY 환경변수 사용.
+            api_key: Deepgram API Key. 없으면 settings.deepgram_api_key 사용.
         """
-        self.api_key = api_key or os.getenv("DEEPGRAM_API_KEY")
+        self.api_key = api_key or settings.deepgram_api_key
         if not self.api_key:
             raise ValueError(
-                "Deepgram API key not found. Set DEEPGRAM_API_KEY environment variable."
+                "Deepgram API key not found. Set DEEPGRAM_API_KEY in .env file."
             )
 
         self.client = DeepgramClient(api_key=self.api_key)
