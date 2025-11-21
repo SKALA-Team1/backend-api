@@ -491,12 +491,29 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
 
         stt_text = await stt_service.transcribe(audio_data)
 
-        if not stt_text:
-            logger.warning(f"STT returned empty result for {len(audio_data)} bytes of audio")
+        # Silence 감지: 음성이 감지되지 않은 경우
+        if not stt_text or stt_text.strip() == "":
+            logger.warning(f"Silence detected: {len(audio_data)} bytes of audio but no speech recognized")
 
-        # STT 최종 결과 전송 (빈 문자열도 정상 전송)
+            # 클라이언트에 STT 결과 (빈 문자열) 전송
+            await websocket.send_json(SttFinalMessage(text="").model_dump())
+
+            # 명확한 에러 메시지 전송
+            await _send_error(
+                websocket,
+                "Silence detected. Please speak again.",
+                code="SILENCE_DETECTED"
+            )
+
+            # 오디오 버퍼 초기화
+            session_manager.clear_audio_buffer(session_id)
+
+            logger.info(f"Silence detected for session {session_id}, waiting for next utterance")
+            return
+
+        # STT 최종 결과 전송 (정상 텍스트)
         await websocket.send_json(SttFinalMessage(text=stt_text).model_dump())
-        logger.info(f"STT final: {stt_text if stt_text else '(empty)'}")
+        logger.info(f"STT final: {stt_text}")
 
         # ========================================
         # Step 2: 세션 히스토리에 사용자 발화 추가
