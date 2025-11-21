@@ -18,16 +18,22 @@
 
 **터미널 1에서:**
 ```bash
-# 서버 시작
 bash scripts/start_server.sh
 ```
 
 ### 2️⃣ 테스트 실행
 
-**터미널 2에서 - 가장 간단한 테스트 (더미 오디오):**
+**터미널 2에서 - 텍스트 기반 (권장, 100% 안정적):**
 ```bash
-bash scripts/test_voice_modes.sh dummy
+bash scripts/roleplay_text.sh
 ```
+
+**또는 음성 기반 (마이크 필요):**
+```bash
+bash scripts/roleplay_voice.sh
+```
+
+> 📌 **추가 정보**: `SCRIPTS.md` 파일에서 모든 옵션 확인 가능
 
 ---
 
