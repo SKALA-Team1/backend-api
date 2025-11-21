@@ -122,8 +122,17 @@ class Spring2Client:
 
             # 오디오가 있으면 multipart/form-data, 없으면 JSON
             if audio_data:
-                files = {"audio": ("audio.wav", audio_data, "audio/wav")}
-                response = await client.post(url, files=files, data=data)
+                # multipart/form-data: 오디오 + 모든 메타데이터
+                files = {
+                    "audio": ("audio.wav", audio_data, "audio/wav"),
+                    "stt_text": (None, data["stt_text"]),
+                    "utterance_index": (None, data["utterance_index"]),
+                    "started_at": (None, data["started_at"]),
+                    "ended_at": (None, data["ended_at"]),
+                    "speaker": (None, data["speaker"]),
+                    "text": (None, data["text"]),
+                }
+                response = await client.post(url, files=files)
             else:
                 # 텍스트만 전송 (오디오 없음)
                 response = await client.post(url, json=data)
