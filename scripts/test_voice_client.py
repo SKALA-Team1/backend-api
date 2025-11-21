@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 """
-음성 기반 롤플레잉 테스트 클라이언트 (마이크 불필요)
+음성 기반 롤플레잉 테스트 클라이언트
 
-마이크 없이 더미 오디오로 음성 기반 롤플레잉을 테스트합니다.
+실제 마이크 음성 또는 더미 오디오로 음성 기반 롤플레잉을 테스트합니다.
 
 사용법:
     python scripts/test_voice_client.py [옵션]
@@ -13,10 +13,13 @@
     --user-id           사용자 ID (기본값: 1)
     --scenario-id       시나리오 ID (기본값: 1)
     --verbose           상세 로깅 활성화
+    --use-mic           실제 마이크 사용 (기본값: 더미 오디오)
+    --record-duration   녹음 시간 (초, 기본값: 10)
 
 예시:
-    python scripts/test_voice_client.py
-    python scripts/test_voice_client.py --user-id 2 --scenario-id 5 --verbose
+    python scripts/test_voice_client.py                          # 더미 오디오
+    python scripts/test_voice_client.py --use-mic                # 실제 마이크
+    python scripts/test_voice_client.py --use-mic --record-duration 5 --verbose
 """
 
 import asyncio
@@ -37,6 +40,60 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# 음성 입력 (마이크 또는 더미 오디오)
+# ============================================================================
+
+class AudioRecorder:
+    """마이크에서 실제 음성을 녹음합니다."""
+
+    @staticmethod
+    def record_audio(duration_seconds: int = 3) -> bytes:
+        """
+        마이크에서 오디오를 녹음합니다.
+
+        Args:
+            duration_seconds: 녹음 시간 (초)
+
+        Returns:
+            PCM 16-bit, 16kHz 오디오 데이터
+        """
+        try:
+            import sounddevice
+            import soundfile
+
+            sample_rate = 16000
+
+            logger.info(f"🎙️  마이크에서 {duration_seconds}초 동안 음성을 녹음 중...")
+            print("(마이크에 대고 말씀해주세요...)")
+
+            # 마이크에서 오디오 녹음
+            audio_data = sounddevice.rec(
+                int(duration_seconds * sample_rate),
+                samplerate=sample_rate,
+                channels=1,
+                dtype='int16'
+            )
+
+            sounddevice.wait()
+
+            logger.info("✅ 녹음 완료")
+
+            # 바이너리로 변환
+            audio_bytes = audio_data.tobytes()
+
+            return audio_bytes
+
+        except ImportError:
+            logger.error("❌ sounddevice 또는 soundfile이 설치되지 않았습니다.")
+            logger.error("   설치: pip install sounddevice soundfile")
+            sys.exit(1)
+
+        except Exception as e:
+            logger.error(f"❌ 마이크 녹음 실패: {e}")
+            sys.exit(1)
+
 
 # ============================================================================
 # 음성 데이터 생성기 (마이크 대체)
@@ -145,7 +202,9 @@ class VoiceRoleplayClient:
         fastapi_url: str = "http://localhost:8082",
         user_id: int = 1,
         scenario_id: int = 1,
-        verbose: bool = False
+        verbose: bool = False,
+        use_mic: bool = False,
+        record_duration: int = 3
     ):
         """
         Args:
@@ -153,11 +212,15 @@ class VoiceRoleplayClient:
             user_id: 사용자 ID
             scenario_id: 시나리오 ID
             verbose: 상세 로깅 활성화
+            use_mic: 실제 마이크 사용 여부
+            record_duration: 녹음 시간 (초)
         """
         self.fastapi_url = fastapi_url.rstrip('/')
         self.user_id = user_id
         self.scenario_id = scenario_id
         self.verbose = verbose
+        self.use_mic = use_mic
+        self.record_duration = record_duration
 
         if verbose:
             logger.setLevel(logging.DEBUG)
@@ -259,25 +322,47 @@ class VoiceRoleplayClient:
             return False
 
     async def send_audio_chunks(self, num_chunks: int = 3) -> bool:
-        """오디오 청크 전송 (마이크 대체)"""
+        """오디오 청크 전송 (마이크 또는 더미 오디오)"""
         if not self.websocket:
             return False
 
-        logger.info(f"📤 오디오 청크 전송 ({num_chunks}개)")
-
         try:
-            for i in range(num_chunks):
-                # 더미 음성 오디오 생성
-                audio_chunk = DummyAudioGenerator.generate_speech_like_audio(
-                    duration_ms=100
-                )
+            if self.use_mic:
+                # 마이크에서 실제 음성 녹음
+                logger.info(f"🎙️  실제 마이크에서 {self.record_duration}초 동안 음성을 녹음합니다...")
+                audio_data = AudioRecorder.record_audio(self.record_duration)
 
-                await self.websocket.send(audio_chunk)
-                logger.debug(f"   청크 {i+1}/{num_chunks} 전송 ({len(audio_chunk)} bytes)")
-                await asyncio.sleep(0.1)  # 송신 간격
+                # 100ms 청크로 분할하여 전송
+                chunk_size = int(16000 * 2 * 0.1)  # 100ms at 16kHz 16-bit
+                chunks_to_send = []
+                for i in range(0, len(audio_data), chunk_size):
+                    chunk = audio_data[i:i+chunk_size]
+                    chunks_to_send.append(chunk)
 
-            logger.info("✅ 오디오 청크 전송 완료")
-            return True
+                logger.info(f"📤 {len(chunks_to_send)}개 청크 전송 중...")
+
+                for i, audio_chunk in enumerate(chunks_to_send):
+                    await self.websocket.send(audio_chunk)
+                    logger.debug(f"   청크 {i+1}/{len(chunks_to_send)} 전송 ({len(audio_chunk)} bytes)")
+                    await asyncio.sleep(0.1)
+
+                logger.info("✅ 오디오 청크 전송 완료")
+                return True
+            else:
+                # 더미 오디오 생성 및 전송 (기존 동작)
+                logger.info(f"📤 더미 오디오 청크 전송 ({num_chunks}개)")
+
+                for i in range(num_chunks):
+                    audio_chunk = DummyAudioGenerator.generate_speech_like_audio(
+                        duration_ms=100
+                    )
+
+                    await self.websocket.send(audio_chunk)
+                    logger.debug(f"   청크 {i+1}/{num_chunks} 전송 ({len(audio_chunk)} bytes)")
+                    await asyncio.sleep(0.1)
+
+                logger.info("✅ 오디오 청크 전송 완료")
+                return True
 
         except Exception as e:
             logger.error(f"❌ 오디오 청크 전송 실패: {e}")
@@ -450,6 +535,8 @@ async def main():
   python scripts/test_voice_client.py
   python scripts/test_voice_client.py --fastapi-url http://localhost:8082
   python scripts/test_voice_client.py --user-id 2 --scenario-id 5 --verbose
+  python scripts/test_voice_client.py --use-mic
+  python scripts/test_voice_client.py --use-mic --record-duration 5 --verbose
         """
     )
 
@@ -475,6 +562,17 @@ async def main():
         action="store_true",
         help="상세 로깅 활성화"
     )
+    parser.add_argument(
+        "--use-mic",
+        action="store_true",
+        help="실제 마이크 사용 (기본값: 더미 오디오)"
+    )
+    parser.add_argument(
+        "--record-duration",
+        type=int,
+        default=10,
+        help="녹음 시간 (초, 기본값: 10)"
+    )
 
     args = parser.parse_args()
 
@@ -483,7 +581,9 @@ async def main():
         fastapi_url=args.fastapi_url,
         user_id=args.user_id,
         scenario_id=args.scenario_id,
-        verbose=args.verbose
+        verbose=args.verbose,
+        use_mic=args.use_mic,
+        record_duration=args.record_duration
     )
 
     success = await client.run()

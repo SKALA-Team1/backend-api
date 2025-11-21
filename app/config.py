@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     # OpenAI
     # -------------------------------------
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
+    deepgram_api_key: Optional[str] = Field(default=None, alias="DEEPGRAM_API_KEY")
 
     # -------------------------------------
     # Redis
