@@ -116,25 +116,29 @@ class Spring2Client:
         try:
             client = await self._get_client()
 
-            # Always use multipart/form-data (required by Spring2 API)
-            # All fields must be in files parameter, not data parameter
-            files = {
-                "speaker": (None, normalized_speaker),
-                "text": (None, final_text),
-                "utterance_index": (None, str(utterance_index)),
+            # Prepare form data fields
+            data = {
+                "speaker": normalized_speaker,
+                "text": final_text,
+                "utterance_index": str(utterance_index),
             }
 
             # Add optional timestamp fields if available
             if started_at:
-                files["started_at"] = (None, _to_offset(started_at))
+                data["started_at"] = _to_offset(started_at)
             if ended_at:
-                files["ended_at"] = (None, _to_offset(ended_at))
+                data["ended_at"] = _to_offset(ended_at)
 
-            # Add audio file if provided
+            # Prepare files for audio (if provided)
+            files = {}
             if audio_data:
                 files["audio"] = (f"utterance_{utterance_index}.wav", audio_data, "audio/wav")
 
-            response = await client.post(url, files=files)
+            # Use data + files for correct multipart/form-data encoding
+            if files:
+                response = await client.post(url, data=data, files=files)
+            else:
+                response = await client.post(url, data=data)
 
             response.raise_for_status()
 
