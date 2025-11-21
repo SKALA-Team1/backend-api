@@ -108,35 +108,35 @@ class Spring2Client:
 
         url = f"/internal/sessions/{session_id}/utterances"
 
-        # Spring2 API requires: speaker, text, utterance_index (as multipart form-data)
-        # Optional: audio, started_at, ended_at
+        # Spring2 API requires: speaker, text, utteranceIndex (as JSON)
+        # Optional: audio (as base64-encoded string), startedAt, endedAt
+        import base64
+
         normalized_speaker = (speaker or "user").lower()
         final_text = text or stt_text
 
         try:
             client = await self._get_client()
 
-            # Spring2 requires multipart/form-data
-            # httpx only sends multipart/form-data when files parameter is present
-            # So we must always include files parameter, even if empty
-
-            files = {
-                "speaker": (None, normalized_speaker),
-                "text": (None, final_text),
-                "utterance_index": (None, str(utterance_index)),
+            # Build JSON payload
+            # Note: Spring2 uses snake_case for JSON field names (@JsonNaming)
+            payload = {
+                "speaker": normalized_speaker,
+                "text": final_text,
+                "utterance_index": utterance_index,
             }
 
             # Add optional timestamp fields if available
             if started_at:
-                files["started_at"] = (None, _to_offset(started_at))
+                payload["started_at"] = _to_offset(started_at)
             if ended_at:
-                files["ended_at"] = (None, _to_offset(ended_at))
+                payload["ended_at"] = _to_offset(ended_at)
 
-            # Add audio file if provided
+            # Add audio as base64-encoded string if provided
             if audio_data:
-                files["audio"] = (f"utterance_{utterance_index}.wav", audio_data, "audio/wav")
+                payload["audio"] = base64.b64encode(audio_data).decode('utf-8')
 
-            response = await client.post(url, files=files)
+            response = await client.post(url, json=payload)
 
             response.raise_for_status()
 
