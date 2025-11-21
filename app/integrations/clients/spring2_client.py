@@ -108,34 +108,33 @@ class Spring2Client:
 
         url = f"/internal/sessions/{session_id}/utterances"
 
-        data = {
-            "stt_text": stt_text,
-            "utterance_index": str(utterance_index),
-            "started_at": _to_offset(started_at),
-            "ended_at": _to_offset(ended_at),
-            "speaker": (speaker or "user").lower(),
-            "text": text or stt_text,
-        }
+        # Spring2 API requires: speaker, text, utterance_index (as multipart form-data)
+        # Optional: audio, started_at, ended_at
+        normalized_speaker = (speaker or "user").lower()
+        final_text = text or stt_text
 
         try:
             client = await self._get_client()
 
-            # 오디오가 있으면 multipart/form-data, 없으면 JSON
+            # Always use multipart/form-data (required by Spring2 API)
+            # All fields must be in files parameter, not data parameter
+            files = {
+                "speaker": (None, normalized_speaker),
+                "text": (None, final_text),
+                "utterance_index": (None, str(utterance_index)),
+            }
+
+            # Add optional timestamp fields if available
+            if started_at:
+                files["started_at"] = (None, _to_offset(started_at))
+            if ended_at:
+                files["ended_at"] = (None, _to_offset(ended_at))
+
+            # Add audio file if provided
             if audio_data:
-                # multipart/form-data: 오디오 + 모든 메타데이터
-                files = {
-                    "audio": ("audio.wav", audio_data, "audio/wav"),
-                    "stt_text": (None, data["stt_text"]),
-                    "utterance_index": (None, data["utterance_index"]),
-                    "started_at": (None, data["started_at"]),
-                    "ended_at": (None, data["ended_at"]),
-                    "speaker": (None, data["speaker"]),
-                    "text": (None, data["text"]),
-                }
-                response = await client.post(url, files=files)
-            else:
-                # 텍스트만 전송 (오디오 없음)
-                response = await client.post(url, json=data)
+                files["audio"] = (f"utterance_{utterance_index}.wav", audio_data, "audio/wav")
+
+            response = await client.post(url, files=files)
 
             response.raise_for_status()
 
