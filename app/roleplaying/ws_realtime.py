@@ -246,6 +246,15 @@ async def _handle_init(
             expires_at=expires_at,
         )
 
+        # STT 스트리밍 세션 생성 (Deepgram WebSocket)
+        from app.roleplaying.services.stt_service import stt_service
+        try:
+            stt_service.create_streaming_session(session_id)
+            logger.info(f"STT streaming session created: {session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to create STT streaming session: {e}")
+            # 스트리밍 실패 시에도 배치 STT는 계속 사용 가능하므로 계속 진행
+
         logger.info(
             f"Session initialized: {session_id}, "
             f"role={init_msg.myRole} → {init_msg.aiRole}"
@@ -322,11 +331,15 @@ async def _handle_audio_chunk(
         # 오디오 버퍼에 추가
         session_manager.append_audio_chunk(session_id, chunk)
 
-        # TODO: STT 스트리밍 처리 (services/stt_service.py)
-        # from app.roleplaying.services.stt_service import stt_service
-        # partial_text = await stt_service.process_chunk(chunk)
-        # if partial_text:
-        #     await websocket.send_json(SttPartialMessage(text=partial_text).model_dump())
+        # STT 스트리밍 처리 (Deepgram WebSocket)
+        from app.roleplaying.services.stt_service import stt_service
+        try:
+            partial_text = await stt_service.process_chunk(session_id, chunk)
+            if partial_text:
+                await websocket.send_json(SttPartialMessage(text=partial_text).model_dump())
+                logger.debug(f"STT partial sent: {partial_text}")
+        except Exception as e:
+            logger.warning(f"Streaming STT error (non-fatal): {e}")
 
     except Exception as e:
         logger.error(f"Audio chunk handler error: {e}", exc_info=True)
@@ -502,23 +515,22 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         # ========================================
         utterance_index = session_manager.increment_utterance_index(session_id)
 
-        # TODO: integrations/clients/spring2_client.py 구현 후 활성화
-        # from app.integrations.clients.spring2_client import spring2_client
-        # import asyncio
-        # asyncio.create_task(
-        #     spring2_client.save_utterance(
-        #         session_id=session_id,
-        #         audio_data=audio_data,
-        #         stt_text=stt_text,
-        #         utterance_index=utterance_index
-        #     )
-        # )
+        from app.integrations.clients.spring2_client import spring2_client
 
-        # Placeholder: 저장 완료 메시지
+        asyncio.create_task(
+            spring2_client.save_utterance(
+                session_id=session_id,
+                audio_data=audio_data,
+                stt_text=stt_text,
+                utterance_index=utterance_index
+            )
+        )
+
+        # 저장 완료 메시지 (비동기 작업은 백그라운드에서 진행)
         await websocket.send_json(
             UtteranceSavedMessage(index=utterance_index).model_dump()
         )
-        logger.info(f"Utterance saved (placeholder): index={utterance_index}")
+        logger.info(f"Utterance save requested to Spring 2: index={utterance_index}")
 
         # 턴 제한 확인 (사용자 발화 후, AI 응답 생성 전)
         # AI가 이미 10번 질문했고, 사용자가 10번 답변했으면 세션 종료
@@ -530,12 +542,10 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         # ========================================
         await websocket.send_json(AiTypingMessage().model_dump())
 
-        # TODO: services/ai_tutor_service.py 구현 후 활성화
-        # from app.roleplaying.services.ai_tutor_service import ai_tutor_service
-        # ai_response = await ai_tutor_service.generate_reply(session_state, stt_text)
+        # AI 튜터 서비스를 사용하여 동적 응답 생성
+        from app.roleplaying.services.ai_tutor_service import ai_tutor_service
 
-        # Placeholder: 고정 질문 또는 더미 응답
-        ai_response, is_fixed = await _generate_ai_response_placeholder(
+        ai_response, is_fixed = await ai_tutor_service.generate_reply(
             session_state, stt_text
         )
 
@@ -547,11 +557,20 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             is_fixed_question=is_fixed,
         )
 
+        # AI 응답 저장 (Spring 2)
+        ai_index = session_manager.increment_utterance_index(session_id)
+        _schedule_spring2_save(
+            session_id=session_id,
+            text=ai_response,
+            utterance_index=ai_index,
+            speaker="AI",
+        )
+
         # AI 응답 전송
         await websocket.send_json(
             AiTextMessage(text=ai_response, is_fixed_question=is_fixed).model_dump()
         )
-        logger.info(f"AI response sent: {ai_response[:50]}...")
+        logger.info(f"AI response sent: {ai_response[:50]}... (fixed={is_fixed})")
 
         # 턴 제한 확인 후 종료 처리
         if await _check_turn_limit(websocket, session_id, session_state):
@@ -743,6 +762,14 @@ async def _send_error(
 async def _cleanup_session(session_id: str, reason: str) -> None:
     """세션 정리 (연결 끊김 또는 에러 시)"""
     try:
+        # STT 스트리밍 세션 정리
+        from app.roleplaying.services.stt_service import stt_service
+        try:
+            await stt_service.finalize_streaming(session_id)
+            logger.debug(f"STT streaming session cleaned up: {session_id}")
+        except Exception as e:
+            logger.debug(f"STT streaming cleanup failed (non-fatal): {e}")
+
         session_state = session_manager.get_session(session_id)
         if session_state and session_state.status == SessionStatus.ACTIVE:
             session_manager.end_session(session_id, reason)
@@ -767,25 +794,3 @@ async def _cleanup_session(session_id: str, reason: str) -> None:
         logger.error(f"Cleanup error: {e}", exc_info=True)
 
 
-async def _generate_ai_response_placeholder(
-    session_state, user_text: str
-) -> tuple[str, bool]:
-    """
-    AI 응답 생성 (Placeholder)
-
-    실제 구현은 services/ai_tutor_service.py에서 수행됩니다.
-
-    Returns:
-        (ai_response, is_fixed_question)
-    """
-    # 다음 AI 턴 번호 확인
-    next_turn = session_state.get_ai_turn_number()
-
-    # 고정 질문 턴인지 확인 (턴 1, 5, 10)
-    if session_state.should_use_fixed_question():
-        fixed_index = session_state.get_fixed_question_index()
-        if fixed_index is not None:
-            return (session_state.fixed_questions[fixed_index], True)
-
-    # 동적 질문 생성 (Placeholder)
-    return (f"[AI Response to: {user_text[:30]}...] (Turn {next_turn})", False)
