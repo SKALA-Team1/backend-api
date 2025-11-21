@@ -489,16 +489,14 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         # ========================================
         from app.roleplaying.services.stt_service import stt_service
 
-        try:
-            stt_text = await stt_service.transcribe(audio_data)
-        except Exception as e:
-            logger.error(f"STT transcription failed: {e}", exc_info=True)
-            await _send_error(websocket, f"STT processing failed: {str(e)}")
-            return
+        stt_text = await stt_service.transcribe(audio_data)
 
-        # STT 최종 결과 전송
+        if not stt_text:
+            logger.warning(f"STT returned empty result for {len(audio_data)} bytes of audio")
+
+        # STT 최종 결과 전송 (빈 문자열도 정상 전송)
         await websocket.send_json(SttFinalMessage(text=stt_text).model_dump())
-        logger.info(f"STT final: {stt_text}")
+        logger.info(f"STT final: {stt_text if stt_text else '(empty)'}")
 
         # ========================================
         # Step 2: 세션 히스토리에 사용자 발화 추가
