@@ -167,10 +167,11 @@ class SttFinalMessage(BaseModel):
     STT 최종 결과 메시지
 
     발화 종료 후 전체 오디오에 대한 최종 STT 결과.
+    STT 실패 시 빈 문자열이 전송될 수 있음.
     """
 
     type: Literal["STT_FINAL"] = "STT_FINAL"
-    text: str = Field(..., description="최종 STT 결과", min_length=1)
+    text: str = Field(default="", description="최종 STT 결과 (STT 실패 시 빈 문자열)")
 
 
 class UtteranceSavedMessage(BaseModel):
