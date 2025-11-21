@@ -520,7 +520,9 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                 session_id=session_id,
                 audio_data=audio_data,
                 stt_text=stt_text,
-                utterance_index=utterance_index
+                utterance_index=utterance_index,
+                speaker="user",
+                text=stt_text,
             )
         )
 
