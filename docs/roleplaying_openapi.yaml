@@ -1,35 +1,74 @@
+# Swagger 포트 가이드 (MinIO 9000/9001과 충돌 방지):
+#   - Spring1 Swagger: http://localhost:9100
+#   - Spring2 Swagger: http://localhost:9101
+#   - FastAPI Swagger: http://localhost:9102 (이 파일)
+# FastAPI 서버 자체는 아래 명령으로 띄울 수 있다.
+#   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# 별도 YAML을 Swagger UI에 연결하고 싶다면 다음 명령으로 swagger-ui-dist를 띄워 이 파일을 불러오면 된다.
+#   npx swagger-ui-watcher ./docs/roleplaying_openapi.yaml --port 9102
 openapi: 3.0.3
 info:
-  title: SKALA Roleplaying API
-  version: "0.1.0"
+  title: SKALA Backend API
+  version: "0.2.0"
   description: |
-    REST + WebSocket endpoints currently implemented for the AI roleplaying flow.
-    Generated manually from the FastAPI router/service code.
+    FastAPI endpoints that currently exist in the repository. This document was
+    assembled directly from the implemented routers/services so it can be
+    imported into Swagger UI or similar tooling without generating a new spec
+    at runtime.
 servers:
   - url: https://api.skala.local
+tags:
+  - name: health
+    description: Lightweight probes used for uptime checks
+  - name: roleplaying
+    description: HTTP APIs that provision AI roleplaying sessions
+  - name: websocket
+    description: Real-time WebSocket used during active roleplaying sessions
 paths:
-  /roleplaying/health/ping:
+  /:
     get:
-      summary: Health check
-      description: Return a simple status payload used by uptime checks.
-      tags:
-        - roleplaying
+      tags: [health]
+      summary: Root greeting
+      description: Convenience endpoint that FastAPI exposes for simple smoke tests.
       responses:
         '200':
-          description: Service is healthy
+          description: The service is responding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RootResponse'
+  /health/health/ping:
+    get:
+      tags: [health]
+      summary: Service health probe
+      description: Returns a static payload so orchestration systems can check liveness.
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PingResponse'
+  /roleplaying/health/ping:
+    get:
+      tags: [health]
+      summary: Roleplaying-specific health probe
+      description: Identical to the general probe but namespaced under the roleplaying router.
+      responses:
+        '200':
+          description: Roleplaying router is up
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PingResponse'
   /roleplaying/internal/scenarios/analyze-conversation:
     post:
+      tags: [roleplaying]
       summary: Analyze Slack conversation and generate scenarios
       description: |
-        Internal endpoint Spring 2 uses to request Slack-conversation analysis
-        and receive four practice scenarios (1 overview + 3 detail) containing
-        the pre-generated fixed questions.
-      tags:
-        - roleplaying
+        Internal API that Spring 2 calls with Slack conversation history. The service validates
+        the payload, runs LLM-based analysis, and returns one overview scenario plus three
+        detailed scenarios with fixed questions.
       requestBody:
         required: true
         content:
@@ -44,26 +83,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/AnalysisResultDto'
         '400':
-          description: Missing messages or invalid payload
+          description: Validation failed (e.g., messages list was empty)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
-          description: LLM failure or other server error
+          description: LLM failure or downstream service error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /roleplaying/sessions:
     post:
-      summary: Create WebSocket roleplaying session
+      tags: [roleplaying]
+      summary: Issue a real-time roleplaying session
       description: |
-        Validate that the requested scenario belongs to the user, then create
-        a UUID session entry in Redis (TTL 2h) and return the WebSocket URL
-        the client should connect to.
-      tags:
-        - roleplaying
+        Looks up the requested scenario, persists an expiring session in Redis, and returns
+        the WebSocket URL the client must connect to for the real-time experience.
       requestBody:
         required: true
         content:
@@ -78,38 +115,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/SessionCreateResponse'
         '404':
-          description: Scenario not found for the user
+          description: Scenario was not found for the requesting user
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
-          description: Redis/DB failure
+          description: Unexpected Redis/DB/RPC failure
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /ws/roleplaying/{session_id}:
     get:
+      tags: [websocket]
       summary: Real-time roleplaying WebSocket
       description: |
-        After obtaining a session via `POST /roleplaying/sessions`, the client
-        connects here using the returned `session_id`. The server immediately
-        validates the Redis entry, waits for an `INIT` message, and then streams
-        audio/STT/AI responses. The handshake itself is standard WebSocket; all
-        payloads are JSON except binary audio chunks.
-      tags:
-        - roleplaying
+        After issuing a session via `POST /roleplaying/sessions`, the client upgrades the
+        connection here. The server validates the Redis session, waits for an `INIT` message,
+        and then alternates between STT ingestion and AI responses. Audio chunks are sent as
+        binary frames while all control payloads are JSON.
       parameters:
         - in: path
           name: session_id
           required: true
           schema:
             type: string
-          description: UUID generated by `/roleplaying/sessions`
+          description: Session identifier returned from `/roleplaying/sessions`
       responses:
         '101':
-          description: WebSocket upgrade (messages defined in components)
+          description: WebSocket upgrade completed
       x-websocket-messages:
         inbound:
           - $ref: '#/components/schemas/InitMessage'
@@ -119,6 +154,7 @@ paths:
         outbound:
           - $ref: '#/components/schemas/AckMessage'
           - $ref: '#/components/schemas/AiTextMessage'
+          - $ref: '#/components/schemas/SttPartialMessage'
           - $ref: '#/components/schemas/SttFinalMessage'
           - $ref: '#/components/schemas/UtteranceSavedMessage'
           - $ref: '#/components/schemas/AiTypingMessage'
@@ -126,17 +162,28 @@ paths:
           - $ref: '#/components/schemas/ErrorMessage'
 components:
   schemas:
+    RootResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: hello
+      required:
+        - message
     PingResponse:
       type: object
       properties:
         status:
           type: string
           example: ok
+      required:
+        - status
     ErrorResponse:
       type: object
       properties:
         detail:
           type: string
+          example: Failed to analyze conversation
       required:
         - detail
     SlackMessageDto:
@@ -156,18 +203,6 @@ components:
         - timestamp
         - senderName
         - text
-    MessageRole:
-      type: object
-      properties:
-        content:
-          type: string
-        sender:
-          type: string
-        mine:
-          type: boolean
-      required:
-        - content
-        - sender
     AnalysisRequestDto:
       type: object
       properties:
@@ -181,6 +216,7 @@ components:
           format: date
         messages:
           type: array
+          minItems: 1
           items:
             $ref: '#/components/schemas/SlackMessageDto'
         aiRoles:
@@ -219,9 +255,7 @@ components:
           type: string
         topicType:
           type: string
-          enum:
-            - overview
-            - detail
+          enum: [overview, detail]
         title:
           type: string
         fixedQuestions:
@@ -259,8 +293,10 @@ components:
           type: integer
           minimum: 1
         sessionId:
-          type: integer
-          description: Existing numeric session ID (if already issued)
+          type: string
+          format: uuid
+          nullable: true
+          description: Existing session identifier to reuse; omit to auto-generate
       required:
         - userId
         - scenarioId
@@ -320,8 +356,10 @@ components:
           enum: [INIT]
         userId:
           type: integer
+          minimum: 1
         subjectId:
           type: integer
+          minimum: 1
         myRole:
           type: string
         aiRole:
@@ -349,10 +387,7 @@ components:
         - type
     UserTextMessage:
       type: object
-      description: |
-        Text-based user message (testing/debugging only).
-        Allows sending user utterances as text without audio/STT processing.
-        For production use, prefer audio-based AUDIO_CHUNK messages.
+      description: Text message shortcut used for testing without streaming audio.
       properties:
         type:
           type: string
@@ -360,7 +395,6 @@ components:
         text:
           type: string
           minLength: 1
-          description: User utterance text
       required:
         - type
         - text
@@ -393,6 +427,18 @@ components:
           type: string
         is_fixed_question:
           type: boolean
+          default: false
+      required:
+        - type
+        - text
+    SttPartialMessage:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [STT_PARTIAL]
+        text:
+          type: string
       required:
         - type
         - text
@@ -425,6 +471,8 @@ components:
         type:
           type: string
           enum: [AI_TYPING]
+      required:
+        - type
     SessionEndedMessage:
       type: object
       properties:
@@ -433,7 +481,7 @@ components:
           enum: [SESSION_ENDED]
         reason:
           type: string
-          enum: [user_end, timeout, disconnected, error]
+          enum: [user_end, timeout, disconnected, error, turn_limit]
       required:
         - type
         - reason
@@ -447,6 +495,7 @@ components:
           type: string
         code:
           type: string
+          nullable: true
       required:
         - type
         - message

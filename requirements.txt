@@ -45,6 +45,7 @@ anthropic>=0.7.0  # Anthropic Claude API (선택)
 # STT (Speech-to-Text)
 # ========================================
 openai-whisper>=20231117  # Whisper 로컬 STT
+deepgram-sdk>=3.0.0  # Deepgram STT (실시간 스트리밍)
 # google-cloud-speech>=2.21.0  # Google STT (선택)
 # azure-cognitiveservices-speech>=1.31.0  # Azure STT (선택)
 

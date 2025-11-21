@@ -474,12 +474,14 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         # ========================================
         # Step 1: STT 처리 (최종)
         # ========================================
-        # TODO: services/stt_service.py 구현 후 활성화
-        # from app.roleplaying.services.stt_service import stt_service
-        # stt_text = await stt_service.transcribe(audio_data)
+        from app.roleplaying.services.stt_service import stt_service
 
-        # Placeholder: 더미 STT 결과
-        stt_text = f"[STT Result - {len(audio_data)} bytes audio]"
+        try:
+            stt_text = await stt_service.transcribe(audio_data)
+        except Exception as e:
+            logger.error(f"STT transcription failed: {e}", exc_info=True)
+            await _send_error(websocket, f"STT processing failed: {str(e)}")
+            return
 
         # STT 최종 결과 전송
         await websocket.send_json(SttFinalMessage(text=stt_text).model_dump())
