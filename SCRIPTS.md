@@ -87,15 +87,29 @@ bash scripts/roleplay_voice.sh --server-only
 bash scripts/start_server.sh
 ```
 
-### 터미널 2: 텍스트 테스트 (권장)
+### 터미널 2: 테스트 선택
+
+#### 옵션 1️⃣: 자동 텍스트 테스트 (권장, 가장 빠름)
 ```bash
 bash scripts/roleplay_text.sh
 ```
+- 자동 3턴 대화
+- 완료까지 ~10초
 
-또는 음성 테스트:
+#### 옵션 2️⃣: 실시간 대화형 입력 (권장, 가장 유연함)
+```bash
+bash scripts/roleplay_interactive.sh
+```
+- 터미널에서 직접 텍스트 입력
+- 'quit' 또는 'exit'로 종료
+- 무제한 턴 수
+
+#### 옵션 3️⃣: 음성 기반 테스트 (마이크 필요)
 ```bash
 bash scripts/roleplay_voice.sh
 ```
+- 실제 마이크 녹음 (10초)
+- Deepgram STT 포함
 
 ---
 
@@ -148,14 +162,24 @@ bash scripts/roleplay_voice.sh
 
 ## 📋 옵션 설명
 
-### roleplay_text.sh
+### roleplay_text.sh (자동 3턴 대화)
 ```bash
 --iterations N       # 반복 횟수 (기본값: 1)
 --verbose           # 상세 로깅 활성화
 --server-only       # 서버만 시작
 ```
 
-### roleplay_voice.sh
+### roleplay_interactive.sh (실시간 사용자 입력)
+```bash
+--verbose           # 상세 로깅 활성화
+--server-only       # 서버만 시작
+```
+**사용법:**
+- 터미널에서 메시지 입력
+- 'quit' 또는 'exit' 입력하면 종료
+- 무제한 턴 수 가능
+
+### roleplay_voice.sh (음성 기반)
 ```bash
 --record-duration N # 녹음 시간 (초, 기본값: 10)
 --iterations N      # 반복 횟수 (기본값: 1)
