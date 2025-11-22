@@ -318,6 +318,23 @@ class SessionManager:
         logger.debug(f"Audio retrieved from session {session_id}: {len(audio)} bytes")
         return audio
 
+    def clear_audio_buffer(self, session_id: str) -> None:
+        """
+        현재 발화 오디오 버퍼 초기화
+
+        Args:
+            session_id: 세션 ID
+
+        Raises:
+            ValueError: 세션이 존재하지 않는 경우
+        """
+        session = self.get_session(session_id)
+        if not session:
+            raise ValueError(f"Session {session_id} not found")
+
+        session.current_utterance_audio = b""
+        logger.debug(f"Audio buffer cleared for session {session_id}")
+
     def increment_utterance_index(self, session_id: str) -> int:
         """
         발화 인덱스 증가
