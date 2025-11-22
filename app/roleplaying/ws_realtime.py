@@ -518,10 +518,11 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         if not stt_text:
             # Silence 감지 시 에러 전송
             await websocket.send_json(SttFinalMessage(text="").model_dump())
-            await _send_error(
+            await ErrorHandler.send_error(
                 websocket,
                 "Silence detected. Please speak again.",
-                code="SILENCE_DETECTED"
+                code="SILENCE_DETECTED",
+                severity=ErrorHandler.SEVERITY_INFO
             )
             session_manager.clear_audio_buffer(session_id)
             logger.info(f"Silence detected for session {session_id}, waiting for next utterance")
