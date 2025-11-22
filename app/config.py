@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     AUDIO_CHUNK_SIZE_MS: int = Field(100, alias="AUDIO_CHUNK_SIZE_MS")  # 100ms chunks
     AUDIO_AGC_ENABLED: bool = Field(True, alias="AUDIO_AGC_ENABLED")
     AUDIO_AGC_TARGET_LEVEL: float = Field(0.8, alias="AUDIO_AGC_TARGET_LEVEL")
-    AUDIO_MIN_TEXT_LENGTH: int = Field(1, alias="AUDIO_MIN_TEXT_LENGTH")  # 침묵 감지 기준
+    AUDIO_MIN_TEXT_LENGTH: int = Field(2, alias="AUDIO_MIN_TEXT_LENGTH")  # 침묵 감지 기준
 
     # -------------------------------------
     # Convenience Property
