@@ -1,12 +1,16 @@
 """
 Session Service
 ===============
-롤플레잉 세션 생성 및 관리를 담당하는 서비스.
+롤플레잉 세션을 FastAPI 내부용으로 저장 및 관리하는 서비스.
 
 역할:
-- 세션 생성 (DB 시나리오 조회 + Redis 저장)
-- 세션 ID 생성 (UUID)
-- TTL 설정 (2시간)
+- Spring 1에서 생성한 session_id를 받아서 FastAPI 내부용으로 저장
+- DB에서 시나리오 정보 조회
+- Redis에 세션 정보 저장 (TTL 2시간)
+
+주의:
+- session_id 생성은 Spring 1의 책임
+- FastAPI는 setup_session() 호출 시 session_id를 전달받아야 함
 
 의존성:
 - Redis (세션 저장)
@@ -14,7 +18,6 @@ Session Service
 """
 
 import logging
-import uuid
 import json
 from datetime import datetime, timedelta
 from typing import Optional
@@ -50,17 +53,18 @@ class SessionService:
             )
         return self.redis_client
 
-    async def create_session(
+    async def setup_session(
         self,
+        session_id: str,
         user_id: int,
         scenario_id: int,
-        db: Session,
-        provided_session_id: Optional[int] = None
+        db: Session
     ) -> tuple[str, ScenarioDetail, datetime]:
         """
-        세션 생성 (DB 시나리오 조회 + Redis 저장)
+        세션 저장 (Spring 1에서 생성한 session_id를 받아서 FastAPI 내부용으로 저장)
 
         Args:
+            session_id: Spring 1에서 생성한 UUID (필수)
             user_id: 사용자 ID
             scenario_id: 시나리오 ID
             db: DB 세션
@@ -77,18 +81,12 @@ class SessionService:
         if not scenario_detail:
             raise ValueError(f"Scenario {scenario_id} not found for user {user_id}")
 
-        # Step 2: session_id 생성 (주어진 값 사용, 없으면 UUID)
-        if provided_session_id is not None:
-            session_id = str(provided_session_id)
-        else:
-            session_id = str(uuid.uuid4())
-
-        # Step 3: Redis에 세션 저장 (TTL 2시간)
+        # Step 2: Redis에 세션 저장 (TTL 2시간)
         expires_at = datetime.utcnow() + timedelta(hours=2)
         await self._save_session_to_redis(session_id, user_id, expires_at)
 
         logger.info(
-            f"Session created: {session_id}, user={user_id}, "
+            f"Session setup: {session_id}, user={user_id}, "
             f"scenario={scenario_id}, expires_at={expires_at}"
         )
 

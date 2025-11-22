@@ -17,9 +17,10 @@ AI 롤플레잉(시나리오 기반 대화) 관련 API 엔드포인트를 정의
         - POST /internal/scenarios/analyze-conversation
         - 역할: Slack 대화 분석 및 시나리오 생성
 
-    3. 세션 생성 (HTTP)
-        - POST /sessions
-        - 역할: 롤플레잉 세션 생성, WebSocket URL 반환
+    3. 내부 API (Spring 1 Gateway에서 호출)
+        - POST /internal/sessions/setup
+        - 역할: Spring 1이 생성한 session_id를 받아서
+                FastAPI 내부용으로 Redis에 저장하고 WebSocket URL 반환
 
     4. 실시간 대화 (WebSocket)
         - WS /ws/roleplaying/{session_id}
@@ -33,6 +34,7 @@ AI 롤플레잉(시나리오 기반 대화) 관련 API 엔드포인트를 정의
 
 참고:
     - 추가 REST API (userInfo, roleplayList 등)는 Spring 2에서 구현
+    - 클라이언트 세션 생성은 Spring 1 Gateway에서만 처리
     - FastAPI는 WebSocket + STT + AI 응답에 집중
     - 데이터 관리는 Spring 2 책임
 """
@@ -45,8 +47,8 @@ from app.roleplaying.schemas import (
     AnalysisRequestDto,
     AnalysisResultDto,
     MessageRole,
-    SessionCreateRequest,
-    SessionCreateResponse
+    InternalSessionSetupRequest,
+    InternalSessionSetupResponse
 )
 from app.roleplaying.services.slack_scenario_service import SlackScenarioService
 from app.config import settings
@@ -111,38 +113,44 @@ async def analyze_conversation(request: AnalysisRequestDto):
         )
 
 
-@router.post("/sessions", response_model=SessionCreateResponse)
-async def create_session(
-    request: SessionCreateRequest,
+@router.post("/internal/sessions/setup", response_model=InternalSessionSetupResponse)
+async def internal_setup_session(
+    request: InternalSessionSetupRequest,
     db: Session = Depends(get_db)
 ):
     """
-    롤플레잉 세션을 생성합니다.
+    Spring 1 Gateway에서 호출하는 내부 API입니다.
 
-    DB에서 시나리오를 조회하고, Redis에 세션 정보를 저장한 후,
+    Spring 1이 생성한 session_id를 받아서,
+    FastAPI 내부용으로 세션 정보를 Redis에 저장하고,
     WebSocket 연결 URL을 반환합니다.
+
+    Note:
+        - 이 엔드포인트는 Spring 1 Gateway에서만 호출합니다.
+        - session_id는 Spring 1이 생성합니다.
+        - FastAPI는 이 session_id를 받아서 Redis에 저장하기만 합니다.
     """
     try:
-        session_id, scenario, expires_at = await session_service.create_session(
+        session_id, scenario, expires_at = await session_service.setup_session(
+            session_id=request.sessionId,
             user_id=request.userId,
             scenario_id=request.scenarioId,
-            db=db,
-            provided_session_id=request.sessionId
+            db=db
         )
 
         base_ws_url = settings.WS_BASE_URL.rstrip("/")
         ws_url = f"{base_ws_url}/ws/roleplaying/{session_id}"
 
         logger.info(
-            f"Session created successfully: session_id={session_id}, "
+            f"Session setup successfully: session_id={session_id}, "
             f"user_id={request.userId}, scenario_id={request.scenarioId}"
         )
 
-        return SessionCreateResponse(
-            session_id=session_id,
-            ws_url=ws_url,
+        return InternalSessionSetupResponse(
+            sessionId=session_id,
+            wsUrl=ws_url,
             scenario=scenario,
-            expires_at=expires_at
+            expiresAt=expires_at
         )
 
     except ValueError as e:
@@ -150,8 +158,8 @@ async def create_session(
         raise HTTPException(status_code=404, detail=str(e))
 
     except Exception as e:
-        logger.error(f"Failed to create session: {e}", exc_info=True)
+        logger.error(f"Failed to setup session: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create session: {str(e)}"
+            detail=f"Failed to setup session: {str(e)}"
         )
