@@ -35,12 +35,13 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.config import settings
 from app.integrations.clients.redis_client import RedisSessionValidator
 from app.roleplaying.session_manager import SessionStatus, SessionState, session_manager
+from app.roleplaying.validators import (ErrorHandler, InitStateValidator,
+                                        SessionValidator)
 from app.roleplaying.ws_models import (AckMessage, AiTextMessage,
                                        AiTypingMessage, EndSessionMessage,
-                                       ErrorMessage, InitMessage,
-                                       SessionEndedMessage, SttFinalMessage,
-                                       SttPartialMessage, UserTextMessage,
-                                       UtteranceEndMessage,
+                                       InitMessage, SessionEndedMessage,
+                                       SttFinalMessage, SttPartialMessage,
+                                       UserTextMessage, UtteranceEndMessage,
                                        UtteranceSavedMessage)
 
 logger = logging.getLogger(__name__)
@@ -49,9 +50,6 @@ router = APIRouter()
 
 # Redis 검증기 (전역 인스턴스)
 redis_validator = RedisSessionValidator(settings.REDIS_URL)
-
-# 대화 턴 제한 (AI ↔ 사용자 페어 기준)
-MAX_TURNS = 10
 
 
 # ========================================
@@ -108,10 +106,9 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
 
             # Binary 메시지 (오디오 청크)
             if "bytes" in raw_data:
-                if not session_initialized:
-                    await _send_error(
-                        websocket, "Session not initialized. Send INIT message first."
-                    )
+                if not await InitStateValidator.validate_for_message(
+                    websocket, "AUDIO_CHUNK", session_initialized
+                ):
                     continue
 
                 await _handle_audio_chunk(websocket, session_id, raw_data["bytes"])
@@ -127,6 +124,12 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
                         f"Received message: type={message_type}, session={session_id}"
                     )
 
+                    # 메시지별 초기화 상태 검증
+                    if not await InitStateValidator.validate_for_message(
+                        websocket, message_type, session_initialized
+                    ):
+                        continue
+
                     # INIT 메시지
                     if message_type == "INIT":
                         init_msg = InitMessage(**message)
@@ -137,12 +140,10 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
 
                     # UTTERANCE_END 메시지
                     elif message_type == "UTTERANCE_END":
-                        if not session_initialized:
-                            await _send_error(websocket, "Session not initialized")
-                            continue
-
-                        session_state = session_manager.get_session(session_id)
-                        if not session_state or session_state.status != SessionStatus.ACTIVE:
+                        session_state = await SessionValidator.validate_active(
+                            websocket, session_id
+                        )
+                        if not session_state:
                             break
 
                         await _handle_utterance_end(websocket, session_id)
@@ -154,16 +155,10 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
 
                     # USER_TEXT 메시지 (테스트용 - STT 없이 텍스트로 직접 전송)
                     elif message_type == "USER_TEXT":
-                        if not session_initialized:
-                            await _send_error(websocket, "Session not initialized")
-                            continue
-
-                        session_state = session_manager.get_session(session_id)
-                        if not session_state or session_state.status != SessionStatus.ACTIVE:
-                            break
-
-                        if session_state.is_expired():
-                            await _handle_end_session(websocket, session_id, "timeout")
+                        session_state = await SessionValidator.validate_active(
+                            websocket, session_id
+                        )
+                        if not session_state:
                             break
 
                         user_text_msg = UserTextMessage(**message)
@@ -183,17 +178,17 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
 
                     else:
                         logger.warning(f"Unknown message type: {message_type}")
-                        await _send_error(
+                        await ErrorHandler.send_error(
                             websocket, f"Unknown message type: {message_type}"
                         )
 
                 except json.JSONDecodeError as e:
                     logger.error(f"Invalid JSON: {e}")
-                    await _send_error(websocket, "Invalid JSON format")
+                    await ErrorHandler.send_error(websocket, "Invalid JSON format")
 
                 except Exception as e:
                     logger.error(f"Error processing message: {e}", exc_info=True)
-                    await _send_error(websocket, f"Processing error: {str(e)}")
+                    await ErrorHandler.send_error(websocket, f"Processing error: {str(e)}")
 
     except WebSocketDisconnect:
         logger.info(f"Client disconnected: {session_id}")
@@ -245,6 +240,15 @@ async def _handle_init(
             fixed_questions=init_msg.fixedQuestions,
             expires_at=expires_at,
         )
+
+        # STT 스트리밍 세션 생성 (Deepgram WebSocket)
+        from app.roleplaying.services.stt_service import stt_service
+        try:
+            stt_service.create_streaming_session(session_id)
+            logger.info(f"STT streaming session created: {session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to create STT streaming session: {e}")
+            # 스트리밍 실패 시에도 배치 STT는 계속 사용 가능하므로 계속 진행
 
         logger.info(
             f"Session initialized: {session_id}, "
@@ -322,11 +326,15 @@ async def _handle_audio_chunk(
         # 오디오 버퍼에 추가
         session_manager.append_audio_chunk(session_id, chunk)
 
-        # TODO: STT 스트리밍 처리 (services/stt_service.py)
-        # from app.roleplaying.services.stt_service import stt_service
-        # partial_text = await stt_service.process_chunk(chunk)
-        # if partial_text:
-        #     await websocket.send_json(SttPartialMessage(text=partial_text).model_dump())
+        # STT 스트리밍 처리 (Deepgram WebSocket)
+        from app.roleplaying.services.stt_service import stt_service
+        try:
+            partial_text = await stt_service.process_chunk(session_id, chunk)
+            if partial_text:
+                await websocket.send_json(SttPartialMessage(text=partial_text).model_dump())
+                logger.debug(f"STT partial sent: {partial_text}")
+        except Exception as e:
+            logger.warning(f"Streaming STT error (non-fatal): {e}")
 
     except Exception as e:
         logger.error(f"Audio chunk handler error: {e}", exc_info=True)
@@ -444,14 +452,12 @@ async def _handle_user_text(
 
 async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
     """
-    발화 종료 처리
+    발화 종료 처리 (비동기 병렬 처리)
 
-    1. 누적된 오디오로 최종 STT 수행
-    2. STT 결과 전송
-    3. 세션 히스토리에 사용자 발화 추가
-    4. Spring 2에 오디오 + STT 전송 (비동기)
-    5. AI 응답 생성
-    6. AI 응답 전송
+    1. STT 처리 시작 (백그라운드)
+    2. STT 결과 대기 & 수신 즉시 전송
+    3. AI 응답 생성 (STT와 병렬)
+    4. 세션 히스토리, Spring 2 저장 (비동기 백그라운드)
     """
     try:
         # 세션 조회
@@ -472,68 +478,91 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         )
 
         # ========================================
-        # Step 1: STT 처리 (최종)
+        # Step 1: STT 처리 시작 (백그라운드 태스크)
         # ========================================
-        # TODO: services/stt_service.py 구현 후 활성화
-        # from app.roleplaying.services.stt_service import stt_service
-        # stt_text = await stt_service.transcribe(audio_data)
+        from app.roleplaying.services.stt_service import stt_service
+        from app.roleplaying.services.ai_tutor_service import ai_tutor_service
 
-        # Placeholder: 더미 STT 결과
-        stt_text = f"[STT Result - {len(audio_data)} bytes audio]"
+        async def process_stt_and_history(audio_data: bytes) -> Optional[str]:
+            """STT 처리 및 히스토리 추가"""
+            try:
+                stt_text = await stt_service.transcribe(audio_data)
+
+                # Silence 감지
+                if not stt_text or stt_text.strip() == "":
+                    logger.warning(f"Silence detected: {len(audio_data)} bytes of audio but no speech")
+                    return None
+
+                # 세션 히스토리에 사용자 발화 추가
+                session_manager.append_message(
+                    session_id=session_id,
+                    speaker="user",
+                    text=stt_text,
+                    audio_s3_url=None,
+                )
+
+                logger.info(f"STT completed: {stt_text}")
+                return stt_text
+            except Exception as e:
+                logger.error(f"STT processing error: {e}", exc_info=True)
+                return None
+
+        # STT 처리 시작 (비동기)
+        stt_task = asyncio.create_task(process_stt_and_history(audio_data))
+
+        # ========================================
+        # Step 2: STT 결과 대기 & 클라이언트에 전송
+        # ========================================
+        stt_text = await stt_task
+
+        if not stt_text:
+            # Silence 감지 시 에러 전송
+            await websocket.send_json(SttFinalMessage(text="").model_dump())
+            await ErrorHandler.send_error(
+                websocket,
+                "Silence detected. Please speak again.",
+                code="SILENCE_DETECTED",
+                severity=ErrorHandler.SEVERITY_INFO
+            )
+            session_manager.clear_audio_buffer(session_id)
+            logger.info(f"Silence detected for session {session_id}, waiting for next utterance")
+            return
 
         # STT 최종 결과 전송
         await websocket.send_json(SttFinalMessage(text=stt_text).model_dump())
-        logger.info(f"STT final: {stt_text}")
 
         # ========================================
-        # Step 2: 세션 히스토리에 사용자 발화 추가
-        # ========================================
-        session_manager.append_message(
-            session_id=session_id,
-            speaker="user",
-            text=stt_text,
-            audio_s3_url=None,  # Spring 2에서 저장 후 업데이트 가능
-        )
-
-        # ========================================
-        # Step 3: Spring 2에 발화 저장 (비동기)
+        # Step 3: AI 응답 생성 (동시 진행 가능)
         # ========================================
         utterance_index = session_manager.increment_utterance_index(session_id)
 
-        # TODO: integrations/clients/spring2_client.py 구현 후 활성화
-        # from app.integrations.clients.spring2_client import spring2_client
-        # import asyncio
-        # asyncio.create_task(
-        #     spring2_client.save_utterance(
-        #         session_id=session_id,
-        #         audio_data=audio_data,
-        #         stt_text=stt_text,
-        #         utterance_index=utterance_index
-        #     )
-        # )
+        # Spring 2 저장을 백그라운드에서 시작
+        from app.integrations.clients.spring2_client import spring2_client
 
-        # Placeholder: 저장 완료 메시지
+        asyncio.create_task(
+            spring2_client.save_utterance(
+                session_id=session_id,
+                audio_data=audio_data,
+                stt_text=stt_text,
+                utterance_index=utterance_index,
+                speaker="user",
+                text=stt_text,
+            )
+        )
+
         await websocket.send_json(
             UtteranceSavedMessage(index=utterance_index).model_dump()
         )
-        logger.info(f"Utterance saved (placeholder): index={utterance_index}")
+        logger.info(f"Utterance save requested to Spring 2: index={utterance_index}")
 
-        # 턴 제한 확인 (사용자 발화 후, AI 응답 생성 전)
-        # AI가 이미 10번 질문했고, 사용자가 10번 답변했으면 세션 종료
+        # 턴 제한 확인
         if await _check_turn_limit(websocket, session_id, session_state):
             return
 
-        # ========================================
-        # Step 4: AI 응답 생성
-        # ========================================
+        # AI 응답 생성
         await websocket.send_json(AiTypingMessage().model_dump())
 
-        # TODO: services/ai_tutor_service.py 구현 후 활성화
-        # from app.roleplaying.services.ai_tutor_service import ai_tutor_service
-        # ai_response = await ai_tutor_service.generate_reply(session_state, stt_text)
-
-        # Placeholder: 고정 질문 또는 더미 응답
-        ai_response, is_fixed = await _generate_ai_response_placeholder(
+        ai_response, is_fixed = await ai_tutor_service.generate_reply(
             session_state, stt_text
         )
 
@@ -545,11 +574,20 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             is_fixed_question=is_fixed,
         )
 
+        # AI 응답 저장 (Spring 2 - 백그라운드)
+        ai_index = session_manager.increment_utterance_index(session_id)
+        _schedule_spring2_save(
+            session_id=session_id,
+            text=ai_response,
+            utterance_index=ai_index,
+            speaker="AI",
+        )
+
         # AI 응답 전송
         await websocket.send_json(
             AiTextMessage(text=ai_response, is_fixed_question=is_fixed).model_dump()
         )
-        logger.info(f"AI response sent: {ai_response[:50]}...")
+        logger.info(f"AI response sent: {ai_response[:50]}... (fixed={is_fixed})")
 
         # 턴 제한 확인 후 종료 처리
         if await _check_turn_limit(websocket, session_id, session_state):
@@ -570,7 +608,7 @@ async def _check_turn_limit(
         True if 세션을 종료했으면 True, 계속 진행해도 되면 False
     """
     try:
-        if session_state.has_reached_turn_limit(MAX_TURNS):
+        if session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS):
             logger.info(f"Turn limit reached for session {session_id}, ending session.")
             await _handle_end_session(websocket, session_id, "turn_limit")
             return True
@@ -681,7 +719,7 @@ async def _validate_session(session_id: str) -> Optional[dict]:
 
             redis_client = await get_redis_client()
             await redis_client.setex(
-                f"session:{session_id}", 7200, json.dumps(session_data)
+                f"session:{session_id}", settings.ROLEPLAY_REDIS_CACHE_TTL, json.dumps(session_data)
             )
 
             logger.info(f"Session loaded from Spring 2 and cached: {session_id}")
@@ -741,6 +779,14 @@ async def _send_error(
 async def _cleanup_session(session_id: str, reason: str) -> None:
     """세션 정리 (연결 끊김 또는 에러 시)"""
     try:
+        # STT 스트리밍 세션 정리
+        from app.roleplaying.services.stt_service import stt_service
+        try:
+            await stt_service.finalize_streaming(session_id)
+            logger.debug(f"STT streaming session cleaned up: {session_id}")
+        except Exception as e:
+            logger.debug(f"STT streaming cleanup failed (non-fatal): {e}")
+
         session_state = session_manager.get_session(session_id)
         if session_state and session_state.status == SessionStatus.ACTIVE:
             session_manager.end_session(session_id, reason)
@@ -765,25 +811,3 @@ async def _cleanup_session(session_id: str, reason: str) -> None:
         logger.error(f"Cleanup error: {e}", exc_info=True)
 
 
-async def _generate_ai_response_placeholder(
-    session_state, user_text: str
-) -> tuple[str, bool]:
-    """
-    AI 응답 생성 (Placeholder)
-
-    실제 구현은 services/ai_tutor_service.py에서 수행됩니다.
-
-    Returns:
-        (ai_response, is_fixed_question)
-    """
-    # 다음 AI 턴 번호 확인
-    next_turn = session_state.get_ai_turn_number()
-
-    # 고정 질문 턴인지 확인 (턴 1, 5, 10)
-    if session_state.should_use_fixed_question():
-        fixed_index = session_state.get_fixed_question_index()
-        if fixed_index is not None:
-            return (session_state.fixed_questions[fixed_index], True)
-
-    # 동적 질문 생성 (Placeholder)
-    return (f"[AI Response to: {user_text[:30]}...] (Turn {next_turn})", False)
