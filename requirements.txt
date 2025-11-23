@@ -45,14 +45,17 @@ anthropic>=0.7.0  # Anthropic Claude API (선택)
 # STT (Speech-to-Text)
 # ========================================
 openai-whisper>=20231117  # Whisper 로컬 STT
+deepgram-sdk>=3.0.0  # Deepgram STT (실시간 스트리밍)
 # google-cloud-speech>=2.21.0  # Google STT (선택)
 # azure-cognitiveservices-speech>=1.31.0  # Azure STT (선택)
 
 # ========================================
 # Audio Processing
 # ========================================
-# librosa>=0.10.0  # 오디오 분석 (선택)
-# soundfile>=0.12.0  # 오디오 파일 I/O (선택)
+librosa>=0.10.0  # 오디오 분석
+sounddevice>=0.4.6  # 실시간 오디오 입력/출력
+soundfile>=0.12.0  # 오디오 파일 I/O
+pynput>=1.7.6  # 마이크 컨트롤용 키보드 입력
 
 # ========================================
 # Utilities

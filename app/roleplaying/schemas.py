@@ -75,20 +75,6 @@ class AnalysisResultDto(BaseModel):
     scenarios: List[ScenarioInfoDto] = Field(..., min_items=4, max_items=4, description="생성된 시나리오 목록 (4개 - overview, project manager detail, tech lead detail, qa engineer detail)")
 
 
-# =====================================================
-# 롤플레잉 세션 생성 관련 스키마
-# =====================================================
-
-class SessionCreateRequest(BaseModel):
-    """세션 생성 요청 DTO"""
-    userId: int = Field(..., description="사용자 ID", gt=0)
-    scenarioId: int = Field(..., description="시나리오 ID (DB에 저장된 시나리오)", gt=0)
-    sessionId: str | None = Field(
-        default=None,
-        description="기존에 발급된 세션 ID (UUID 문자열). 없으면 FastAPI가 UUID를 생성"
-    )
-
-
 class ScenarioDetail(BaseModel):
     """세션 생성 응답에 포함되는 시나리오 상세 정보"""
     scenarioId: int = Field(..., description="시나리오 ID")
@@ -106,3 +92,22 @@ class SessionCreateResponse(BaseModel):
     ws_url: str = Field(..., description="WebSocket 연결 URL")
     scenario: ScenarioDetail = Field(..., description="선택된 시나리오 정보")
     expires_at: datetime = Field(..., description="세션 만료 시각")
+
+
+# =====================================================
+# Spring 1 Gateway 전용 내부 API 스키마
+# =====================================================
+
+class InternalSessionSetupRequest(BaseModel):
+    """Spring 1에서 FastAPI로 전달하는 내부 세션 설정 요청"""
+    sessionId: str = Field(..., description="Spring 1이 생성한 세션 ID (UUID 문자열)")
+    userId: int = Field(..., description="사용자 ID", gt=0)
+    scenarioId: int = Field(..., description="시나리오 ID", gt=0)
+
+
+class InternalSessionSetupResponse(BaseModel):
+    """FastAPI에서 Spring 1로 반환하는 내부 세션 설정 응답"""
+    sessionId: str = Field(..., description="세션 ID")
+    wsUrl: str = Field(..., description="WebSocket 연결 URL")
+    scenario: ScenarioDetail = Field(..., description="시나리오 정보")
+    expiresAt: datetime = Field(..., description="세션 만료 시각")

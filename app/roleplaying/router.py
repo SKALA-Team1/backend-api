@@ -4,214 +4,39 @@ Roleplaying Router
 AI 롤플레잉(시나리오 기반 대화) 관련 API 엔드포인트를 정의하는 라우터 모듈.
 
 역할:
-    - 시나리오 시작, 메시지 주고받기, 상태 조회, 종료 등 모든 흐름의 진입점 제공.
-    - WebSocket 및 HTTP 기반 요청을 서비스 계층으로 전달.
+    - WebSocket을 통한 실시간 음성 기반 롤플레잉 지원
+    - STT (Deepgram), AI 응답 생성, 세션 관리
 
-엔드포인트:
-    - 사용자 정보
-        - GET /roleplaying/userInfo
-        - Request Spec
-            - Headers: Authorization: Bearer <access_token>
-        - Response Spec
-            {
-              "id": "user_001",
-              "name": "땡땡",
-              "email": "user@example.com",
-              "using_days": 12,              // 앱 사용 n일째
-              "profile_image_url": "https://.../avatar.png",
-              "integrations": {
-                "slack_connected": true,
-                "github_connected": false
-          }
+구현된 엔드포인트:
 
-    - 사용자 이용 데이터 조회
-        - GET /roleplaying/userStatics
-        - Request Spec
-            - Headers: Authorization: Bearer <access_token>
-        - Response Spec
-            {
-              "conversation_minutes": 100,
-              "team_rank": 3,
-              "personal_rank": 10,
-              "team_name": "Platform Team",
-              "updated_at": "2025-11-13T09:00:00Z"
-            }
+    1. Health Check
+        - GET /health/ping
+        - 역할: 서버 상태 확인
 
-    - 롤플레잉 리스트 조회
-        - GET /roleplaying/roleplayList
-        - Request Spec
-            - Headers: Authorization: Bearer <access_token>
-            - Query Params
-                - page
-                - size
-                - status
-                - source_type
-                - order
-                - created_from
-                - created_to
-        - Response Spec
-            {
-              "items": [
-                {
-                  "id": "rp_101",
-                  "title": "어제 스탠드업 미팅 기반 롤플레이",
-                  "summary": "팀 스탠드업에서 나왔던 이슈를 영어로 다시 이야기해보는 시나리오입니다.",
-                  "source_type": "slack",          // "slack" | "github" | "prompt" ...
-                  "status": "READY",               // "READY" | "IN_PROGRESS" | "FINISHED" | "CREATING" ...
-                  "created_at": "2025-11-12T09:00:00Z",
-                  "updated_at": "2025-11-12T10:30:00Z"
-                }
-              ],
-              "page": 1,
-              "size": 10,
-              "total": 25
-            }
+    2. 내부 API (Spring 2에서 호출)
+        - POST /internal/scenarios/analyze-conversation
+        - 역할: Slack 대화 분석 및 시나리오 생성
 
-    - 프롬프트 기반 롤플레잉 생성
-        - POST /roleplaying/prompt_create
-        - Request Spec
-            - Headers
-                - Authorization: Bearer <access_token>
-                - Content-Type: application/json
-            - Body
-                {
-                  "ai_role": "면접관으로서 질문하기",
-                  "user_role": "지원자로서 답변하기",
-                  "situation": "AI 회사 면접 상황에서 자기소개 연습",
-                  "total_turns": 10,
-                }
-        - Response Spec
-            {
-              "roleplay": {
-                "id": "rp_501",
-                "title": "AI 회사 면접 자기소개 롤플레이",
-                "summary": "면접관과 지원자 역할로 진행되는 자기소개 연습 롤플레이입니다.",
-                "source_type": "prompt",
-                "status": "READY",
-                "created_at": "2025-11-13T10:00:00Z"
-              },
-              "turn_plan": {
-                "total_turns": 10,
-                "key_turn_indices": [1, 5, 10],
-                "key_turns": [
-                  {
-                    "turn_index": 1,
-                    "speaker": "ai",
-                    "turn_type": "OPENING",
-                    "goal": "라포 형성과 긴장 완화",
-                    "question_template": "간단하게 자기소개를 해 주세요."
-                  },
-                  {
-                    "turn_index": 5,
-                    "speaker": "ai",
-                    "turn_type": "DEEP_DIVE",
-                    "goal": "핵심 경험을 파고들기",
-                    "question_template": "가장 도전적이었던 프로젝트와 역할을 설명해 주세요."
-                  },
-                  {
-                    "turn_index": 10,
-                    "speaker": "ai",
-                    "turn_type": "WRAP_UP",
-                    "goal": "회고 및 마무리",
-                    "question_template": "오늘 대화에서 배운 점이나 아쉬운 점이 있나요?"
-                  }
-                ]
-              }
-            }
+    3. 내부 API (Spring 1 Gateway에서 호출)
+        - POST /internal/sessions/setup
+        - 역할: Spring 1이 생성한 session_id를 받아서
+                FastAPI 내부용으로 Redis에 저장하고 WebSocket URL 반환
 
-    - 롤플레잉 세션 시작
-        - POST /roleplaying/{roleplayingId}/session/start
-        - Request Spec
-            - Headers
-                - Authorization: Bearer <access_token>
-                - Path Params: roleplayingId
-        - Response Spec
-            {
-              "session": {
-                "session_id": "rs_9001",
-                "roleplay_id": "rp_501",
-                "status": "IN_PROGRESS",
-                "current_turn_index": 1,
-                "total_turns": 10,
-                "created_at": "2025-11-13T10:05:00Z"
-              },
-              "first_ai_turn": {
-                "turn_index": 1,
-                "speaker": "ai",
-                "is_key_turn": true,
-                "message": "간단하게 자기소개를 해 주세요."
-              }
-            }
+    4. 실시간 대화 (WebSocket)
+        - WS /ws/roleplaying/{session_id}
+        - 역할: 음성 입력, STT, AI 응답, 세션 관리
+        - 메시지 타입:
+            - INIT: 세션 초기화
+            - AUDIO_CHUNK: 오디오 청크 전송
+            - UTTERANCE_END: 발화 종료
+            - USER_TEXT: 텍스트 입력 (테스트용)
+            - END_SESSION: 세션 종료
 
-    - 롤플레잉 다음 턴 생성
-        - POST /roleplaying/{sessionId}/nextTurn
-        - Request Spec
-            - Headers
-                - Authorization: Bearer <access_token>
-            - Path Params: sessionId
-            - Body
-                {
-                  "last_turn_index": 2,
-                  "last_user_message": "저는 3년차 백엔드 개발자이고, 최근에는 영어 롤플레잉 서비스를 만들고 있어요."
-                }
-        - Response Spec
-            - 아직 턴이 남아 있을 때(IN_PROGRESS)
-                {
-                  "next_turn": {
-                    "turn_index": 3,
-                    "speaker": "ai",
-                    "is_key_turn": false,
-                    "message": "그 서비스를 만들면서 가장 어려웠던 점은 무엇이었나요?",
-                    "source": "dynamic_llm"
-                  },
-                  "session": {
-                    "session_id": "rs_9001",
-                    "current_turn_index": 3,
-                    "remaining_turns": 8,
-                    "status": "IN_PROGRESS"
-                  }
-                }
-            - 마지막 턴까지 끝나서 세션이 종료될 때
-                {
-                  "next_turn": null,
-                  "session": {
-                    "session_id": "rs_9001",
-                    "current_turn_index": 10,
-                    "remaining_turns": 0,
-                    "status": "FINISHED"
-                  }
-                }
-
-    - 세션 대화 리스트 조회(오른쪽 패널용)
-        - GET /roleplaying/{sessionId}/messages
-        - Request Spec
-            - Headers
-                - Authorization: Bearer <access_token>
-            - Path Params: sessionId
-            - Query Params
-                - page
-                - size
-        - Response Spec
-            {
-              "session_id": "rs_9001",
-              "items": [
-                {
-                  "turn_index": 1,
-                  "speaker": "ai",
-                  "message": "간단하게 자기소개를 해 주세요.",
-                  "created_at": "2025-11-13T11:10:00Z"
-                },
-                {
-                  "turn_index": 2,
-                  "speaker": "user",
-                  "message": "저는 3년차 백엔드 개발자이고...",
-                  "created_at": "2025-11-13T11:11:10Z"
-                }
-              ],
-              "page": 1,
-              "size": 50,
-              "total": 12
-            }
+참고:
+    - 추가 REST API (userInfo, roleplayList 등)는 Spring 2에서 구현
+    - 클라이언트 세션 생성은 Spring 1 Gateway에서만 처리
+    - FastAPI는 WebSocket + STT + AI 응답에 집중
+    - 데이터 관리는 Spring 2 책임
 """
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -222,8 +47,8 @@ from app.roleplaying.schemas import (
     AnalysisRequestDto,
     AnalysisResultDto,
     MessageRole,
-    SessionCreateRequest,
-    SessionCreateResponse
+    InternalSessionSetupRequest,
+    InternalSessionSetupResponse
 )
 from app.roleplaying.services.slack_scenario_service import SlackScenarioService
 from app.config import settings
@@ -288,38 +113,44 @@ async def analyze_conversation(request: AnalysisRequestDto):
         )
 
 
-@router.post("/sessions", response_model=SessionCreateResponse)
-async def create_session(
-    request: SessionCreateRequest,
+@router.post("/internal/sessions/setup", response_model=InternalSessionSetupResponse)
+async def internal_setup_session(
+    request: InternalSessionSetupRequest,
     db: Session = Depends(get_db)
 ):
     """
-    롤플레잉 세션을 생성합니다.
+    Spring 1 Gateway에서 호출하는 내부 API입니다.
 
-    DB에서 시나리오를 조회하고, Redis에 세션 정보를 저장한 후,
+    Spring 1이 생성한 session_id를 받아서,
+    FastAPI 내부용으로 세션 정보를 Redis에 저장하고,
     WebSocket 연결 URL을 반환합니다.
+
+    Note:
+        - 이 엔드포인트는 Spring 1 Gateway에서만 호출합니다.
+        - session_id는 Spring 1이 생성합니다.
+        - FastAPI는 이 session_id를 받아서 Redis에 저장하기만 합니다.
     """
     try:
-        session_id, scenario, expires_at = await session_service.create_session(
+        session_id, scenario, expires_at = await session_service.setup_session(
+            session_id=request.sessionId,
             user_id=request.userId,
             scenario_id=request.scenarioId,
-            db=db,
-            provided_session_id=request.sessionId
+            db=db
         )
 
         base_ws_url = settings.WS_BASE_URL.rstrip("/")
         ws_url = f"{base_ws_url}/ws/roleplaying/{session_id}"
 
         logger.info(
-            f"Session created successfully: session_id={session_id}, "
+            f"Session setup successfully: session_id={session_id}, "
             f"user_id={request.userId}, scenario_id={request.scenarioId}"
         )
 
-        return SessionCreateResponse(
-            session_id=session_id,
-            ws_url=ws_url,
+        return InternalSessionSetupResponse(
+            sessionId=session_id,
+            wsUrl=ws_url,
             scenario=scenario,
-            expires_at=expires_at
+            expiresAt=expires_at
         )
 
     except ValueError as e:
@@ -327,8 +158,8 @@ async def create_session(
         raise HTTPException(status_code=404, detail=str(e))
 
     except Exception as e:
-        logger.error(f"Failed to create session: {e}", exc_info=True)
+        logger.error(f"Failed to setup session: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create session: {str(e)}"
+            detail=f"Failed to setup session: {str(e)}"
         )

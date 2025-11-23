@@ -108,25 +108,35 @@ class Spring2Client:
 
         url = f"/internal/sessions/{session_id}/utterances"
 
-        data = {
-            "stt_text": stt_text,
-            "utterance_index": str(utterance_index),
-            "started_at": _to_offset(started_at),
-            "ended_at": _to_offset(ended_at),
-            "speaker": (speaker or "user").lower(),
-            "text": text or stt_text,
-        }
+        # Spring2 API requires: speaker, text, utteranceIndex (as JSON)
+        # Optional: audio (as base64-encoded string), startedAt, endedAt
+        import base64
+
+        normalized_speaker = (speaker or "user").lower()
+        final_text = text or stt_text
 
         try:
             client = await self._get_client()
 
-            # 오디오가 있으면 multipart/form-data, 없으면 JSON
+            # Build JSON payload
+            # Note: Spring2 uses snake_case for JSON field names (@JsonNaming)
+            payload = {
+                "speaker": normalized_speaker,
+                "text": final_text,
+                "utterance_index": utterance_index,
+            }
+
+            # Add optional timestamp fields if available
+            if started_at:
+                payload["started_at"] = _to_offset(started_at)
+            if ended_at:
+                payload["ended_at"] = _to_offset(ended_at)
+
+            # Add audio as base64-encoded string if provided
             if audio_data:
-                files = {"audio": ("audio.wav", audio_data, "audio/wav")}
-                response = await client.post(url, files=files, data=data)
-            else:
-                # 텍스트만 전송 (오디오 없음)
-                response = await client.post(url, json=data)
+                payload["audio"] = base64.b64encode(audio_data).decode('utf-8')
+
+            response = await client.post(url, json=payload)
 
             response.raise_for_status()
 
