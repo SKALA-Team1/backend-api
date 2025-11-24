@@ -20,7 +20,7 @@ AI Tutor Service
 """
 
 import logging
-from typing import Tuple
+from typing import AsyncGenerator, Tuple
 
 from app.roleplaying.session_manager import SessionState
 from app.roleplaying.services.llm_service import LLMService
@@ -98,7 +98,7 @@ class AITutorService:
         self,
         session_state: SessionState,
         user_text: str
-    ):
+    ) -> AsyncGenerator[Tuple[str, bool], None]:
         """
         사용자 발화에 대한 AI 응답을 스트리밍으로 생성
 
@@ -219,7 +219,7 @@ Return ONLY the question text, nothing else."""
         self,
         session_state: SessionState,
         user_text: str
-    ):
+    ) -> AsyncGenerator[str, None]:
         """
         LLM을 사용하여 동적 질문을 스트리밍으로 생성
 

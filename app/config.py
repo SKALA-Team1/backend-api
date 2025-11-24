@@ -29,7 +29,7 @@ Modified: 2025-11-17
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -113,9 +113,127 @@ class Settings(BaseSettings):
     AUDIO_AGC_TARGET_LEVEL: float = Field(0.8, alias="AUDIO_AGC_TARGET_LEVEL")
     AUDIO_MIN_TEXT_LENGTH: int = Field(2, alias="AUDIO_MIN_TEXT_LENGTH")  # 침묵 감지 기준
 
-    # -------------------------------------
+    # ========================================
+    # ✅ Field Validators
+    # ========================================
+
+    @field_validator("environment")
+    @classmethod
+    def validate_environment(cls, v: str) -> str:
+        """
+        환경값 검증 (development, staging, production만 허용)
+        """
+        valid_environments = {"development", "staging", "production", "local"}
+        if v.lower() not in valid_environments:
+            raise ValueError(
+                f"Invalid environment: {v}. Must be one of {valid_environments}"
+            )
+        return v.lower()
+
+    @field_validator("DEEPGRAM_SAMPLE_RATE")
+    @classmethod
+    def validate_sample_rate(cls, v: int) -> int:
+        """
+        샘플레이트 검증 (8000, 16000, 48000만 허용)
+        """
+        valid_rates = {8000, 16000, 48000}
+        if v not in valid_rates:
+            raise ValueError(
+                f"Invalid sample rate: {v}. Must be one of {valid_rates}"
+            )
+        return v
+
+    @field_validator("AUDIO_CHUNK_SIZE_MS")
+    @classmethod
+    def validate_chunk_size(cls, v: int) -> int:
+        """
+        청크 크기 검증 (10-500ms)
+        """
+        if not 10 <= v <= 500:
+            raise ValueError(
+                f"Invalid chunk size: {v}ms. Must be between 10-500ms"
+            )
+        return v
+
+    @field_validator("AUDIO_AGC_TARGET_LEVEL")
+    @classmethod
+    def validate_agc_level(cls, v: float) -> float:
+        """
+        AGC 타겟 레벨 검증 (0.0-1.0)
+        """
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(
+                f"Invalid AGC target level: {v}. Must be between 0.0-1.0"
+            )
+        return v
+
+    @field_validator("ROLEPLAY_MAX_TURNS")
+    @classmethod
+    def validate_max_turns(cls, v: int) -> int:
+        """
+        최대 턴 수 검증 (1-50)
+        """
+        if not 1 <= v <= 50:
+            raise ValueError(
+                f"Invalid max turns: {v}. Must be between 1-50"
+            )
+        return v
+
+    @field_validator(
+        "ROLEPLAY_REDIS_CACHE_TTL",
+        "ROLEPLAY_SESSION_TIMEOUT",
+        "ROLEPLAY_STT_TIMEOUT",
+        "ROLEPLAY_AI_RESPONSE_TIMEOUT",
+        "ROLEPLAY_AUTO_CLEANUP_INTERVAL"
+    )
+    @classmethod
+    def validate_timeouts(cls, v: int) -> int:
+        """
+        타임아웃/TTL 값 검증 (1초 이상)
+        """
+        if v < 1:
+            raise ValueError(
+                f"Invalid timeout value: {v}. Must be at least 1 second"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_urls(self) -> "Settings":
+        """
+        URL 형식 검증 (http/ws로 시작해야 함)
+        """
+        url_fields = {
+            "S3_ENDPOINT_URL": self.S3_ENDPOINT_URL,
+            "SPRING2_BASE_URL": self.SPRING2_BASE_URL,
+            "WS_BASE_URL": self.WS_BASE_URL,
+            "REDIS_URL": self.REDIS_URL,
+        }
+
+        for field_name, url in url_fields.items():
+            if not url.startswith(("http://", "https://", "ws://", "wss://", "redis://", "rediss://")):
+                raise ValueError(
+                    f"Invalid URL format for {field_name}: {url}. "
+                    f"Must start with http://, https://, ws://, wss://, redis://, or rediss://"
+                )
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_database_url(self) -> "Settings":
+        """
+        데이터베이스 URL 검증 (mysql로 시작해야 함)
+        """
+        valid_db_schemes = ("mysql://", "mysql+pymysql://")
+        if not self.database_url.startswith(valid_db_schemes):
+            raise ValueError(
+                f"Invalid database URL: {self.database_url}. "
+                f"Must start with {valid_db_schemes}"
+            )
+        return self
+
+    # ========================================
     # Convenience Property
-    # -------------------------------------
+    # ========================================
     @property
     def debug(self) -> bool:
         """개발모드 여부"""

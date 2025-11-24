@@ -46,6 +46,39 @@ from app.roleplaying.ws_models import (AckMessage, AiTextMessage,
 
 logger = logging.getLogger(__name__)
 
+
+# ========================================
+# 유틸리티 함수
+# ========================================
+
+
+def _handle_task_error(task: asyncio.Task, context: str = "") -> None:
+    """
+    Background task 완료 콜백 - 에러 처리
+
+    Args:
+        task: 완료된 asyncio.Task
+        context: 컨텍스트 정보 (로깅용)
+    """
+    try:
+        if task.cancelled():
+            logger.debug(f"Background task cancelled: {context}")
+            return
+
+        exception = task.exception()
+        if exception is not None:
+            logger.error(
+                f"Background task failed: {context}",
+                exc_info=(type(exception), exception, exception.__traceback__)
+            )
+        else:
+            result = task.result()
+            logger.debug(f"Background task completed: {context}, result={result}")
+    except asyncio.CancelledError:
+        logger.debug(f"Background task cancellation detected: {context}")
+    except Exception as e:
+        logger.error(f"Error in task error handler: {e}", exc_info=True)
+
 router = APIRouter()
 
 # Redis 검증기 (전역 인스턴스)
@@ -561,20 +594,30 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         # Spring 2 저장을 백그라운드에서 시작
         from app.integrations.clients.spring2_client import spring2_client
 
-        asyncio.create_task(
-            spring2_client.save_utterance(
-                session_id=session_id,
-                audio_data=audio_data,
-                stt_text=stt_text,
-                utterance_index=utterance_index,
-                speaker="user",
-                text=stt_text,
-                played_turns=session_state.ai_turn_count,
-                completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS),
-                finish_reason=None,
-                status="IN_PROGRESS",
-            )
-        )
+        async def _save_user_utterance():
+            try:
+                await spring2_client.save_utterance(
+                    session_id=session_id,
+                    audio_data=audio_data,
+                    stt_text=stt_text,
+                    utterance_index=utterance_index,
+                    speaker="user",
+                    text=stt_text,
+                    played_turns=session_state.ai_turn_count,
+                    completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS),
+                    finish_reason=None,
+                    status="IN_PROGRESS",
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to save user utterance: session={session_id}, index={utterance_index}, error={e}",
+                    exc_info=True
+                )
+
+        # ✅ 태스크 생성 후 에러 콜백 추가
+        task = asyncio.create_task(_save_user_utterance())
+        context = f"spring2_save_utterance(session={session_id}, speaker=user, index={utterance_index})"
+        task.add_done_callback(lambda t: _handle_task_error(t, context))
 
         await websocket.send_json(
             UtteranceSavedMessage(index=utterance_index).model_dump()
@@ -823,7 +866,10 @@ def _schedule_spring2_save(
         except Exception as exc:
             logger.error(f"Failed to save text to Spring 2: {exc}", exc_info=True)
 
-    asyncio.create_task(_save())
+    # ✅ 태스크 생성 후 에러 콜백 추가
+    task = asyncio.create_task(_save())
+    context = f"spring2_save(session={session_id}, speaker={speaker}, index={utterance_index})"
+    task.add_done_callback(lambda t: _handle_task_error(t, context))
 
 
 async def _send_error(
