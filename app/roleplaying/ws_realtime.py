@@ -27,7 +27,7 @@ WebSocket 실시간 롤플레잉 엔드포인트
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
@@ -547,6 +547,10 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                 utterance_index=utterance_index,
                 speaker="user",
                 text=stt_text,
+                played_turns=session_state.ai_turn_count,
+                completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS),
+                finish_reason=None,
+                status="IN_PROGRESS",
             )
         )
 
@@ -581,6 +585,10 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             text=ai_response,
             utterance_index=ai_index,
             speaker="AI",
+            played_turns=session_state.ai_turn_count,
+            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS),
+            finish_reason=None,
+            status="IN_PROGRESS",
         )
 
         # AI 응답 전송
@@ -640,6 +648,7 @@ async def _handle_end_session(
         logger.info(f"Ending session: {session_id}, reason={reason}")
 
         # SessionManager에서 세션 종료
+        session_state = session_manager.get_session(session_id)
         session_manager.end_session(session_id, reason)
 
         # Spring 2에 세션 완료 알림
@@ -649,7 +658,11 @@ async def _handle_end_session(
             await spring2_client.complete_session(
                 session_id=session_id,
                 status="FINISHED" if reason != "error" else "ERROR",
-                reason=reason
+                reason=reason,
+                played_turns=session_state.ai_turn_count if session_state else None,
+                completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
+                finish_reason=reason,
+                finished_at=datetime.now(timezone.utc),
             )
         except Exception as e:
             logger.error(f"Failed to notify Spring 2 of session completion: {e}")
@@ -738,6 +751,10 @@ def _schedule_spring2_save(
     text: str,
     utterance_index: int,
     speaker: str,
+    played_turns: Optional[int] = None,
+    completed_all_turns: bool = False,
+    finish_reason: Optional[str] = None,
+    status: str = "IN_PROGRESS",
 ) -> None:
     """Spring 2 저장을 비동기로 수행하도록 스케줄합니다."""
 
@@ -754,6 +771,10 @@ def _schedule_spring2_save(
                 speaker=normalized_speaker,
                 text=text,
                 audio_data=None,
+                played_turns=played_turns,
+                completed_all_turns=completed_all_turns,
+                finish_reason=finish_reason,
+                status=status,
             )
             logger.info(
                 f"Text saved to Spring 2: session={session_id}, index={utterance_index}, speaker={normalized_speaker}"
