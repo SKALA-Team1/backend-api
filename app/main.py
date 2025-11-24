@@ -30,7 +30,6 @@ async def warmup_ollama() -> None:
     - 클라이언트가 타임아웃하지 않도록 사전에 모델 준비
     """
     try:
-        from app.config import settings
         import ollama
         import asyncio
 
@@ -40,7 +39,7 @@ async def warmup_ollama() -> None:
         # 간단한 프롬프트로 모델 로드
         # (실제 응답은 필요 없고, 메모리 로드만 필요)
         response = ollama.chat(
-            model=settings.OLLAMA_MODEL,
+            model="llama3.2",  # 기본 모델명
             messages=[
                 {
                     "role": "user",
@@ -53,7 +52,7 @@ async def warmup_ollama() -> None:
         elapsed = asyncio.get_running_loop().time() - start_time
         logger.info(
             f"✅ Ollama warmup complete in {elapsed:.2f}s "
-            f"(model={settings.OLLAMA_MODEL})"
+            f"(model=llama3.2)"
         )
 
     except Exception as e:
