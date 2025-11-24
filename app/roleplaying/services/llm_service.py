@@ -418,14 +418,13 @@ class LLMService:
         # 비동기 큐 (executor와 메인 루프 간 통신용)
         queue: Queue = Queue()
         stream_error = None
-        stream_done = False
 
         def _stream_question_to_queue() -> None:
             """
             동기 스트리밍 호출 (executor에서 실행)
             생성되는 청크를 큐에 추가 (논블로킹 방식)
             """
-            nonlocal stream_error, stream_done
+            nonlocal stream_error
 
             try:
                 stream = ollama.chat(
@@ -455,7 +454,6 @@ class LLMService:
 
                 # 스트림 완료 신호
                 queue.put_nowait(None)
-                stream_done = True
 
             except Exception as error:
                 logger.error(f"Failed to generate follow-up question stream: {error}")
