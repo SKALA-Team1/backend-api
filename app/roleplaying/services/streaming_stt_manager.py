@@ -1,14 +1,14 @@
 """
-스트리밍 STT 관리자 (Deepgram SDK 3.x)
+스트리밍 STT 관리자 (Deepgram SDK 3.x+)
 ===============================================
 
 역할:
-- Deepgram WebSocket 세션 관리 (SDK 3.x API)
+- Deepgram WebSocket 세션 관리 (SDK 3.x+ API)
 - 실시간 부분 결과 수신
 - 세션 초기화/종료
 
-Deepgram SDK 3.x 변경사항:
-- listen.live.v2.connect() 사용 (AsyncLiveConnection 반환)
+Deepgram SDK 3.x+ 변경사항:
+- listen.v2.connect() 사용 (AsyncLiveConnection 반환)
 - 이벤트 기반 메시지 처리 (EventType.MESSAGE 등)
 - 모든 메서드가 async/await 기반
 """
@@ -196,10 +196,10 @@ class StreamingSTTManager:
 
     async def create_session(self, session_id: str) -> StreamingSTTSession:
         """
-        스트리밍 세션 생성 (SDK 3.x: AsyncLiveConnection)
+        스트리밍 세션 생성 (SDK 3.x+: AsyncLiveConnection)
 
-        ✅ SDK 3.x 변경:
-        - listen.live.v2.connect()를 사용하여 WebSocket 연결 생성
+        ✅ SDK 3.x+ 변경:
+        - listen.v2.connect()를 사용하여 WebSocket 연결 생성
         - async context manager 또는 수동으로 .start()/.stop() 호출
         - 이벤트 기반 메시지 처리
 
@@ -213,9 +213,9 @@ class StreamingSTTManager:
             Exception: 세션 생성 실패 시
         """
         try:
-            # ✅ SDK 3.x: listen.live.v2.connect()로 WebSocket 연결 생성
+            # ✅ SDK 3.x+: listen.v2.connect()로 WebSocket 연결 생성
             # async context manager 사용 (자동으로 cleanup 처리)
-            connection = await self.client.listen.live.v2.connect(
+            connection = await self.client.listen.v2.connect(
                 model=settings.DEEPGRAM_MODEL,
                 language=settings.DEEPGRAM_LANGUAGE,
                 smart_format=settings.DEEPGRAM_SMART_FORMAT,

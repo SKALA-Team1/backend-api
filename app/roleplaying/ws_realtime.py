@@ -38,7 +38,8 @@ from app.roleplaying.session_manager import SessionStatus, SessionState, session
 from app.roleplaying.validators import (ErrorHandler, InitStateValidator,
                                         SessionValidator)
 from app.roleplaying.ws_models import (AckMessage, AiTextMessage,
-                                       AiTypingMessage, EndSessionMessage,
+                                       AiTextStreamingMessage, AiTypingMessage,
+                                       EndSessionMessage, ErrorMessage,
                                        InitMessage, SessionEndedMessage,
                                        SttFinalMessage, SttPartialMessage,
                                        UserTextMessage, UtteranceEndMessage,
@@ -78,6 +79,29 @@ def _handle_task_error(task: asyncio.Task, context: str = "") -> None:
         logger.debug(f"Background task cancellation detected: {context}")
     except Exception as e:
         logger.error(f"Error in task error handler: {e}", exc_info=True)
+
+
+async def _safe_send_json(websocket: WebSocket, data: dict, context: str = "") -> bool:
+    """
+    WebSocket 메시지를 안전하게 전송 (연결이 닫혀있으면 실패)
+
+    Args:
+        websocket: WebSocket 연결
+        data: 전송할 데이터
+        context: 컨텍스트 정보 (로깅용)
+
+    Returns:
+        True if 전송 성공, False if 실패
+    """
+    try:
+        await websocket.send_json(data)
+        return True
+    except (WebSocketDisconnect, RuntimeError) as e:
+        logger.debug(f"Cannot send message (connection closed): {context}")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to send message ({context}): {e}")
+        return False
 
 router = APIRouter()
 
@@ -894,11 +918,14 @@ def _schedule_spring2_save(
 async def _send_error(
     websocket: WebSocket, message: str, code: Optional[str] = None
 ) -> None:
-    """에러 메시지 전송"""
+    """에러 메시지 전송 (연결이 닫혀있으면 조용히 실패)"""
     try:
         error_msg = ErrorMessage(message=message, code=code)
         await websocket.send_json(error_msg.model_dump())
         logger.error(f"Error sent to client: {message}")
+    except (WebSocketDisconnect, RuntimeError) as e:
+        # WebSocket이 이미 닫혀있거나 연결이 끊김
+        logger.debug(f"Cannot send error to client (connection closed): {message}")
     except Exception as e:
         logger.error(f"Failed to send error message: {e}")
 
