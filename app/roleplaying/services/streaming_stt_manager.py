@@ -8,7 +8,8 @@
 - 세션 초기화/종료
 
 Deepgram SDK 3.x 변경사항:
-- listen.live() → listen.live.v1() (async context manager)
+- listen.live.v2.connect() 사용 (AsyncLiveConnection 반환)
+- 이벤트 기반 메시지 처리 (EventType.MESSAGE 등)
 - 모든 메서드가 async/await 기반
 """
 
@@ -27,7 +28,7 @@ __all__ = ["StreamingSTTSession", "StreamingSTTManager"]
 
 
 class StreamingSTTSession:
-    """Deepgram WebSocket 스트리밍 세션 (SDK 3.x)"""
+    """Deepgram WebSocket 스트리밍 세션 (SDK 3.x - 이벤트 기반)"""
 
     def __init__(self, connection: Any):
         """
@@ -37,12 +38,77 @@ class StreamingSTTSession:
         self.connection = connection
         self.transcript_buffer = ""
         self.is_finalized = False
+        self.message_queue: asyncio.Queue = asyncio.Queue()
+        self._setup_event_handlers()
+
+    def _setup_event_handlers(self) -> None:
+        """SDK 3.x 이벤트 핸들러 설정"""
+        try:
+            from deepgram.core.events import EventType
+
+            # ✅ SDK 3.x: 이벤트 기반 메시지 처리
+            self.connection.on(EventType.OPEN, self._on_open)
+            self.connection.on(EventType.MESSAGE, self._on_message)
+            self.connection.on(EventType.CLOSE, self._on_close)
+            self.connection.on(EventType.ERROR, self._on_error)
+
+            logger.debug("Event handlers registered for streaming session")
+        except ImportError:
+            logger.warning("deepgram.core.events.EventType not available, will use fallback")
+
+    def _on_open(self, open_msg: Any) -> None:
+        """WebSocket 연결 열림"""
+        logger.debug("WebSocket connection opened")
+
+    def _on_message(self, message: Any) -> None:
+        """메시지 수신 핸들러 (이벤트 기반)"""
+        try:
+            # 메시지가 객체일 수도, 문자열일 수도 있음
+            if hasattr(message, 'raw'):
+                # SDK 3.x LiveMessage 객체
+                data = json.loads(message.raw) if isinstance(message.raw, str) else message.raw
+            elif isinstance(message, str):
+                data = json.loads(message)
+            else:
+                data = message if isinstance(message, dict) else {}
+
+            # 부분 결과 추출
+            if "result" in data:
+                results = data.get("result", {}).get("results", [])
+                if results and len(results) > 0:
+                    transcript = results[0].get("transcript", "")
+                    if transcript:
+                        self.transcript_buffer = transcript
+                        logger.debug(f"STT partial: {transcript}")
+                        # 큐에 추가 (비동기 처리용)
+                        try:
+                            self.message_queue.put_nowait(("partial", transcript))
+                        except asyncio.QueueFull:
+                            pass
+
+            # 최종 결과 표시
+            if data.get("is_final"):
+                self.is_finalized = True
+
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as e:
+            logger.debug(f"Could not parse streaming response: {e}")
+
+    def _on_close(self, close_msg: Any) -> None:
+        """WebSocket 연결 종료"""
+        logger.debug("WebSocket connection closed")
+        self.is_finalized = True
+
+    def _on_error(self, error_msg: Any) -> None:
+        """에러 핸들러"""
+        logger.error(f"WebSocket error: {error_msg}")
+        self.is_finalized = True
 
     async def send_chunk(self, audio_chunk: bytes) -> None:
         """오디오 청크 전송 (비동기)"""
         try:
-            # ✅ SDK 3.x: send()는 이미 async
+            # ✅ SDK 3.x: send()는 비동기
             await self.connection.send(audio_chunk)
+            logger.debug(f"Audio chunk sent: {len(audio_chunk)} bytes")
         except Exception as e:
             logger.error(f"Failed to send audio chunk: {e}", exc_info=True)
             raise
@@ -50,40 +116,21 @@ class StreamingSTTSession:
     async def receive_partial(self) -> Optional[str]:
         """부분 인식 결과 수신 (비동기)"""
         try:
-            # ✅ SDK 3.x: recv()는 이미 async
-            response = await self.connection.recv()
+            # 타임아웃: 500ms (부분 결과 대기)
+            message_type, text = await asyncio.wait_for(
+                self.message_queue.get(),
+                timeout=0.5
+            )
 
-            if not response:
-                return None
-
-            try:
-                # 응답이 문자열일 수도, dict일 수도 있음
-                if isinstance(response, str):
-                    data = json.loads(response)
-                else:
-                    data = response
-
-                # 부분 결과 추출
-                if "result" in data and "results" in data["result"]:
-                    results = data["result"]["results"]
-                    if results and len(results) > 0:
-                        transcript = results[0].get("transcript", "")
-                        if transcript and transcript != self.transcript_buffer:
-                            self.transcript_buffer = transcript
-                            logger.debug(f"STT partial: {transcript}")
-                            return transcript
-
-                # 최종 결과 표시
-                if data.get("is_final"):
-                    self.is_finalized = True
-
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
-                logger.debug(f"Could not parse streaming response: {e}")
+            if message_type == "partial":
+                return text
 
             return None
 
         except asyncio.TimeoutError:
-            logger.debug("Timeout waiting for streaming result")
+            # 타임아웃은 정상 (부분 결과가 없을 수 있음)
+            return None
+        except asyncio.QueueEmpty:
             return None
         except Exception as e:
             logger.error(f"Failed to receive streaming result: {e}", exc_info=True)
@@ -149,12 +196,12 @@ class StreamingSTTManager:
 
     async def create_session(self, session_id: str) -> StreamingSTTSession:
         """
-        스트리밍 세션 생성 (SDK 3.x: async context manager)
+        스트리밍 세션 생성 (SDK 3.x: AsyncLiveConnection)
 
         ✅ SDK 3.x 변경:
-        - listen.live() → listen.live.v1()
-        - 동기 → 비동기
-        - Context manager 사용
+        - listen.live.v2.connect()를 사용하여 WebSocket 연결 생성
+        - async context manager 또는 수동으로 .start()/.stop() 호출
+        - 이벤트 기반 메시지 처리
 
         Args:
             session_id: 세션 ID
@@ -166,8 +213,9 @@ class StreamingSTTManager:
             Exception: 세션 생성 실패 시
         """
         try:
-            # ✅ SDK 3.x: listen.live.v1()는 async context manager 반환
-            connection = await self.client.listen.live.v1(
+            # ✅ SDK 3.x: listen.live.v2.connect()로 WebSocket 연결 생성
+            # async context manager 사용 (자동으로 cleanup 처리)
+            connection = await self.client.listen.live.v2.connect(
                 model=settings.DEEPGRAM_MODEL,
                 language=settings.DEEPGRAM_LANGUAGE,
                 smart_format=settings.DEEPGRAM_SMART_FORMAT,
