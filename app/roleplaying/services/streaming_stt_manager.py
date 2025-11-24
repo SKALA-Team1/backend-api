@@ -178,16 +178,16 @@ class StreamingSTTManager:
         self._sessions: Dict[str, StreamingSTTSession] = {}
         self._connections: Dict[str, Any] = {}  # 활성 V2SocketClient 연결 추적
         self._listening_tasks: Dict[str, asyncio.Task] = {}  # recv() 반복 태스크
+        self._connection_contexts: Dict[str, Any] = {}  # context manager 추적
 
     async def create_session(self, session_id: str) -> StreamingSTTSession:
         """
         스트리밍 세션 생성 (SDK 5.3.0: V2SocketClient)
 
         ✅ SDK 5.3.0 특징:
-        - listen.v2.connect()는 Iterator를 반환
-        - next(iterator)를 호출하여 V2SocketClient를 획득
-        - start_listening()으로 수신 대기 시작
-        - send_media()로 오디오 전송
+        - listen.v2.connect()는 동기 context manager (with 사용)
+        - V2SocketClient는 동기 WebSocket 클라이언트
+        - run_in_executor()로 asyncio와 통합
 
         Args:
             session_id: 세션 ID
@@ -198,17 +198,19 @@ class StreamingSTTManager:
         Raises:
             Exception: 세션 생성 실패 시
         """
+        loop = asyncio.get_running_loop()
+
         try:
-            # ✅ SDK 5.3.0: listen.v2.connect()는 Iterator 반환
-            connection_iterator = self.client.listen.v2.connect(
-                model=settings.DEEPGRAM_MODEL,
-                encoding=settings.DEEPGRAM_ENCODING,
-                sample_rate=settings.DEEPGRAM_SAMPLE_RATE,
+            # ✅ SDK 5.3.0: listen.v2.connect()는 동기 context manager
+            # executor에서 실행하여 asyncio 루프 블로킹 방지
+            connection = await loop.run_in_executor(
+                None,
+                self._create_connection_sync,
+                session_id
             )
 
-            # Iterator에서 V2SocketClient 획득
-            connection = next(connection_iterator)
-            logger.debug(f"V2SocketClient obtained for session {session_id}")
+            if not connection:
+                raise RuntimeError("Failed to create WebSocket connection")
 
             # 연결 저장
             self._connections[session_id] = connection
@@ -218,8 +220,6 @@ class StreamingSTTManager:
             self._sessions[session_id] = session
 
             # ✅ 백그라운드에서 recv() 반복 시작
-            # V2SocketClient는 non-blocking recv()를 제공하지 않으므로
-            # 별도 태스크에서 recv()를 호출하고 이벤트 발생
             listening_task = asyncio.create_task(
                 self._listening_loop(session_id, connection)
             )
@@ -230,6 +230,34 @@ class StreamingSTTManager:
 
         except Exception as e:
             logger.error(f"Failed to create streaming session: {e}", exc_info=True)
+            raise
+
+    def _create_connection_sync(self, session_id: str) -> Any:
+        """
+        동기 WebSocket 연결 생성 (executor에서 실행)
+
+        SDK 5.3.0의 listen.v2.connect()는 동기 context manager이므로,
+        executor 스레드에서 실행해야 함
+        """
+        try:
+            # ✅ SDK 5.3.0: 동기 context manager 사용
+            context = self.client.listen.v2.connect(
+                model=settings.DEEPGRAM_MODEL,
+                encoding=settings.DEEPGRAM_ENCODING,
+                sample_rate=settings.DEEPGRAM_SAMPLE_RATE,
+            )
+
+            # context manager 진입
+            connection = context.__enter__()
+
+            # context를 나중에 종료할 수 있도록 저장
+            self._connection_contexts[session_id] = context
+
+            logger.debug(f"V2SocketClient created for session {session_id}")
+            return connection
+
+        except Exception as e:
+            logger.error(f"Failed to create WebSocket connection: {e}", exc_info=True)
             raise
 
     async def _listening_loop(self, session_id: str, connection: Any) -> None:
@@ -344,10 +372,17 @@ class StreamingSTTManager:
 
         finally:
             # 연결 정리
-            if connection:
+            loop = asyncio.get_running_loop()
+            if connection or session_id in self._connection_contexts:
                 try:
-                    # V2SocketClient는 finish() 메서드 제공
-                    if hasattr(connection, 'finish'):
+                    # Context manager 정리
+                    context = self._connection_contexts.pop(session_id, None)
+                    if context:
+                        await loop.run_in_executor(
+                            None,
+                            lambda: context.__exit__(None, None, None)
+                        )
+                    elif connection and hasattr(connection, 'finish'):
                         connection.finish()
                     logger.info(f"Connection closed: {session_id}")
                 except Exception as e:
