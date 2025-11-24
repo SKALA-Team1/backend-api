@@ -236,25 +236,35 @@ class StreamingSTTManager:
         """
         백그라운드에서 메시지 수신 루프 (비동기)
 
-        Deepgram V2SocketClient의 recv()는 동기 함수이지만,
-        asyncio 루프를 블로킹하지 않기 위해 별도 태스크에서 실행
+        Deepgram V2SocketClient의 recv()는 동기 함수이므로,
+        run_in_executor()를 사용하여 asyncio 루프를 블로킹하지 않음
         """
+        loop = asyncio.get_running_loop()
+
         try:
             logger.debug(f"Starting listening loop for session {session_id}")
 
             while session_id in self._sessions:
                 try:
-                    # recv()는 동기 함수이지만 이벤트로 메시지 전달됨
-                    response = connection.recv()
+                    # ✅ recv()를 executor에서 실행하여 asyncio 루프 블로킹 방지
+                    # 최대 1초까지 기다림 (타임아웃)
+                    response = await asyncio.wait_for(
+                        loop.run_in_executor(None, connection.recv),
+                        timeout=1.0
+                    )
 
                     if response:
                         logger.debug(f"Received message: {type(response).__name__}")
+                        # 이벤트 핸들러가 비동기적으로 메시지 처리
 
-                    # 이벤트 핸들러가 메시지 처리
-                    await asyncio.sleep(0)  # 다른 태스크에 기회 제공
+                except asyncio.TimeoutError:
+                    # 타임아웃은 정상 - recv()가 메시지 대기 중
+                    logger.debug(f"Listening timeout for session {session_id} (normal)")
+                    continue
 
                 except Exception as e:
-                    if "Connection" in str(e) or "closed" in str(e).lower():
+                    error_str = str(e).lower()
+                    if any(x in error_str for x in ["connection", "closed", "eof", "reset"]):
                         logger.debug(f"Connection closed for session {session_id}")
                         break
                     else:
