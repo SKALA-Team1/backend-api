@@ -1,17 +1,21 @@
 """
-스트리밍 STT 관리자
+스트리밍 STT 관리자 (Deepgram SDK 3.x)
 ===============================================
 
 역할:
-- Deepgram WebSocket 세션 관리
+- Deepgram WebSocket 세션 관리 (SDK 3.x API)
 - 실시간 부분 결과 수신
 - 세션 초기화/종료
+
+Deepgram SDK 3.x 변경사항:
+- listen.live() → listen.live.v1() (async context manager)
+- 모든 메서드가 async/await 기반
 """
 
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, AsyncIterator, Dict, Optional
 
 from deepgram import DeepgramClient
 
@@ -23,46 +27,41 @@ __all__ = ["StreamingSTTSession", "StreamingSTTManager"]
 
 
 class StreamingSTTSession:
-    """Deepgram WebSocket 스트리밍 세션"""
+    """Deepgram WebSocket 스트리밍 세션 (SDK 3.x)"""
 
     def __init__(self, connection: Any):
         """
         Args:
-            connection: Deepgram WebSocket 연결
+            connection: Deepgram AsyncLiveConnection (SDK 3.x)
         """
         self.connection = connection
         self.transcript_buffer = ""
         self.is_finalized = False
 
     async def send_chunk(self, audio_chunk: bytes) -> None:
-        """오디오 청크 전송"""
+        """오디오 청크 전송 (비동기)"""
         try:
-            loop = asyncio.get_running_loop()
-            # ✅ 동기 send() 호출을 executor에서 실행 (블로킹 방지)
-            await loop.run_in_executor(
-                None,
-                self.connection.send,
-                audio_chunk
-            )
+            # ✅ SDK 3.x: send()는 이미 async
+            await self.connection.send(audio_chunk)
         except Exception as e:
             logger.error(f"Failed to send audio chunk: {e}", exc_info=True)
             raise
 
     async def receive_partial(self) -> Optional[str]:
-        """부분 인식 결과 수신"""
+        """부분 인식 결과 수신 (비동기)"""
         try:
-            loop = asyncio.get_running_loop()
-            # ✅ 동기 recv() 호출을 executor에서 실행 (블로킹 방지)
-            response = await loop.run_in_executor(
-                None,
-                self.connection.recv
-            )
+            # ✅ SDK 3.x: recv()는 이미 async
+            response = await self.connection.recv()
 
             if not response:
                 return None
 
             try:
-                data = json.loads(response)
+                # 응답이 문자열일 수도, dict일 수도 있음
+                if isinstance(response, str):
+                    data = json.loads(response)
+                else:
+                    data = response
 
                 # 부분 결과 추출
                 if "result" in data and "results" in data["result"]:
@@ -78,11 +77,14 @@ class StreamingSTTSession:
                 if data.get("is_final"):
                     self.is_finalized = True
 
-            except (json.JSONDecodeError, KeyError):
-                logger.debug("Could not parse streaming response")
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                logger.debug(f"Could not parse streaming response: {e}")
 
             return None
 
+        except asyncio.TimeoutError:
+            logger.debug("Timeout waiting for streaming result")
+            return None
         except Exception as e:
             logger.error(f"Failed to receive streaming result: {e}", exc_info=True)
             raise
@@ -90,28 +92,39 @@ class StreamingSTTSession:
     async def finalize(self) -> str:
         """스트리밍 종료 및 최종 결과 반환"""
         try:
+            # ✅ SDK 3.x: finish()는 비동기
+            await self.connection.finish()
+
+            # 최종 결과 대기 (타임아웃 5초)
+            timeout = 5.0
             loop = asyncio.get_running_loop()
+            start_time = loop.time()
 
-            # ✅ 동기 finish() 호출을 executor에서 실행 (블로킹 방지)
-            await loop.run_in_executor(
-                None,
-                self.connection.finish
-            )
-
-            # 최종 결과 대기
             while not self.is_finalized:
                 try:
-                    # ✅ 동기 recv() 호출을 executor에서 실행 (블로킹 방지)
-                    response = await loop.run_in_executor(
-                        None,
-                        self.connection.recv
+                    elapsed = loop.time() - start_time
+                    if elapsed > timeout:
+                        logger.warning(f"Timeout waiting for finalized result after {timeout}s")
+                        break
+
+                    # ✅ SDK 3.x: recv()는 비동기
+                    response = await asyncio.wait_for(
+                        self.connection.recv(),
+                        timeout=timeout - elapsed
                     )
-                    data = json.loads(response)
+
+                    if isinstance(response, str):
+                        data = json.loads(response)
+                    else:
+                        data = response
 
                     if data.get("is_final"):
                         self.is_finalized = True
 
-                except (json.JSONDecodeError, StopIteration):
+                except asyncio.TimeoutError:
+                    logger.debug("Timeout waiting for final result")
+                    break
+                except (json.JSONDecodeError, StopIteration, TypeError):
                     break
 
             logger.info(f"STT finalized: {self.transcript_buffer}")
@@ -123,7 +136,7 @@ class StreamingSTTSession:
 
 
 class StreamingSTTManager:
-    """스트리밍 STT 세션 관리"""
+    """스트리밍 STT 세션 관리 (SDK 3.x)"""
 
     def __init__(self, client: Optional[DeepgramClient] = None):
         """
@@ -132,19 +145,29 @@ class StreamingSTTManager:
         """
         self.client = client or DeepgramClient(api_key=settings.deepgram_api_key)
         self._sessions: Dict[str, StreamingSTTSession] = {}
+        self._connections: Dict[str, Any] = {}  # 활성 WebSocket 연결 추적
 
-    def create_session(self, session_id: str) -> StreamingSTTSession:
+    async def create_session(self, session_id: str) -> StreamingSTTSession:
         """
-        스트리밍 세션 생성
+        스트리밍 세션 생성 (SDK 3.x: async context manager)
+
+        ✅ SDK 3.x 변경:
+        - listen.live() → listen.live.v1()
+        - 동기 → 비동기
+        - Context manager 사용
 
         Args:
             session_id: 세션 ID
 
         Returns:
             StreamingSTTSession
+
+        Raises:
+            Exception: 세션 생성 실패 시
         """
         try:
-            connection = self.client.listen.live(
+            # ✅ SDK 3.x: listen.live.v1()는 async context manager 반환
+            connection = await self.client.listen.live.v1(
                 model=settings.DEEPGRAM_MODEL,
                 language=settings.DEEPGRAM_LANGUAGE,
                 smart_format=settings.DEEPGRAM_SMART_FORMAT,
@@ -152,6 +175,9 @@ class StreamingSTTManager:
                 sample_rate=settings.DEEPGRAM_SAMPLE_RATE,
                 interim_results=settings.DEEPGRAM_INTERIM_RESULTS,
             )
+
+            # 연결 저장 (cleanup 시 필요)
+            self._connections[session_id] = connection
 
             session = StreamingSTTSession(connection)
             self._sessions[session_id] = session
@@ -183,6 +209,9 @@ class StreamingSTTManager:
             return None
 
         try:
+            # 오디오 전송
+            await session.send_chunk(chunk)
+            # 부분 결과 수신
             return await session.receive_partial()
         except Exception as e:
             logger.error(f"Chunk processing failed: {e}", exc_info=True)
@@ -199,6 +228,7 @@ class StreamingSTTManager:
             최종 인식 결과
         """
         session = self._sessions.pop(session_id, None)
+        connection = self._connections.pop(session_id, None)
 
         if not session:
             logger.warning(f"Session not found for finalization: {session_id}")
@@ -212,3 +242,28 @@ class StreamingSTTManager:
         except Exception as e:
             logger.error(f"Failed to finalize session {session_id}: {e}", exc_info=True)
             return ""
+
+        finally:
+            # 연결 정리
+            if connection:
+                try:
+                    await connection.aclose()
+                except Exception as e:
+                    logger.warning(f"Error closing connection: {e}")
+
+    async def cleanup(self, session_id: str) -> None:
+        """
+        세션 강제 정리 (비정상 종료 시)
+
+        Args:
+            session_id: 세션 ID
+        """
+        session = self._sessions.pop(session_id, None)
+        connection = self._connections.pop(session_id, None)
+
+        if connection:
+            try:
+                await connection.aclose()
+                logger.info(f"Connection closed: {session_id}")
+            except Exception as e:
+                logger.warning(f"Error closing connection: {e}")
