@@ -8,6 +8,7 @@
 - 세션 초기화/종료
 """
 
+import asyncio
 import json
 import logging
 from typing import Any, Dict, Optional
@@ -36,7 +37,13 @@ class StreamingSTTSession:
     async def send_chunk(self, audio_chunk: bytes) -> None:
         """오디오 청크 전송"""
         try:
-            self.connection.send(audio_chunk)
+            loop = asyncio.get_running_loop()
+            # ✅ 동기 send() 호출을 executor에서 실행 (블로킹 방지)
+            await loop.run_in_executor(
+                None,
+                self.connection.send,
+                audio_chunk
+            )
         except Exception as e:
             logger.error(f"Failed to send audio chunk: {e}", exc_info=True)
             raise
@@ -44,7 +51,12 @@ class StreamingSTTSession:
     async def receive_partial(self) -> Optional[str]:
         """부분 인식 결과 수신"""
         try:
-            response = self.connection.recv()
+            loop = asyncio.get_running_loop()
+            # ✅ 동기 recv() 호출을 executor에서 실행 (블로킹 방지)
+            response = await loop.run_in_executor(
+                None,
+                self.connection.recv
+            )
 
             if not response:
                 return None
@@ -78,12 +90,22 @@ class StreamingSTTSession:
     async def finalize(self) -> str:
         """스트리밍 종료 및 최종 결과 반환"""
         try:
-            self.connection.finish()
+            loop = asyncio.get_running_loop()
+
+            # ✅ 동기 finish() 호출을 executor에서 실행 (블로킹 방지)
+            await loop.run_in_executor(
+                None,
+                self.connection.finish
+            )
 
             # 최종 결과 대기
             while not self.is_finalized:
                 try:
-                    response = self.connection.recv()
+                    # ✅ 동기 recv() 호출을 executor에서 실행 (블로킹 방지)
+                    response = await loop.run_in_executor(
+                        None,
+                        self.connection.recv
+                    )
                     data = json.loads(response)
 
                     if data.get("is_final"):

@@ -14,8 +14,9 @@ Ollama를 사용하여 대화 분석 및 시나리오 생성을 수행하는 서
 
 import json
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, AsyncGenerator
 from datetime import datetime
+import asyncio
 import ollama
 
 logger = logging.getLogger(__name__)
@@ -395,6 +396,97 @@ class LLMService:
             return response['message']['content'].strip()
         except Exception as error:
             logger.error(f"Failed to generate follow-up question: {error}")
+            raise
+
+    async def generate_followup_question_stream(self, prompt: str) -> AsyncGenerator[str, None]:
+        """
+        스트리밍으로 AI 답변 생성 (청크 단위로 즉시 반환)
+
+        ✅ 진정한 실시간 스트리밍:
+        - Ollama의 동기 스트리밍을 executor에서 실행
+        - 청크가 생성되는대로 즉시 asyncio.Queue에 추가
+        - 메인 루프에서 큐를 모니터링하며 청크를 즉시 yield
+
+        Args:
+            prompt: 이미 구성된 사용자 프롬프트 (역할/히스토리 포함)
+
+        Yields:
+            청크 단위로 생성된 텍스트 (한 단어 또는 여러 단어) - 실시간
+        """
+        from asyncio import Queue
+
+        # 비동기 큐 (executor와 메인 루프 간 통신용)
+        queue: Queue = Queue()
+        stream_error = None
+
+        def _stream_question_to_queue() -> None:
+            """
+            동기 스트리밍 호출 (executor에서 실행)
+            생성되는 청크를 큐에 추가 (논블로킹 방식)
+            """
+            nonlocal stream_error
+
+            try:
+                stream = ollama.chat(
+                    model=self.model_name,
+                    messages=[
+                        {
+                            'role': 'system',
+                            'content': 'You are a helpful AI tutor that only outputs one concise English question.'
+                        },
+                        {
+                            'role': 'user',
+                            'content': prompt
+                        }
+                    ],
+                    stream=True  # ✅ 스트리밍 활성화
+                )
+
+                # 스트림 반복 (executor에서 실행)
+                for chunk in stream:
+                    content = chunk.get('message', {}).get('content', '')
+                    if content:
+                        # ✅ 논블로킹 방식으로 큐에 추가
+                        try:
+                            queue.put_nowait(content)
+                        except Exception as e:
+                            logger.warning(f"Failed to put chunk to queue: {e}")
+
+                # 스트림 완료 신호
+                queue.put_nowait(None)
+
+            except Exception as error:
+                logger.error(f"Failed to generate follow-up question stream: {error}")
+                stream_error = error
+                queue.put_nowait(None)  # 종료 신호
+
+        try:
+            # ✅ executor에서 스트리밍 시작 (논블로킹)
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, _stream_question_to_queue)
+
+            # ✅ 큐에서 청크를 꺼내며 즉시 yield
+            while True:
+                try:
+                    # 타임아웃 설정으로 무한 대기 방지 (30초)
+                    chunk = await asyncio.wait_for(queue.get(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Stream timeout: no data received for 30 seconds")
+                    break
+
+                # None은 스트림 완료 신호
+                if chunk is None:
+                    break
+
+                # 청크를 즉시 yield (블로킹 없음)
+                yield chunk
+
+            # 에러 확인
+            if stream_error:
+                raise stream_error
+
+        except Exception as error:
+            logger.error(f"Failed to generate follow-up question stream: {error}")
             raise
 
     async def generate_additional_questions(

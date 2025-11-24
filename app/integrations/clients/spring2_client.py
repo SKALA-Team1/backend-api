@@ -73,6 +73,10 @@ class Spring2Client:
         audio_data: Optional[bytes] = None,
         started_at: Optional[datetime] = None,
         ended_at: Optional[datetime] = None,
+        played_turns: Optional[int] = None,
+        completed_all_turns: bool = False,
+        finish_reason: Optional[str] = None,
+        status: str = "IN_PROGRESS",
     ) -> dict:
         """
         발화 저장 API 호출
@@ -80,6 +84,7 @@ class Spring2Client:
         Spring 2는:
         1. (오디오 있을 경우) S3에 오디오 업로드: s3://skala/sessions/{session_id}/utterance_{index}.wav
         2. MySQL에 메타데이터 저장 (텍스트는 항상 저장)
+        3. scenario_session 테이블 업데이트 (turnCount, completedAllTurns, status 등)
 
         Args:
             session_id: 세션 ID
@@ -88,6 +93,10 @@ class Spring2Client:
             audio_data: 오디오 바이너리 데이터 (WAV, 선택사항)
             started_at: 발화 시작 시각
             ended_at: 발화 종료 시각
+            played_turns: AI가 한 질문의 총 개수
+            completed_all_turns: 모든 턴(10개)을 완료했는지 여부
+            finish_reason: 세션 종료 사유 (turn_limit, user_end, timeout, error 등)
+            status: 세션 상태 (IN_PROGRESS, FINISHED, ERROR)
 
         Returns:
             API 응답 ({"success": true, "s3_url": "...", "utterance_id": 123})
@@ -131,6 +140,14 @@ class Spring2Client:
                 payload["started_at"] = _to_offset(started_at)
             if ended_at:
                 payload["ended_at"] = _to_offset(ended_at)
+
+            # Add scenario_session update fields
+            if played_turns is not None:
+                payload["played_turns"] = played_turns
+            payload["completed_all_turns"] = completed_all_turns
+            if finish_reason is not None:
+                payload["finish_reason"] = finish_reason
+            payload["status"] = status
 
             # Add audio as base64-encoded string if provided
             if audio_data:
@@ -202,7 +219,14 @@ class Spring2Client:
             raise
 
     async def complete_session(
-        self, session_id: str, status: str = "FINISHED", reason: str = "user_end"
+        self,
+        session_id: str,
+        status: str = "FINISHED",
+        reason: str = "user_end",
+        played_turns: Optional[int] = None,
+        completed_all_turns: bool = False,
+        finish_reason: Optional[str] = None,
+        finished_at: Optional[datetime] = None,
     ) -> dict:
         """
         세션 완료 API 호출
@@ -211,11 +235,16 @@ class Spring2Client:
         - status = 'FINISHED'
         - ended_at = NOW()
         - end_reason = reason
+        - scenario_session 테이블도 함께 업데이트
 
         Args:
             session_id: 세션 ID
             status: 세션 상태 ("FINISHED", "ERROR" 등)
             reason: 종료 사유 ("user_end", "timeout", "disconnected", "error")
+            played_turns: AI가 한 질문의 총 개수
+            completed_all_turns: 모든 턴(10개)을 완료했는지 여부
+            finish_reason: 세션 종료 사유
+            finished_at: 세션 종료 시각
 
         Returns:
             API 응답 ({"success": true, "session_id": "...", "ended_at": "..."})
@@ -225,7 +254,22 @@ class Spring2Client:
         """
         url = f"/internal/sessions/{session_id}/complete"
 
+        def _to_offset(dt: datetime) -> str:
+            """Ensure datetime is timezone-aware and return ISO8601 string with offset."""
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
         payload = {"status": status, "reason": reason}
+
+        # Add scenario_session update fields
+        if played_turns is not None:
+            payload["played_turns"] = played_turns
+        payload["completed_all_turns"] = completed_all_turns
+        if finish_reason is not None:
+            payload["finish_reason"] = finish_reason
+        if finished_at is not None:
+            payload["finished_at"] = _to_offset(finished_at)
 
         try:
             client = await self._get_client()
