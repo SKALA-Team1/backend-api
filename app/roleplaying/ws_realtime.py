@@ -27,7 +27,7 @@ WebSocket 실시간 롤플레잉 엔드포인트
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
@@ -45,6 +45,39 @@ from app.roleplaying.ws_models import (AckMessage, AiTextMessage,
                                        UtteranceSavedMessage)
 
 logger = logging.getLogger(__name__)
+
+
+# ========================================
+# 유틸리티 함수
+# ========================================
+
+
+def _handle_task_error(task: asyncio.Task, context: str = "") -> None:
+    """
+    Background task 완료 콜백 - 에러 처리
+
+    Args:
+        task: 완료된 asyncio.Task
+        context: 컨텍스트 정보 (로깅용)
+    """
+    try:
+        if task.cancelled():
+            logger.debug(f"Background task cancelled: {context}")
+            return
+
+        exception = task.exception()
+        if exception is not None:
+            logger.error(
+                f"Background task failed: {context}",
+                exc_info=(type(exception), exception, exception.__traceback__)
+            )
+        else:
+            result = task.result()
+            logger.debug(f"Background task completed: {context}, result={result}")
+    except asyncio.CancelledError:
+        logger.debug(f"Background task cancellation detected: {context}")
+    except Exception as e:
+        logger.error(f"Error in task error handler: {e}", exc_info=True)
 
 router = APIRouter()
 
@@ -408,38 +441,60 @@ async def _handle_user_text(
             return
 
         # ========================================
-        # Step 3: AI 응답 생성
+        # Step 3: AI 응답 생성 (스트리밍)
         # ========================================
         await websocket.send_json(AiTypingMessage().model_dump())
 
-        # AI 튜터 서비스를 사용하여 동적 응답 생성
+        # AI 튜터 서비스를 사용하여 동적 응답 생성 (스트리밍)
         from app.roleplaying.services.ai_tutor_service import ai_tutor_service
+        from app.roleplaying.ws_models import AiTextStreamingMessage
 
-        ai_response, is_fixed = await ai_tutor_service.generate_reply(
-            session_state, user_text
-        )
+        full_ai_response = ""
+        is_fixed_question = False
 
-        # 세션 히스토리에 AI 응답 추가
+        try:
+            async for chunk, is_fixed in ai_tutor_service.generate_reply_stream(
+                session_state, user_text
+            ):
+                full_ai_response += chunk
+                is_fixed_question = is_fixed
+
+                # ✅ 청크를 즉시 클라이언트에 전송
+                await websocket.send_json(
+                    AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
+                )
+                logger.debug(f"AI streaming chunk sent: {chunk[:30]}...")
+
+        except Exception as e:
+            logger.error(f"Error during AI streaming: {e}", exc_info=True)
+            # Fallback: 기본 응답 전송
+            full_ai_response = "Could you tell me more about that?"
+            is_fixed_question = False
+            await websocket.send_json(
+                AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
+            )
+
+        # 세션 히스토리에 완전한 AI 응답 추가
         session_manager.append_message(
             session_id=session_id,
             speaker="ai",
-            text=ai_response,
-            is_fixed_question=is_fixed,
+            text=full_ai_response,
+            is_fixed_question=is_fixed_question,
         )
 
         ai_index = session_manager.increment_utterance_index(session_id)
         _schedule_spring2_save(
             session_id=session_id,
-            text=ai_response,
+            text=full_ai_response,
             utterance_index=ai_index,
             speaker="AI",
+            played_turns=session_state.ai_turn_count,
+            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS),
+            finish_reason=None,
+            status="IN_PROGRESS",
         )
 
-        # AI 응답 전송
-        await websocket.send_json(
-            AiTextMessage(text=ai_response, is_fixed_question=is_fixed).model_dump()
-        )
-        logger.info(f"AI response sent: {ai_response[:50]}... (fixed={is_fixed})")
+        logger.info(f"AI response completed: {full_ai_response[:50]}... (fixed={is_fixed_question})")
 
         # 턴 제한 확인 후 종료 처리
         if await _check_turn_limit(websocket, session_id, session_state):
@@ -539,16 +594,30 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         # Spring 2 저장을 백그라운드에서 시작
         from app.integrations.clients.spring2_client import spring2_client
 
-        asyncio.create_task(
-            spring2_client.save_utterance(
-                session_id=session_id,
-                audio_data=audio_data,
-                stt_text=stt_text,
-                utterance_index=utterance_index,
-                speaker="user",
-                text=stt_text,
-            )
-        )
+        async def _save_user_utterance():
+            try:
+                await spring2_client.save_utterance(
+                    session_id=session_id,
+                    audio_data=audio_data,
+                    stt_text=stt_text,
+                    utterance_index=utterance_index,
+                    speaker="user",
+                    text=stt_text,
+                    played_turns=session_state.ai_turn_count,
+                    completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS),
+                    finish_reason=None,
+                    status="IN_PROGRESS",
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to save user utterance: session={session_id}, index={utterance_index}, error={e}",
+                    exc_info=True
+                )
+
+        # ✅ 태스크 생성 후 에러 콜백 추가
+        task = asyncio.create_task(_save_user_utterance())
+        context = f"spring2_save_utterance(session={session_id}, speaker=user, index={utterance_index})"
+        task.add_done_callback(lambda t: _handle_task_error(t, context))
 
         await websocket.send_json(
             UtteranceSavedMessage(index=utterance_index).model_dump()
@@ -559,35 +628,58 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         if await _check_turn_limit(websocket, session_id, session_state):
             return
 
-        # AI 응답 생성
+        # AI 응답 생성 (스트리밍)
         await websocket.send_json(AiTypingMessage().model_dump())
 
-        ai_response, is_fixed = await ai_tutor_service.generate_reply(
-            session_state, stt_text
-        )
+        # 스트리밍으로 응답 생성
+        full_ai_response = ""
+        is_fixed_question = False
 
-        # 세션 히스토리에 AI 응답 추가
+        try:
+            async for chunk, is_fixed in ai_tutor_service.generate_reply_stream(
+                session_state, stt_text
+            ):
+                full_ai_response += chunk
+                is_fixed_question = is_fixed
+
+                # ✅ 청크를 즉시 클라이언트에 전송
+                from app.roleplaying.ws_models import AiTextStreamingMessage
+                await websocket.send_json(
+                    AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
+                )
+                logger.debug(f"AI streaming chunk sent: {chunk[:30]}...")
+
+        except Exception as e:
+            logger.error(f"Error during AI streaming: {e}", exc_info=True)
+            # Fallback: 기본 응답 전송
+            full_ai_response = "Could you tell me more about that?"
+            is_fixed_question = False
+            await websocket.send_json(
+                AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
+            )
+
+        # 세션 히스토리에 완전한 AI 응답 추가
         session_manager.append_message(
             session_id=session_id,
             speaker="ai",
-            text=ai_response,
-            is_fixed_question=is_fixed,
+            text=full_ai_response,
+            is_fixed_question=is_fixed_question,
         )
 
         # AI 응답 저장 (Spring 2 - 백그라운드)
         ai_index = session_manager.increment_utterance_index(session_id)
         _schedule_spring2_save(
             session_id=session_id,
-            text=ai_response,
+            text=full_ai_response,
             utterance_index=ai_index,
             speaker="AI",
+            played_turns=session_state.ai_turn_count,
+            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS),
+            finish_reason=None,
+            status="IN_PROGRESS",
         )
 
-        # AI 응답 전송
-        await websocket.send_json(
-            AiTextMessage(text=ai_response, is_fixed_question=is_fixed).model_dump()
-        )
-        logger.info(f"AI response sent: {ai_response[:50]}... (fixed={is_fixed})")
+        logger.info(f"AI response completed: {full_ai_response[:50]}... (fixed={is_fixed_question})")
 
         # 턴 제한 확인 후 종료 처리
         if await _check_turn_limit(websocket, session_id, session_state):
@@ -640,6 +732,7 @@ async def _handle_end_session(
         logger.info(f"Ending session: {session_id}, reason={reason}")
 
         # SessionManager에서 세션 종료
+        session_state = session_manager.get_session(session_id)
         session_manager.end_session(session_id, reason)
 
         # Spring 2에 세션 완료 알림
@@ -649,7 +742,11 @@ async def _handle_end_session(
             await spring2_client.complete_session(
                 session_id=session_id,
                 status="FINISHED" if reason != "error" else "ERROR",
-                reason=reason
+                reason=reason,
+                played_turns=session_state.ai_turn_count if session_state else None,
+                completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
+                finish_reason=reason,
+                finished_at=datetime.now(timezone.utc),
             )
         except Exception as e:
             logger.error(f"Failed to notify Spring 2 of session completion: {e}")
@@ -738,6 +835,10 @@ def _schedule_spring2_save(
     text: str,
     utterance_index: int,
     speaker: str,
+    played_turns: Optional[int] = None,
+    completed_all_turns: bool = False,
+    finish_reason: Optional[str] = None,
+    status: str = "IN_PROGRESS",
 ) -> None:
     """Spring 2 저장을 비동기로 수행하도록 스케줄합니다."""
 
@@ -754,6 +855,10 @@ def _schedule_spring2_save(
                 speaker=normalized_speaker,
                 text=text,
                 audio_data=None,
+                played_turns=played_turns,
+                completed_all_turns=completed_all_turns,
+                finish_reason=finish_reason,
+                status=status,
             )
             logger.info(
                 f"Text saved to Spring 2: session={session_id}, index={utterance_index}, speaker={normalized_speaker}"
@@ -761,7 +866,10 @@ def _schedule_spring2_save(
         except Exception as exc:
             logger.error(f"Failed to save text to Spring 2: {exc}", exc_info=True)
 
-    asyncio.create_task(_save())
+    # ✅ 태스크 생성 후 에러 콜백 추가
+    task = asyncio.create_task(_save())
+    context = f"spring2_save(session={session_id}, speaker={speaker}, index={utterance_index})"
+    task.add_done_callback(lambda t: _handle_task_error(t, context))
 
 
 async def _send_error(

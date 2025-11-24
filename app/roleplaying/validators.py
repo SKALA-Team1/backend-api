@@ -30,22 +30,81 @@ class SessionValidator:
         """
         활성 세션 검증
 
+        ✅ 종합 검증:
+        - 세션 존재 여부
+        - 세션 상태 (ACTIVE)
+        - 세션 만료 여부
+
         Returns:
             검증된 세션 또는 None (검증 실패 시)
         """
         session_state = session_manager.get_session(session_id)
 
         if not session_state:
-            await ErrorHandler.send_error(websocket, "Session not found")
+            await ErrorHandler.send_error(
+                websocket,
+                "Session not found",
+                code="SESSION_NOT_FOUND",
+                severity=ErrorHandler.SEVERITY_WARNING
+            )
             return None
 
         if session_state.status != SessionStatus.ACTIVE:
-            await ErrorHandler.send_error(websocket, "Session not active")
+            await ErrorHandler.send_error(
+                websocket,
+                f"Session not active (status={session_state.status})",
+                code="SESSION_NOT_ACTIVE",
+                severity=ErrorHandler.SEVERITY_WARNING
+            )
             return None
 
         if session_state.is_expired():
-            await ErrorHandler.send_error(websocket, "Session expired")
+            await ErrorHandler.send_error(
+                websocket,
+                "Session expired",
+                code="SESSION_EXPIRED",
+                severity=ErrorHandler.SEVERITY_WARNING
+            )
             return None
+
+        return session_state
+
+    @staticmethod
+    async def validate_session_for_operation(
+        websocket: WebSocket,
+        session_id: str,
+        operation: str = "operation"
+    ) -> Optional[SessionState]:
+        """
+        특정 작업 수행 전 세션 검증
+
+        ✅ 추가 검증:
+        - 활성 세션 존재 확인
+        - 세션 상태 검증
+        - 만료 여부 확인
+        - 작업 로깅
+
+        Args:
+            websocket: WebSocket 연결
+            session_id: 세션 ID
+            operation: 수행할 작업 명 (로깅용)
+
+        Returns:
+            검증된 세션 또는 None
+        """
+        session_state = await SessionValidator.validate_active(websocket, session_id)
+
+        if session_state:
+            logger.debug(
+                f"Session validation passed for {operation}: "
+                f"session={session_id}, status={session_state.status}, "
+                f"turns={session_state.ai_turn_count}"
+            )
+        else:
+            logger.warning(
+                f"Session validation failed for {operation}: "
+                f"session={session_id}"
+            )
 
         return session_state
 

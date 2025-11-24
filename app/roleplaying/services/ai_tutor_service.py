@@ -20,7 +20,7 @@ AI Tutor Service
 """
 
 import logging
-from typing import Tuple
+from typing import AsyncGenerator, Tuple
 
 from app.roleplaying.session_manager import SessionState
 from app.roleplaying.services.llm_service import LLMService
@@ -94,6 +94,65 @@ class AITutorService:
             # Fallback: 기본 질문 반환
             return ("Could you tell me more about that?", False)
 
+    async def generate_reply_stream(
+        self,
+        session_state: SessionState,
+        user_text: str
+    ) -> AsyncGenerator[Tuple[str, bool], None]:
+        """
+        사용자 발화에 대한 AI 응답을 스트리밍으로 생성
+
+        Args:
+            session_state: 세션 상태 (대화 히스토리, 시나리오 정보 포함)
+            user_text: 사용자 발화 텍스트
+
+        Yields:
+            (chunk: str, is_fixed_question: bool)
+            - chunk: 청크 단위로 생성된 텍스트
+            - is_fixed_question: 고정 질문 여부
+        """
+        try:
+            # 다음 AI 턴 번호 확인
+            next_turn = session_state.get_ai_turn_number()
+
+            logger.info(
+                f"Generating AI reply stream: session={session_state.session_id}, "
+                f"turn={next_turn}, user_text='{user_text[:30]}...'"
+            )
+
+            # ========================================
+            # Step 1: 고정 질문 턴 확인 (턴 1, 5, 10)
+            # ========================================
+            if session_state.should_use_fixed_question():
+                fixed_index = session_state.get_fixed_question_index()
+                if fixed_index is not None and fixed_index < len(session_state.fixed_questions):
+                    fixed_question = session_state.fixed_questions[fixed_index]
+                    logger.info(
+                        f"Using fixed question stream (turn {next_turn}): {fixed_question[:50]}..."
+                    )
+                    # 고정 질문은 한 번에 반환 (스트리밍이 필요 없음)
+                    yield (fixed_question, True)
+                    return
+
+            # ========================================
+            # Step 2: 동적 질문 생성 (LLM 스트리밍)
+            # ========================================
+            logger.debug(f"Starting dynamic question stream (turn {next_turn})")
+
+            async for chunk in self._generate_dynamic_question_stream(
+                session_state=session_state,
+                user_text=user_text
+            ):
+                yield (chunk, False)
+
+            logger.info(f"Dynamic question stream completed (turn {next_turn})")
+
+        except Exception as e:
+            logger.error(f"Failed to generate AI reply stream: {e}", exc_info=True)
+            # Fallback: 기본 질문 반환
+            fallback_question = "Could you tell me more about that?"
+            yield (fallback_question, False)
+
     async def _generate_dynamic_question(
         self,
         session_state: SessionState,
@@ -155,6 +214,66 @@ Return ONLY the question text, nothing else."""
             logger.error(f"LLM call failed: {e}", exc_info=True)
             # Fallback
             return f"That's interesting. As a {session_state.ai_role}, I'd like to know more. Could you elaborate?"
+
+    async def _generate_dynamic_question_stream(
+        self,
+        session_state: SessionState,
+        user_text: str
+    ) -> AsyncGenerator[str, None]:
+        """
+        LLM을 사용하여 동적 질문을 스트리밍으로 생성
+
+        Args:
+            session_state: 세션 상태
+            user_text: 사용자 발화
+
+        Yields:
+            청크 단위로 생성된 질문 텍스트
+        """
+        # ========================================
+        # Step 1: 대화 컨텍스트 구성
+        # ========================================
+        scenario_context = self._build_scenario_context(session_state)
+        conversation_history = self._build_conversation_history(session_state)
+
+        # ========================================
+        # Step 2: 프롬프트 구성
+        # ========================================
+        prompt = f"""You are roleplaying as a {session_state.ai_role} in a professional English conversation practice session.
+
+Context:
+- Your role: {session_state.ai_role}
+- User's role: {session_state.my_role}
+- Conversation topic: Professional workplace discussion
+
+Conversation so far:
+{conversation_history}
+
+User just said:
+"{user_text}"
+
+Your task:
+- Ask a follow-up question that:
+  1. Relates to what the user just said
+  2. Helps them practice professional English
+  3. Matches your role as a {session_state.ai_role}
+  4. Encourages detailed responses (avoid yes/no questions)
+
+Generate ONE natural, professional question in English.
+Return ONLY the question text, nothing else."""
+
+        try:
+            # ========================================
+            # Step 3: LLM 스트리밍 호출
+            # ========================================
+            async for chunk in self.llm_service.generate_followup_question_stream(prompt):
+                yield chunk
+
+        except Exception as e:
+            logger.error(f"LLM streaming call failed: {e}", exc_info=True)
+            # Fallback: 기본 질문 반환
+            fallback = f"That's interesting. As a {session_state.ai_role}, I'd like to know more. Could you elaborate?"
+            yield fallback
 
     def _build_scenario_context(self, session_state: SessionState) -> str:
         """
