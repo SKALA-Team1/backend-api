@@ -65,16 +65,11 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to close Redis: {e}")
 
     try:
-        # HTTP 클라이언트 종료
+        # ✅ HTTP 클라이언트 종료 (public interface 사용)
         from app.integrations.clients.spring2_client import spring2_client
-        if spring2_client.client is not None:
-            try:
-                await spring2_client.client.aclose()
-                logger.info("HTTP client closed")
-            except Exception as e:
-                logger.error(f"Error closing HTTP client: {e}")
+        await spring2_client.close()
     except Exception as e:
-        logger.warning(f"Failed to close HTTP client: {e}")
+        logger.error(f"Error closing HTTP client: {e}", exc_info=True)
 
     logger.info("FastAPI application shutdown complete")
 
