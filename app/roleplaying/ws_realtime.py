@@ -408,38 +408,60 @@ async def _handle_user_text(
             return
 
         # ========================================
-        # Step 3: AI 응답 생성
+        # Step 3: AI 응답 생성 (스트리밍)
         # ========================================
         await websocket.send_json(AiTypingMessage().model_dump())
 
-        # AI 튜터 서비스를 사용하여 동적 응답 생성
+        # AI 튜터 서비스를 사용하여 동적 응답 생성 (스트리밍)
         from app.roleplaying.services.ai_tutor_service import ai_tutor_service
+        from app.roleplaying.ws_models import AiTextStreamingMessage
 
-        ai_response, is_fixed = await ai_tutor_service.generate_reply(
-            session_state, user_text
-        )
+        full_ai_response = ""
+        is_fixed_question = False
 
-        # 세션 히스토리에 AI 응답 추가
+        try:
+            async for chunk, is_fixed in ai_tutor_service.generate_reply_stream(
+                session_state, user_text
+            ):
+                full_ai_response += chunk
+                is_fixed_question = is_fixed
+
+                # ✅ 청크를 즉시 클라이언트에 전송
+                await websocket.send_json(
+                    AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
+                )
+                logger.debug(f"AI streaming chunk sent: {chunk[:30]}...")
+
+        except Exception as e:
+            logger.error(f"Error during AI streaming: {e}", exc_info=True)
+            # Fallback: 기본 응답 전송
+            full_ai_response = "Could you tell me more about that?"
+            is_fixed_question = False
+            await websocket.send_json(
+                AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
+            )
+
+        # 세션 히스토리에 완전한 AI 응답 추가
         session_manager.append_message(
             session_id=session_id,
             speaker="ai",
-            text=ai_response,
-            is_fixed_question=is_fixed,
+            text=full_ai_response,
+            is_fixed_question=is_fixed_question,
         )
 
         ai_index = session_manager.increment_utterance_index(session_id)
         _schedule_spring2_save(
             session_id=session_id,
-            text=ai_response,
+            text=full_ai_response,
             utterance_index=ai_index,
             speaker="AI",
+            played_turns=session_state.ai_turn_count,
+            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS),
+            finish_reason=None,
+            status="IN_PROGRESS",
         )
 
-        # AI 응답 전송
-        await websocket.send_json(
-            AiTextMessage(text=ai_response, is_fixed_question=is_fixed).model_dump()
-        )
-        logger.info(f"AI response sent: {ai_response[:50]}... (fixed={is_fixed})")
+        logger.info(f"AI response completed: {full_ai_response[:50]}... (fixed={is_fixed_question})")
 
         # 턴 제한 확인 후 종료 처리
         if await _check_turn_limit(websocket, session_id, session_state):
@@ -563,26 +585,49 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         if await _check_turn_limit(websocket, session_id, session_state):
             return
 
-        # AI 응답 생성
+        # AI 응답 생성 (스트리밍)
         await websocket.send_json(AiTypingMessage().model_dump())
 
-        ai_response, is_fixed = await ai_tutor_service.generate_reply(
-            session_state, stt_text
-        )
+        # 스트리밍으로 응답 생성
+        full_ai_response = ""
+        is_fixed_question = False
 
-        # 세션 히스토리에 AI 응답 추가
+        try:
+            async for chunk, is_fixed in ai_tutor_service.generate_reply_stream(
+                session_state, stt_text
+            ):
+                full_ai_response += chunk
+                is_fixed_question = is_fixed
+
+                # ✅ 청크를 즉시 클라이언트에 전송
+                from app.roleplaying.ws_models import AiTextStreamingMessage
+                await websocket.send_json(
+                    AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
+                )
+                logger.debug(f"AI streaming chunk sent: {chunk[:30]}...")
+
+        except Exception as e:
+            logger.error(f"Error during AI streaming: {e}", exc_info=True)
+            # Fallback: 기본 응답 전송
+            full_ai_response = "Could you tell me more about that?"
+            is_fixed_question = False
+            await websocket.send_json(
+                AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
+            )
+
+        # 세션 히스토리에 완전한 AI 응답 추가
         session_manager.append_message(
             session_id=session_id,
             speaker="ai",
-            text=ai_response,
-            is_fixed_question=is_fixed,
+            text=full_ai_response,
+            is_fixed_question=is_fixed_question,
         )
 
         # AI 응답 저장 (Spring 2 - 백그라운드)
         ai_index = session_manager.increment_utterance_index(session_id)
         _schedule_spring2_save(
             session_id=session_id,
-            text=ai_response,
+            text=full_ai_response,
             utterance_index=ai_index,
             speaker="AI",
             played_turns=session_state.ai_turn_count,
@@ -591,11 +636,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             status="IN_PROGRESS",
         )
 
-        # AI 응답 전송
-        await websocket.send_json(
-            AiTextMessage(text=ai_response, is_fixed_question=is_fixed).model_dump()
-        )
-        logger.info(f"AI response sent: {ai_response[:50]}... (fixed={is_fixed})")
+        logger.info(f"AI response completed: {full_ai_response[:50]}... (fixed={is_fixed_question})")
 
         # 턴 제한 확인 후 종료 처리
         if await _check_turn_limit(websocket, session_id, session_state):

@@ -150,6 +150,25 @@ class AiTextMessage(BaseModel):
     )
 
 
+class AiTextStreamingMessage(BaseModel):
+    """
+    AI 응답 텍스트 스트리밍 메시지
+
+    AI 응답을 청크 단위로 실시간 전송.
+    ChatGPT처럼 답변이 한 글자씩 또는 한 단어씩 나타남.
+
+    사용:
+    - 동적 질문 생성 중 청크 전송
+    - 고정 질문은 한 번에 전송 (is_fixed_question=True일 때)
+    """
+
+    type: Literal["AI_TEXT_STREAMING"] = "AI_TEXT_STREAMING"
+    chunk: str = Field(..., description="스트리밍 청크 (한 단어 또는 여러 단어)")
+    is_fixed_question: bool = Field(
+        default=False, description="고정 질문 여부 (턴 1, 5, 10)"
+    )
+
+
 class SttPartialMessage(BaseModel):
     """
     STT 부분 결과 메시지
@@ -231,6 +250,7 @@ InboundMessage = InitMessage | UtteranceEndMessage | UserTextMessage | EndSessio
 OutboundMessage = (
     AckMessage
     | AiTextMessage
+    | AiTextStreamingMessage
     | SttPartialMessage
     | SttFinalMessage
     | UtteranceSavedMessage
