@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     # -------------------------------------
     # Deepgram STT Settings
     # -------------------------------------
-    DEEPGRAM_MODEL: str = Field("nova-2", alias="DEEPGRAM_MODEL")
+    DEEPGRAM_MODEL: str = Field("nova-2-en", alias="DEEPGRAM_MODEL")
     DEEPGRAM_LANGUAGE: str = Field("en", alias="DEEPGRAM_LANGUAGE")
     DEEPGRAM_ENCODING: str = Field("LINEAR16", alias="DEEPGRAM_ENCODING")
     DEEPGRAM_SAMPLE_RATE: int = Field(16000, alias="DEEPGRAM_SAMPLE_RATE")

@@ -46,7 +46,6 @@ async def test_with_microphone():
   # Redis에 세션 생성
   await setup_test_session(session_id)
 
-  # 포트 확인 (환경에 따라 8000 또는 8082)
   port = 8082
   uri = f"ws://localhost:{port}/ws/roleplaying/{session_id}"
 
