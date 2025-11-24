@@ -397,6 +397,41 @@ class LLMService:
             logger.error(f"Failed to generate follow-up question: {error}")
             raise
 
+    async def generate_followup_question_stream(self, prompt: str):
+        """
+        스트리밍으로 AI 답변 생성 (청크 단위로 반환)
+
+        Args:
+            prompt: 이미 구성된 사용자 프롬프트 (역할/히스토리 포함)
+
+        Yields:
+            청크 단위로 생성된 텍스트 (한 단어 또는 여러 단어)
+        """
+        try:
+            stream = ollama.chat(
+                model=self.model_name,
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'You are a helpful AI tutor that only outputs one concise English question.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                stream=True  # ✅ 스트리밍 활성화
+            )
+
+            for chunk in stream:
+                content = chunk.get('message', {}).get('content', '')
+                if content:
+                    yield content
+
+        except Exception as error:
+            logger.error(f"Failed to generate follow-up question stream: {error}")
+            raise
+
     async def generate_additional_questions(
         self,
         existing_questions: List[str],
