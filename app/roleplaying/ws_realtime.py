@@ -145,6 +145,14 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
                     continue
 
                 await _handle_audio_chunk(websocket, session_id, raw_data["bytes"])
+
+                # ✅ AUDIO_CHUNK 처리 후 세션 상태 재검증
+                # AUDIO_CHUNK 처리 중 세션이 종료되었을 수 있으므로 확인
+                session_state = session_manager.get_session(session_id)
+                if not session_state or session_state.status != SessionStatus.ACTIVE:
+                    logger.info(f"Session ended during audio chunk processing: {session_id}")
+                    break
+
                 continue
 
             # Text 메시지 (JSON)
@@ -336,21 +344,24 @@ async def _handle_audio_chunk(
     오디오 청크 처리
 
     1. SessionManager에 오디오 청크 추가
-    2. STT 스트리밍 처리 (향후 구현)
-    3. 부분 결과 전송 (향후 구현)
+    2. STT 스트리밍 처리 (Deepgram WebSocket)
+    3. 부분 결과 전송
 
-    Note:
-        현재는 버퍼에만 추가. STT 스트리밍은 services/stt_service.py에서 구현 예정.
+    에러 처리:
+    - 세션이 없거나 만료되면 WebSocket 닫음
+    - STT 처리 에러는 로깅만 하고 계속 진행 (배치 STT로 폴백)
     """
     try:
         # 세션 검증
         session_state = session_manager.get_session(session_id)
         if not session_state:
+            logger.error(f"Session not found during audio chunk: {session_id}")
             await _send_error(websocket, "Session not found")
             return
 
         # 세션 만료 확인
         if session_state.is_expired():
+            logger.warning(f"Session expired during audio chunk: {session_id}")
             await _send_error(websocket, "Session expired")
             await websocket.close(
                 code=status.WS_1008_POLICY_VIOLATION, reason="Session expired"
@@ -358,17 +369,24 @@ async def _handle_audio_chunk(
             return
 
         # 오디오 버퍼에 추가
-        session_manager.append_audio_chunk(session_id, chunk)
+        try:
+            session_manager.append_audio_chunk(session_id, chunk)
+            logger.debug(f"Audio chunk added: {len(chunk)} bytes")
+        except Exception as e:
+            logger.error(f"Failed to append audio chunk: {e}", exc_info=True)
+            await _send_error(websocket, "Failed to buffer audio")
+            return
 
-        # STT 스트리밍 처리 (Deepgram WebSocket)
+        # STT 스트리밍 처리 (Deepgram WebSocket, SDK 3.x)
         from app.roleplaying.services.stt_service import stt_service
         try:
             partial_text = await stt_service.process_chunk(session_id, chunk)
             if partial_text:
                 await websocket.send_json(SttPartialMessage(text=partial_text).model_dump())
-                logger.debug(f"STT partial sent: {partial_text}")
+                logger.debug(f"STT partial sent: {partial_text[:50]}...")
         except Exception as e:
-            logger.warning(f"Streaming STT error (non-fatal): {e}")
+            # STT 스트리밍 에러는 배치 모드로 폴백하므로 warning으로만 로깅
+            logger.warning(f"Streaming STT error (will fallback to batch): {e}")
 
     except Exception as e:
         logger.error(f"Audio chunk handler error: {e}", exc_info=True)
