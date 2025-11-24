@@ -198,37 +198,40 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def validate_urls(self) -> "Settings":
+    def validate_model_urls(self) -> "Settings":
         """
-        URL 형식 검증 (http/ws로 시작해야 함)
+        URL 및 데이터베이스 URL 형식 검증 (엄격한 스킴 검증)
+
+        ✅ 각 URL 필드에 맞는 스킴만 허용하여 설정 오류 조기 방지:
+        - S3_ENDPOINT_URL: http://, https://만 허용
+        - SPRING2_BASE_URL: http://, https://만 허용
+        - WS_BASE_URL: ws://, wss://만 허용
+        - REDIS_URL: redis://, rediss://만 허용
+        - DATABASE_URL: mysql://, mysql+pymysql://만 허용
         """
-        url_fields = {
-            "S3_ENDPOINT_URL": self.S3_ENDPOINT_URL,
-            "SPRING2_BASE_URL": self.SPRING2_BASE_URL,
-            "WS_BASE_URL": self.WS_BASE_URL,
-            "REDIS_URL": self.REDIS_URL,
+        # ✅ 각 URL에 맞는 스킴 정의 (허용된 스킴만 명시)
+        url_validations = {
+            "S3_ENDPOINT_URL": (self.S3_ENDPOINT_URL, ("http://", "https://")),
+            "SPRING2_BASE_URL": (self.SPRING2_BASE_URL, ("http://", "https://")),
+            "WS_BASE_URL": (self.WS_BASE_URL, ("ws://", "wss://")),
+            "REDIS_URL": (self.REDIS_URL, ("redis://", "rediss://")),
         }
 
-        for field_name, url in url_fields.items():
-            if not url.startswith(("http://", "https://", "ws://", "wss://", "redis://", "rediss://")):
+        for field_name, (url, schemes) in url_validations.items():
+            if not url.startswith(schemes):
                 raise ValueError(
                     f"Invalid URL format for {field_name}: {url}. "
-                    f"Must start with http://, https://, ws://, wss://, redis://, or rediss://"
+                    f"Must start with {schemes}"
                 )
 
-        return self
-
-    @model_validator(mode="after")
-    def validate_database_url(self) -> "Settings":
-        """
-        데이터베이스 URL 검증 (mysql로 시작해야 함)
-        """
+        # ✅ 데이터베이스 URL 검증
         valid_db_schemes = ("mysql://", "mysql+pymysql://")
         if not self.database_url.startswith(valid_db_schemes):
             raise ValueError(
                 f"Invalid database URL: {self.database_url}. "
                 f"Must start with {valid_db_schemes}"
             )
+
         return self
 
     # ========================================
