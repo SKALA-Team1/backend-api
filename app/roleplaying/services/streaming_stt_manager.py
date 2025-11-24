@@ -244,7 +244,7 @@ class StreamingSTTManager:
             context = self.client.listen.v2.connect(
                 model=settings.DEEPGRAM_MODEL,
                 encoding=settings.DEEPGRAM_ENCODING,
-                sample_rate=settings.DEEPGRAM_SAMPLE_RATE,
+                sample_rate=str(settings.DEEPGRAM_SAMPLE_RATE),
             )
 
             # context manager 진입
