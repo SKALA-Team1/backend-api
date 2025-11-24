@@ -274,10 +274,11 @@ async def _handle_init(
             expires_at=expires_at,
         )
 
-        # STT 스트리밍 세션 생성 (Deepgram WebSocket)
+        # STT 스트리밍 세션 생성 (Deepgram WebSocket, SDK 3.x)
         from app.roleplaying.services.stt_service import stt_service
         try:
-            stt_service.create_streaming_session(session_id)
+            # ✅ SDK 3.x: create_streaming_session()은 이제 비동기
+            await stt_service.create_streaming_session(session_id)
             logger.info(f"STT streaming session created: {session_id}")
         except Exception as e:
             logger.warning(f"Failed to create STT streaming session: {e}")
@@ -887,10 +888,12 @@ async def _send_error(
 async def _cleanup_session(session_id: str, reason: str) -> None:
     """세션 정리 (연결 끊김 또는 에러 시)"""
     try:
-        # STT 스트리밍 세션 정리
+        # STT 스트리밍 세션 강제 정리 (최종 결과 대기 없이)
         from app.roleplaying.services.stt_service import stt_service
         try:
-            await stt_service.finalize_streaming(session_id)
+            # ✅ cleanup() 사용: finalize_streaming()과 달리 최종 결과를 기다리지 않음
+            # 이는 예상치 못한 클라이언트 연결 해제 시 리소스 누수를 방지합니다
+            await stt_service.cleanup(session_id)
             logger.debug(f"STT streaming session cleaned up: {session_id}")
         except Exception as e:
             logger.debug(f"STT streaming cleanup failed (non-fatal): {e}")
