@@ -127,6 +127,9 @@ async def get_redis_client(redis_url: Optional[str] = None) -> redis.Redis:
 
     Args:
         redis_url: 커스텀 Redis URL (없으면 settings.REDIS_URL 사용)
+
+    Returns:
+        redis.Redis: Redis 비동기 클라이언트
     """
     from app.config import settings  # 지연 임포트 (순환 참조 방지)
 
@@ -142,3 +145,26 @@ async def get_redis_client(redis_url: Optional[str] = None) -> redis.Redis:
         logger.info(f"Redis client initialized for caching: {url}")
 
     return _redis_client_cache
+
+
+async def close_redis_client() -> None:
+    """
+    캐시된 Redis 클라이언트 연결 종료
+
+    ✅ Public interface: private _redis_client_cache에 직접 접근 대신 이 함수 사용
+    - FastAPI lifespan에서 서버 종료 시 호출
+    - redis_client 모듈의 내부 구현 변경에 영향을 받지 않음
+
+    사용 예:
+        from app.integrations.clients.redis_client import close_redis_client
+        await close_redis_client()
+    """
+    global _redis_client_cache
+
+    if _redis_client_cache is not None:
+        try:
+            await _redis_client_cache.close()
+            logger.info("Redis client connection closed")
+            _redis_client_cache = None
+        except Exception as e:
+            logger.error(f"Error closing Redis client: {e}", exc_info=True)

@@ -58,14 +58,9 @@ async def lifespan(app: FastAPI):
     logger.info("FastAPI application shutting down...")
 
     try:
-        # Redis 연결 종료
-        from app.integrations.clients.redis_client import _redis_client_cache
-        if _redis_client_cache is not None:
-            try:
-                await _redis_client_cache.close()
-                logger.info("Redis client closed")
-            except Exception as e:
-                logger.error(f"Error closing Redis client: {e}")
+        # ✅ Redis 연결 종료 (public interface 사용)
+        from app.integrations.clients.redis_client import close_redis_client
+        await close_redis_client()
     except Exception as e:
         logger.warning(f"Failed to close Redis: {e}")
 
