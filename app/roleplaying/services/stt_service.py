@@ -54,9 +54,11 @@ class STTService:
         logger.debug("Transcribing audio (%d bytes) via batch engine", len(audio_data))
         return await self.batch_engine.transcribe(audio_data)
 
-    def create_streaming_session(self, session_id: str) -> StreamingSTTSession:
+    async def create_streaming_session(self, session_id: str) -> StreamingSTTSession:
         """
-        스트리밍 STT 세션 생성
+        스트리밍 STT 세션 생성 (SDK 3.x: 비동기)
+
+        ✅ SDK 3.x 변경: create_session()이 비동기로 변경됨
 
         Args:
             session_id: 세션 ID
@@ -65,7 +67,7 @@ class STTService:
             StreamingSTTSession 객체
         """
         logger.debug(f"Creating streaming session: {session_id}")
-        return self.streaming_manager.create_session(session_id)
+        return await self.streaming_manager.create_session(session_id)
 
     async def process_chunk(
         self, session_id: str, audio_chunk: bytes
@@ -94,6 +96,19 @@ class STTService:
         """
         logger.debug(f"Finalizing streaming session: {session_id}")
         return await self.streaming_manager.finalize_session(session_id)
+
+    async def cleanup(self, session_id: str) -> None:
+        """
+        스트리밍 세션 강제 정리 (비정상 종료 시)
+
+        finalize_streaming()과 다르게, 최종 결과를 기다리지 않고 즉시 리소스를 정리합니다.
+        예상치 못한 클라이언트 연결 해제 시 사용하세요.
+
+        Args:
+            session_id: 스트리밍 세션 ID
+        """
+        logger.debug(f"Cleaning up streaming session: {session_id}")
+        await self.streaming_manager.cleanup(session_id)
 
 
 # 전역 STT 서비스 인스턴스
