@@ -2,21 +2,22 @@
 스트리밍 STT 관리자 (Deepgram SDK 5.3.0 V1SocketClient - 단일 recv 루프)
 ================================================================
 
-역할:
+역할 (SOLID 원칙 준수):
 - Deepgram WebSocket 세션 관리 (SDK 5.3.0 v1 API)
 - 실시간 부분 결과 수신 (queue 기반)
 - 세션 초기화/종료
 
+아키텍처:
+- MessageHandler: 메시지 파싱 및 처리 (SRP)
+- ConnectionManager: WebSocket 연결 생명주기 관리 (SRP)
+- StreamingSTTSession: 세션 조율 (SRP)
+- StreamingSTTManager: 세션 저장소 관리 (SRP)
+
 Deepgram SDK 5.3.0 v1 특징:
 - listen.v1.connect() 반환: V1SocketClient (동기 context manager)
-- recv()는 단 한 곳(reader_loop)에서만 호출
-- send()로 오디오 청크 전송 (바이너리)
+- start_listening(): 내부 recv 루프 관리 (단일 recv 호출)
+- send_media(bytes): 오디오 청크 전송
 - 메시지는 queue를 통해 async 작업에 전달
-
-아키텍처:
-- StreamingSTTSession: 단일 recv loop + queue 기반 메시지 처리
-- _reader_loop(): 유일한 recv() 호출 지점
-- message queue: 수신 메시지를 async 작업에 전달
 """
 
 import asyncio
@@ -32,6 +33,59 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 __all__ = ["StreamingSTTSession", "StreamingSTTManager"]
+
+
+class MessageHandler:
+    """메시지 파싱 및 처리 (SRP: 메시지 해석 전담)"""
+
+    @staticmethod
+    def parse_transcript(message: Any) -> Optional[str]:
+        """메시지에서 트랜스크립트 추출"""
+        try:
+            data = message.raw if hasattr(message, 'raw') else message
+
+            if not hasattr(data, 'channel') or not hasattr(data.channel, 'alternatives'):
+                return None
+
+            alternatives = data.channel.alternatives
+            if alternatives and len(alternatives) > 0:
+                transcript = getattr(alternatives[0], 'transcript', "")
+                return transcript if transcript else None
+
+        except Exception as e:
+            logger.debug(f"Failed to parse transcript: {e}")
+
+        return None
+
+    @staticmethod
+    def is_final(message: Any) -> bool:
+        """최종 결과 여부 확인"""
+        try:
+            data = message.raw if hasattr(message, 'raw') else message
+            return getattr(data, 'is_final', False)
+        except Exception:
+            return False
+
+
+class ConnectionLifecycle:
+    """WebSocket 연결 생명주기 관리 (SRP: 연결 정리 전담)"""
+
+    @staticmethod
+    async def finish_connection(connection: Any) -> None:
+        """연결 종료"""
+        loop = asyncio.get_running_loop()
+        if hasattr(connection, "finish"):
+            await loop.run_in_executor(None, connection.finish)
+
+    @staticmethod
+    async def exit_context(context: Any) -> None:
+        """Context manager 종료"""
+        loop = asyncio.get_running_loop()
+        if context:
+            await loop.run_in_executor(
+                None,
+                lambda: context.__exit__(None, None, None)
+            )
 
 
 class StreamingSTTSession:
@@ -77,29 +131,20 @@ class StreamingSTTSession:
         logger.debug("WebSocket connection opened")
 
     def _on_message(self, message: Any) -> None:
-        """메시지 수신 핸들러 (이벤트 기반)"""
+        """메시지 수신 핸들러 (이벤트 기반) - MessageHandler 사용"""
         try:
-            # Deepgram V1SocketClient 메시지 처리
-            if hasattr(message, 'raw'):
-                data = message.raw
-            else:
-                data = message
-
-            # 트랜스크립트 추출
-            if hasattr(data, 'channel') and hasattr(data.channel, 'alternatives'):
-                alternatives = data.channel.alternatives
-                if alternatives and len(alternatives) > 0:
-                    transcript = alternatives[0].transcript if hasattr(alternatives[0], 'transcript') else ""
-                    if transcript:
-                        self.transcript_buffer = transcript
-                        logger.debug(f"STT partial: {transcript}")
-                        try:
-                            self.message_queue.put_nowait(("partial", transcript))
-                        except asyncio.QueueFull:
-                            pass
+            # 트랜스크립트 추출 (SRP: MessageHandler가 파싱 담당)
+            transcript = MessageHandler.parse_transcript(message)
+            if transcript:
+                self.transcript_buffer = transcript
+                logger.debug(f"STT partial: {transcript}")
+                try:
+                    self.message_queue.put_nowait(("partial", transcript))
+                except asyncio.QueueFull:
+                    pass
 
             # 최종 결과 확인
-            if hasattr(data, 'is_final') and data.is_final:
+            if MessageHandler.is_final(message):
                 self.is_finalized = True
                 logger.debug("STT result finalized")
 
@@ -239,11 +284,11 @@ class StreamingSTTSession:
 
     async def close(self) -> None:
         """
-        ✅ 세션 정리 및 연결 종료
+        ✅ 세션 정리 및 연결 종료 (ConnectionLifecycle 사용)
 
         1. 수신 루프 종료
-        2. Deepgram connection 정리
-        3. Context manager 종료
+        2. Deepgram connection 정리 (SRP: ConnectionLifecycle 담당)
+        3. Context manager 종료 (SRP: ConnectionLifecycle 담당)
         """
         try:
             # Step 1: 수신 루프 종료
@@ -258,20 +303,13 @@ class StreamingSTTSession:
 
             logger.debug("Reader task stopped")
 
-            # Step 2: Deepgram connection finish
-            loop = asyncio.get_running_loop()
+            # Step 2 & 3: Deepgram connection & context cleanup
+            # (ConnectionLifecycle이 연결 정리 담당)
+            await ConnectionLifecycle.finish_connection(self.connection)
+            logger.debug("Deepgram connection finished")
 
-            if hasattr(self.connection, "finish"):
-                await loop.run_in_executor(None, self.connection.finish)
-                logger.debug("Deepgram connection finished")
-
-            # Step 3: Context manager 종료
-            if self.context:
-                await loop.run_in_executor(
-                    None,
-                    lambda: self.context.__exit__(None, None, None)
-                )
-                logger.debug("Context manager exited")
+            await ConnectionLifecycle.exit_context(self.context)
+            logger.debug("Context manager exited")
 
             logger.info("STT session closed successfully")
 
