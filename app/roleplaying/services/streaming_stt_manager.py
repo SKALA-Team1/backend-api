@@ -1,17 +1,22 @@
 """
-스트리밍 STT 관리자 (Deepgram SDK 5.3.0 V2SocketClient)
+스트리밍 STT 관리자 (Deepgram SDK 5.3.0 V1SocketClient - 단일 recv 루프)
 ================================================================
 
 역할:
-- Deepgram WebSocket 세션 관리 (SDK 5.3.0 API)
-- 실시간 부분 결과 수신
+- Deepgram WebSocket 세션 관리 (SDK 5.3.0 v1 API)
+- 실시간 부분 결과 수신 (queue 기반)
 - 세션 초기화/종료
 
-Deepgram SDK 5.3.0 특징:
-- listen.v2.connect() 반환: V2SocketClient (Iterator 기반)
-- recv() 비동기 호출로 메시지 수신
-- send_media()로 오디오 청크 전송
-- 이벤트 핸들러 기반 처리 (on() 메서드)
+Deepgram SDK 5.3.0 v1 특징:
+- listen.v1.connect() 반환: V1SocketClient (동기 context manager)
+- recv()는 단 한 곳(reader_loop)에서만 호출
+- send()로 오디오 청크 전송 (바이너리)
+- 메시지는 queue를 통해 async 작업에 전달
+
+아키텍처:
+- StreamingSTTSession: 단일 recv loop + queue 기반 메시지 처리
+- _reader_loop(): 유일한 recv() 호출 지점
+- message queue: 수신 메시지를 async 작업에 전달
 """
 
 import asyncio
@@ -19,8 +24,8 @@ import logging
 from typing import Any, Dict, Optional
 
 from deepgram import DeepgramClient
-from deepgram.extensions.types.sockets.listen_v2_media_message import ListenV2MediaMessage
 from deepgram.core.events import EventType
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 
@@ -30,17 +35,28 @@ __all__ = ["StreamingSTTSession", "StreamingSTTManager"]
 
 
 class StreamingSTTSession:
-    """Deepgram WebSocket 스트리밍 세션 (SDK 5.3.0 V2SocketClient)"""
+    """Deepgram WebSocket 스트리밍 세션 (SDK 5.3.0 V1SocketClient - 단일 recv 루프)"""
 
-    def __init__(self, connection: Any):
+    def __init__(self, connection: Any, context: Any):
         """
         Args:
-            connection: Deepgram V2SocketClient (SDK 5.3.0)
+            connection: Deepgram V1SocketClient (SDK 5.3.0)
+            context: context manager (종료 시 __exit__ 호출용)
         """
         self.connection = connection
+        self.context = context
         self.transcript_buffer = ""
         self.is_finalized = False
         self.message_queue: asyncio.Queue = asyncio.Queue()
+
+        # 수신 루프 제어
+        self._running = False
+        self._reader_task: Optional[asyncio.Task] = None
+
+        # 디버깅: 연결 타입 확인
+        logger.info(f"[STT] Connection type = {type(self.connection)}")
+        logger.info(f"[STT] Connection has send = {hasattr(self.connection, 'send')}")
+
         self._setup_event_handlers()
 
     def _setup_event_handlers(self) -> None:
@@ -63,9 +79,8 @@ class StreamingSTTSession:
     def _on_message(self, message: Any) -> None:
         """메시지 수신 핸들러 (이벤트 기반)"""
         try:
-            # Deepgram V2SocketClient 메시지 처리
+            # Deepgram V1SocketClient 메시지 처리
             if hasattr(message, 'raw'):
-                # ListenV2ConnectedEvent, ListenV2TurnInfoEvent 등의 raw 필드
                 data = message.raw
             else:
                 data = message
@@ -101,13 +116,73 @@ class StreamingSTTSession:
         logger.error(f"WebSocket error: {error_msg}")
         self.is_finalized = True
 
-    async def send_chunk(self, audio_chunk: bytes) -> None:
-        """오디오 청크 전송 (비동기)"""
+    async def start(self) -> None:
+        """
+        ✅ 수신 루프 시작 (Event-based with SDK's start_listening())
+
+        Deepgram v1 SDK의 start_listening()을 사용하면:
+        1. SDK이 내부적으로 recv 루프 관리 (동시성 문제 해결)
+        2. 등록된 event handler가 자동으로 호출됨
+        3. 사용자 코드는 recv를 직접 호출하지 않음
+        """
+        self._running = True
+        self._reader_task = asyncio.create_task(self._reader_loop())
+        logger.debug("STT reader loop started (event-based)")
+
+    async def _reader_loop(self) -> None:
+        """
+        ✅ Event-based listening loop (SDK's start_listening() 사용)
+
+        Deepgram v1 SDK의 start_listening()은:
+        - 동기 blocking 메서드
+        - 내부적으로 recv() 루프 실행
+        - 등록된 event handler 자동 호출
+        - executor에서 실행하여 asyncio를 블로킹하지 않음
+        """
+        loop = asyncio.get_running_loop()
+
         try:
-            # ✅ SDK 5.3.0: send_media() 사용
-            media_message = ListenV2MediaMessage(data=audio_chunk)
-            self.connection.send_media(media_message)
-            logger.debug(f"Audio chunk sent: {len(audio_chunk)} bytes")
+            logger.debug("Reader loop: starting (SDK start_listening mode)")
+
+            # ✅ SDK의 start_listening()을 executor에서 실행
+            # 이 메서드는 blocking이며, 내부적으로 recv 루프를 관리함
+            await loop.run_in_executor(
+                None,
+                self.connection.start_listening
+            )
+
+            logger.debug("Reader loop: start_listening completed")
+
+        except asyncio.CancelledError:
+            logger.debug("Reader loop: cancelled")
+        except Exception as e:
+            error_str = str(e).lower()
+            if any(x in error_str for x in ["connection", "closed", "eof", "reset", "broken"]):
+                logger.debug(f"Reader loop: connection closed normally")
+            else:
+                logger.error(f"Reader loop error: {e}", exc_info=True)
+        finally:
+            self._running = False
+            logger.debug("Reader loop: ended")
+
+    async def send_chunk(self, audio_chunk: bytes) -> None:
+        """
+        ✅ 오디오 청크 전송 (비동기)
+
+        Deepgram v1 SDK의 send_media()를 사용
+        send_media()는 동기 메서드이므로 run_in_threadpool으로 감싸서 실행
+        """
+        try:
+            conn = self.connection
+
+            # ✅ Deepgram v1 공식 메서드: connection.send_media(bytes)
+            if hasattr(conn, "send_media"):
+                await run_in_threadpool(conn.send_media, audio_chunk)
+                logger.debug(f"Audio chunk sent (via send_media()): {len(audio_chunk)} bytes")
+                return
+
+            raise RuntimeError(f"No valid send_media method on Deepgram connection: {type(conn)}")
+
         except Exception as e:
             logger.error(f"Failed to send audio chunk: {e}", exc_info=True)
             raise
@@ -129,16 +204,14 @@ class StreamingSTTSession:
         except asyncio.TimeoutError:
             # 타임아웃은 정상 (부분 결과가 없을 수 있음)
             return None
-        except asyncio.QueueEmpty:
-            return None
         except Exception as e:
             logger.error(f"Failed to receive streaming result: {e}", exc_info=True)
-            raise
+            return None
 
     async def finalize(self) -> str:
         """스트리밍 종료 및 최종 결과 반환"""
         try:
-            # ✅ SDK 5.3.0: 마지막 메시지 수신 (최종 결과)
+            # ✅ 마지막 메시지 수신 대기 (최종 결과)
             timeout = 5.0
             loop = asyncio.get_running_loop()
             start_time = loop.time()
@@ -150,8 +223,7 @@ class StreamingSTTSession:
                         logger.warning(f"Timeout waiting for finalized result after {timeout}s")
                         break
 
-                    # ✅ SDK 5.3.0: recv()는 동기 (블로킹)이지만 asyncio 루프에서 실행
-                    # 이를 피하기 위해 작은 타임아웃으로 poll
+                    # 작은 대기 + 폴링
                     await asyncio.sleep(0.1)
 
                 except asyncio.TimeoutError:
@@ -165,6 +237,47 @@ class StreamingSTTSession:
             logger.error(f"Failed to finalize streaming: {e}", exc_info=True)
             return self.transcript_buffer
 
+    async def close(self) -> None:
+        """
+        ✅ 세션 정리 및 연결 종료
+
+        1. 수신 루프 종료
+        2. Deepgram connection 정리
+        3. Context manager 종료
+        """
+        try:
+            # Step 1: 수신 루프 종료
+            self._running = False
+
+            if self._reader_task and not self._reader_task.done():
+                self._reader_task.cancel()
+                try:
+                    await self._reader_task
+                except asyncio.CancelledError:
+                    pass
+
+            logger.debug("Reader task stopped")
+
+            # Step 2: Deepgram connection finish
+            loop = asyncio.get_running_loop()
+
+            if hasattr(self.connection, "finish"):
+                await loop.run_in_executor(None, self.connection.finish)
+                logger.debug("Deepgram connection finished")
+
+            # Step 3: Context manager 종료
+            if self.context:
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.context.__exit__(None, None, None)
+                )
+                logger.debug("Context manager exited")
+
+            logger.info("STT session closed successfully")
+
+        except Exception as e:
+            logger.error(f"Error closing STT session: {e}", exc_info=True)
+
 
 class StreamingSTTManager:
     """스트리밍 STT 세션 관리 (SDK 5.3.0)"""
@@ -176,18 +289,10 @@ class StreamingSTTManager:
         """
         self.client = client or DeepgramClient(api_key=settings.deepgram_api_key)
         self._sessions: Dict[str, StreamingSTTSession] = {}
-        self._connections: Dict[str, Any] = {}  # 활성 V2SocketClient 연결 추적
-        self._listening_tasks: Dict[str, asyncio.Task] = {}  # recv() 반복 태스크
-        self._connection_contexts: Dict[str, Any] = {}  # context manager 추적
 
     async def create_session(self, session_id: str) -> StreamingSTTSession:
         """
-        스트리밍 세션 생성 (SDK 5.3.0: V2SocketClient)
-
-        ✅ SDK 5.3.0 특징:
-        - listen.v2.connect()는 동기 context manager (with 사용)
-        - V2SocketClient는 동기 WebSocket 클라이언트
-        - run_in_executor()로 asyncio와 통합
+        스트리밍 세션 생성 (SDK 5.3.0 v1 API)
 
         Args:
             session_id: 세션 ID
@@ -201,29 +306,22 @@ class StreamingSTTManager:
         loop = asyncio.get_running_loop()
 
         try:
-            # ✅ SDK 5.3.0: listen.v2.connect()는 동기 context manager
+            # ✅ SDK 5.3.0: listen.v1.connect()는 동기 context manager
             # executor에서 실행하여 asyncio 루프 블로킹 방지
-            connection = await loop.run_in_executor(
+            connection, context = await loop.run_in_executor(
                 None,
-                self._create_connection_sync,
-                session_id
+                self._create_connection_sync
             )
 
             if not connection:
                 raise RuntimeError("Failed to create WebSocket connection")
 
-            # 연결 저장
-            self._connections[session_id] = connection
-
             # 세션 생성
-            session = StreamingSTTSession(connection)
+            session = StreamingSTTSession(connection, context)
             self._sessions[session_id] = session
 
-            # ✅ 백그라운드에서 recv() 반복 시작
-            listening_task = asyncio.create_task(
-                self._listening_loop(session_id, connection)
-            )
-            self._listening_tasks[session_id] = listening_task
+            # ✅ 수신 루프 시작 (단일 recv 루프)
+            await session.start()
 
             logger.info(f"Streaming STT session created: {session_id}")
             return session
@@ -232,79 +330,34 @@ class StreamingSTTManager:
             logger.error(f"Failed to create streaming session: {e}", exc_info=True)
             raise
 
-    def _create_connection_sync(self, session_id: str) -> Any:
+    def _create_connection_sync(self) -> tuple:
         """
         동기 WebSocket 연결 생성 (executor에서 실행)
 
-        SDK 5.3.0의 listen.v2.connect()는 동기 context manager이므로,
+        SDK 5.3.0의 listen.v1.connect()는 동기 context manager이므로,
         executor 스레드에서 실행해야 함
+
+        Returns:
+            (connection, context) 튜플
         """
         try:
-            # ✅ SDK 5.3.0: 동기 context manager 사용
-            context = self.client.listen.v2.connect(
+            # ✅ SDK 5.3.0: v1 API 사용 (일반 STT용)
+            context = self.client.listen.v1.connect(
                 model=settings.DEEPGRAM_MODEL,
+                language=settings.DEEPGRAM_LANGUAGE,
                 encoding=settings.DEEPGRAM_ENCODING,
                 sample_rate=str(settings.DEEPGRAM_SAMPLE_RATE),
             )
 
-            # context manager 진입
+            # ✅ Context manager 진입하여 실제 connection 획득
             connection = context.__enter__()
 
-            # context를 나중에 종료할 수 있도록 저장
-            self._connection_contexts[session_id] = context
-
-            logger.debug(f"V2SocketClient created for session {session_id}")
-            return connection
+            logger.debug(f"V1SocketClient created")
+            return connection, context
 
         except Exception as e:
             logger.error(f"Failed to create WebSocket connection: {e}", exc_info=True)
             raise
-
-    async def _listening_loop(self, session_id: str, connection: Any) -> None:
-        """
-        백그라운드에서 메시지 수신 루프 (비동기)
-
-        Deepgram V2SocketClient의 recv()는 동기 함수이므로,
-        run_in_executor()를 사용하여 asyncio 루프를 블로킹하지 않음
-        """
-        loop = asyncio.get_running_loop()
-
-        try:
-            logger.debug(f"Starting listening loop for session {session_id}")
-
-            while session_id in self._sessions:
-                try:
-                    # ✅ recv()를 executor에서 실행하여 asyncio 루프 블로킹 방지
-                    # 최대 1초까지 기다림 (타임아웃)
-                    response = await asyncio.wait_for(
-                        loop.run_in_executor(None, connection.recv),
-                        timeout=1.0
-                    )
-
-                    if response:
-                        logger.debug(f"Received message: {type(response).__name__}")
-                        # 이벤트 핸들러가 비동기적으로 메시지 처리
-
-                except asyncio.TimeoutError:
-                    # 타임아웃은 정상 - recv()가 메시지 대기 중
-                    logger.debug(f"Listening timeout for session {session_id} (normal)")
-                    continue
-
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if any(x in error_str for x in ["connection", "closed", "eof", "reset"]):
-                        logger.debug(f"Connection closed for session {session_id}")
-                        break
-                    else:
-                        logger.warning(f"Error in listening loop: {e}")
-                        await asyncio.sleep(0.1)  # 에러 후 재시도
-
-        except asyncio.CancelledError:
-            logger.debug(f"Listening loop cancelled for session {session_id}")
-        except Exception as e:
-            logger.error(f"Listening loop error for session {session_id}: {e}", exc_info=True)
-        finally:
-            logger.debug(f"Listening loop ended for session {session_id}")
 
     async def process_chunk(
         self, session_id: str, chunk: bytes
@@ -345,22 +398,12 @@ class StreamingSTTManager:
             최종 인식 결과
         """
         session = self._sessions.pop(session_id, None)
-        connection = self._connections.pop(session_id, None)
-        listening_task = self._listening_tasks.pop(session_id, None)
 
         if not session:
             logger.warning(f"Session not found for finalization: {session_id}")
             return ""
 
         try:
-            # 수신 루프 종료
-            if listening_task and not listening_task.done():
-                listening_task.cancel()
-                try:
-                    await listening_task
-                except asyncio.CancelledError:
-                    pass
-
             # 최종 결과 대기
             result = await session.finalize()
             logger.info(f"Session finalized: {session_id}")
@@ -371,22 +414,11 @@ class StreamingSTTManager:
             return ""
 
         finally:
-            # 연결 정리
-            loop = asyncio.get_running_loop()
-            if connection or session_id in self._connection_contexts:
-                try:
-                    # Context manager 정리
-                    context = self._connection_contexts.pop(session_id, None)
-                    if context:
-                        await loop.run_in_executor(
-                            None,
-                            lambda: context.__exit__(None, None, None)
-                        )
-                    elif connection and hasattr(connection, 'finish'):
-                        connection.finish()
-                    logger.info(f"Connection closed: {session_id}")
-                except Exception as e:
-                    logger.warning(f"Error closing connection: {e}")
+            # ✅ 세션 정리 (reader loop + connection close)
+            try:
+                await session.close()
+            except Exception as e:
+                logger.warning(f"Error closing session: {e}")
 
     async def cleanup(self, session_id: str) -> None:
         """
@@ -396,20 +428,10 @@ class StreamingSTTManager:
             session_id: 세션 ID
         """
         session = self._sessions.pop(session_id, None)
-        connection = self._connections.pop(session_id, None)
-        listening_task = self._listening_tasks.pop(session_id, None)
 
-        if listening_task and not listening_task.done():
-            listening_task.cancel()
+        if session:
             try:
-                await listening_task
-            except asyncio.CancelledError:
-                pass
-
-        if connection:
-            try:
-                if hasattr(connection, 'finish'):
-                    connection.finish()
-                logger.info(f"Connection closed: {session_id}")
+                await session.close()
+                logger.info(f"Session cleaned up: {session_id}")
             except Exception as e:
-                logger.warning(f"Error closing connection: {e}")
+                logger.warning(f"Error cleaning up session: {e}")

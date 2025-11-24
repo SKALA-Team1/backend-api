@@ -41,7 +41,7 @@ async def setup_test_session(session_id: str) -> str:
 async def test_with_microphone():
   """실제 마이크 입력으로 WebSocket 테스트"""
 
-  session_id = str(uuid4())
+  session_id = "test-session-001"
 
   # Redis에 세션 생성
   await setup_test_session(session_id)
