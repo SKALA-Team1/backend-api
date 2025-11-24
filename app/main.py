@@ -17,6 +17,52 @@ setup_logging()
 
 
 # ========================================
+# Ollama Warmup
+# ========================================
+
+
+async def warmup_ollama() -> None:
+    """
+    Ollama 모델을 미리 로드하여 콜드 스타트 방지
+
+    목표:
+    - 첫 요청 시 모델 로딩 지연(2-3초) 방지
+    - 클라이언트가 타임아웃하지 않도록 사전에 모델 준비
+    """
+    try:
+        from app.config import settings
+        import ollama
+        import asyncio
+
+        logger.info("🔥 Starting Ollama model warmup...")
+        start_time = asyncio.get_running_loop().time()
+
+        # 간단한 프롬프트로 모델 로드
+        # (실제 응답은 필요 없고, 메모리 로드만 필요)
+        response = ollama.chat(
+            model=settings.OLLAMA_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Say 'ready' in one word."
+                }
+            ],
+            stream=False
+        )
+
+        elapsed = asyncio.get_running_loop().time() - start_time
+        logger.info(
+            f"✅ Ollama warmup complete in {elapsed:.2f}s "
+            f"(model={settings.OLLAMA_MODEL})"
+        )
+
+    except Exception as e:
+        logger.warning(
+            f"⚠️  Ollama warmup failed (will retry on first request): {e}"
+        )
+
+
+# ========================================
 # FastAPI Lifespan Handler
 # ========================================
 
@@ -47,6 +93,14 @@ async def lifespan(app: FastAPI):
         logger.info("Spring 2 client initialized")
     except Exception as e:
         logger.warning(f"Failed to initialize Spring 2 client: {e}")
+
+    # ========================================
+    # Ollama 모델 워밍업 (콜드 스타트 방지)
+    # ========================================
+    try:
+        await warmup_ollama()
+    except Exception as e:
+        logger.warning(f"Ollama warmup failed (non-fatal): {e}")
 
     logger.info("FastAPI application startup complete")
 

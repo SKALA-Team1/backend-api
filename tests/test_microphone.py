@@ -72,13 +72,21 @@ async def test_with_microphone():
       print("\n📤 INIT 메시지 전송...")
       await websocket.send(json.dumps(init_msg))
 
-      # ACK 수신
-      response = await websocket.recv()
-      print(f"📥 응답: {response}")
+      # ACK 수신 (타임아웃: 3초)
+      try:
+          response = await asyncio.wait_for(websocket.recv(), timeout=3.0)
+          print(f"📥 응답: {response}")
+      except asyncio.TimeoutError:
+          print("❌ ACK 수신 타임아웃 (3초)")
+          return
 
-      # Step 2: AI 첫 질문 수신
-      ai_question = await websocket.recv()
-      print(f"🤖 AI 질문: {ai_question}")
+      # Step 2: AI 첫 질문 수신 (타임아웃: 3초)
+      try:
+          ai_question = await asyncio.wait_for(websocket.recv(), timeout=3.0)
+          print(f"🤖 AI 질문: {ai_question}")
+      except asyncio.TimeoutError:
+          print("❌ AI 질문 수신 타임아웃 (3초)")
+          return
 
       # Step 3: 마이크 입력 준비
       print("\n🎤 마이크를 통해 답변하세요 (5초 동안 녹음)...")
@@ -124,15 +132,26 @@ async def test_with_microphone():
           utterance_end = {"type": "UTTERANCE_END"}
           await websocket.send(json.dumps(utterance_end))
 
-          # STT 결과 수신
+          # STT 결과 수신 (타임아웃: 5초 - STT 처리 시간 포함)
           print("\n⏳ STT 결과 대기 중...")
-          stt_result = await websocket.recv()
-          print(f"🎯 STT 결과: {stt_result}")
+          try:
+              stt_result = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+              print(f"🎯 STT 결과: {stt_result}")
+          except asyncio.TimeoutError:
+              print("❌ STT 결과 수신 타임아웃 (5초)")
+              return
 
-          # AI 응답 수신
-          print("\n⏳ AI 응답 대기 중...")
-          ai_response = await websocket.recv()
-          print(f"🤖 AI 응답: {ai_response}")
+          # AI 응답 수신 (타임아웃: 10초 - 모델 생성 시간 포함)
+          # 첫 AI 응답: 3초 (모델 워밍업됨)
+          # 콜드 스타트: 5초 (모델 로딩 + 생성)
+          # 여유있게: 10초
+          print("\n⏳ AI 응답 대기 중 (최대 10초)...")
+          try:
+              ai_response = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+              print(f"🤖 AI 응답: {ai_response}")
+          except asyncio.TimeoutError:
+              print("❌ AI 응답 수신 타임아웃 (10초)")
+              return
 
           stream.stop_stream()
           stream.close()
