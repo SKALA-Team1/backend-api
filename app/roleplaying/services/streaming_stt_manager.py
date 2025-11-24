@@ -1,24 +1,26 @@
 """
-스트리밍 STT 관리자 (Deepgram SDK 3.x+)
-===============================================
+스트리밍 STT 관리자 (Deepgram SDK 5.3.0 V2SocketClient)
+================================================================
 
 역할:
-- Deepgram WebSocket 세션 관리 (SDK 3.x+ API)
+- Deepgram WebSocket 세션 관리 (SDK 5.3.0 API)
 - 실시간 부분 결과 수신
 - 세션 초기화/종료
 
-Deepgram SDK 3.x+ 변경사항:
-- listen.v2.connect() 사용 (AsyncLiveConnection 반환)
-- 이벤트 기반 메시지 처리 (EventType.MESSAGE 등)
-- 모든 메서드가 async/await 기반
+Deepgram SDK 5.3.0 특징:
+- listen.v2.connect() 반환: V2SocketClient (Iterator 기반)
+- recv() 비동기 호출로 메시지 수신
+- send_media()로 오디오 청크 전송
+- 이벤트 핸들러 기반 처리 (on() 메서드)
 """
 
 import asyncio
-import json
 import logging
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, Dict, Optional
 
 from deepgram import DeepgramClient
+from deepgram.extensions.types.sockets.listen_v2_media_message import ListenV2MediaMessage
+from deepgram.core.events import EventType
 
 from app.config import settings
 
@@ -28,12 +30,12 @@ __all__ = ["StreamingSTTSession", "StreamingSTTManager"]
 
 
 class StreamingSTTSession:
-    """Deepgram WebSocket 스트리밍 세션 (SDK 3.x - 이벤트 기반)"""
+    """Deepgram WebSocket 스트리밍 세션 (SDK 5.3.0 V2SocketClient)"""
 
     def __init__(self, connection: Any):
         """
         Args:
-            connection: Deepgram AsyncLiveConnection (SDK 3.x)
+            connection: Deepgram V2SocketClient (SDK 5.3.0)
         """
         self.connection = connection
         self.transcript_buffer = ""
@@ -42,19 +44,17 @@ class StreamingSTTSession:
         self._setup_event_handlers()
 
     def _setup_event_handlers(self) -> None:
-        """SDK 3.x 이벤트 핸들러 설정"""
+        """SDK 5.3.0 이벤트 핸들러 설정"""
         try:
-            from deepgram.core.events import EventType
-
-            # ✅ SDK 3.x: 이벤트 기반 메시지 처리
+            # ✅ SDK 5.3.0: 이벤트 기반 메시지 처리
             self.connection.on(EventType.OPEN, self._on_open)
             self.connection.on(EventType.MESSAGE, self._on_message)
             self.connection.on(EventType.CLOSE, self._on_close)
             self.connection.on(EventType.ERROR, self._on_error)
 
             logger.debug("Event handlers registered for streaming session")
-        except ImportError:
-            logger.warning("deepgram.core.events.EventType not available, will use fallback")
+        except Exception as e:
+            logger.warning(f"Failed to register event handlers: {e}")
 
     def _on_open(self, open_msg: Any) -> None:
         """WebSocket 연결 열림"""
@@ -63,34 +63,32 @@ class StreamingSTTSession:
     def _on_message(self, message: Any) -> None:
         """메시지 수신 핸들러 (이벤트 기반)"""
         try:
-            # 메시지가 객체일 수도, 문자열일 수도 있음
+            # Deepgram V2SocketClient 메시지 처리
             if hasattr(message, 'raw'):
-                # SDK 3.x LiveMessage 객체
-                data = json.loads(message.raw) if isinstance(message.raw, str) else message.raw
-            elif isinstance(message, str):
-                data = json.loads(message)
+                # ListenV2ConnectedEvent, ListenV2TurnInfoEvent 등의 raw 필드
+                data = message.raw
             else:
-                data = message if isinstance(message, dict) else {}
+                data = message
 
-            # 부분 결과 추출
-            if "result" in data:
-                results = data.get("result", {}).get("results", [])
-                if results and len(results) > 0:
-                    transcript = results[0].get("transcript", "")
+            # 트랜스크립트 추출
+            if hasattr(data, 'channel') and hasattr(data.channel, 'alternatives'):
+                alternatives = data.channel.alternatives
+                if alternatives and len(alternatives) > 0:
+                    transcript = alternatives[0].transcript if hasattr(alternatives[0], 'transcript') else ""
                     if transcript:
                         self.transcript_buffer = transcript
                         logger.debug(f"STT partial: {transcript}")
-                        # 큐에 추가 (비동기 처리용)
                         try:
                             self.message_queue.put_nowait(("partial", transcript))
                         except asyncio.QueueFull:
                             pass
 
-            # 최종 결과 표시
-            if data.get("is_final"):
+            # 최종 결과 확인
+            if hasattr(data, 'is_final') and data.is_final:
                 self.is_finalized = True
+                logger.debug("STT result finalized")
 
-        except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as e:
+        except Exception as e:
             logger.debug(f"Could not parse streaming response: {e}")
 
     def _on_close(self, close_msg: Any) -> None:
@@ -106,8 +104,9 @@ class StreamingSTTSession:
     async def send_chunk(self, audio_chunk: bytes) -> None:
         """오디오 청크 전송 (비동기)"""
         try:
-            # ✅ SDK 3.x: send()는 비동기
-            await self.connection.send(audio_chunk)
+            # ✅ SDK 5.3.0: send_media() 사용
+            media_message = ListenV2MediaMessage(data=audio_chunk)
+            self.connection.send_media(media_message)
             logger.debug(f"Audio chunk sent: {len(audio_chunk)} bytes")
         except Exception as e:
             logger.error(f"Failed to send audio chunk: {e}", exc_info=True)
@@ -139,10 +138,7 @@ class StreamingSTTSession:
     async def finalize(self) -> str:
         """스트리밍 종료 및 최종 결과 반환"""
         try:
-            # ✅ SDK 3.x: finish()는 비동기
-            await self.connection.finish()
-
-            # 최종 결과 대기 (타임아웃 5초)
+            # ✅ SDK 5.3.0: 마지막 메시지 수신 (최종 결과)
             timeout = 5.0
             loop = asyncio.get_running_loop()
             start_time = loop.time()
@@ -154,24 +150,12 @@ class StreamingSTTSession:
                         logger.warning(f"Timeout waiting for finalized result after {timeout}s")
                         break
 
-                    # ✅ SDK 3.x: recv()는 비동기
-                    response = await asyncio.wait_for(
-                        self.connection.recv(),
-                        timeout=timeout - elapsed
-                    )
-
-                    if isinstance(response, str):
-                        data = json.loads(response)
-                    else:
-                        data = response
-
-                    if data.get("is_final"):
-                        self.is_finalized = True
+                    # ✅ SDK 5.3.0: recv()는 동기 (블로킹)이지만 asyncio 루프에서 실행
+                    # 이를 피하기 위해 작은 타임아웃으로 poll
+                    await asyncio.sleep(0.1)
 
                 except asyncio.TimeoutError:
                     logger.debug("Timeout waiting for final result")
-                    break
-                except (json.JSONDecodeError, StopIteration, TypeError):
                     break
 
             logger.info(f"STT finalized: {self.transcript_buffer}")
@@ -183,7 +167,7 @@ class StreamingSTTSession:
 
 
 class StreamingSTTManager:
-    """스트리밍 STT 세션 관리 (SDK 3.x)"""
+    """스트리밍 STT 세션 관리 (SDK 5.3.0)"""
 
     def __init__(self, client: Optional[DeepgramClient] = None):
         """
@@ -192,16 +176,18 @@ class StreamingSTTManager:
         """
         self.client = client or DeepgramClient(api_key=settings.deepgram_api_key)
         self._sessions: Dict[str, StreamingSTTSession] = {}
-        self._connections: Dict[str, Any] = {}  # 활성 WebSocket 연결 추적
+        self._connections: Dict[str, Any] = {}  # 활성 V2SocketClient 연결 추적
+        self._listening_tasks: Dict[str, asyncio.Task] = {}  # recv() 반복 태스크
 
     async def create_session(self, session_id: str) -> StreamingSTTSession:
         """
-        스트리밍 세션 생성 (SDK 3.x+: AsyncLiveConnection)
+        스트리밍 세션 생성 (SDK 5.3.0: V2SocketClient)
 
-        ✅ SDK 3.x+ 변경:
-        - listen.v2.connect()를 사용하여 WebSocket 연결 생성
-        - async context manager 또는 수동으로 .start()/.stop() 호출
-        - 이벤트 기반 메시지 처리
+        ✅ SDK 5.3.0 특징:
+        - listen.v2.connect()는 Iterator를 반환
+        - next(iterator)를 호출하여 V2SocketClient를 획득
+        - start_listening()으로 수신 대기 시작
+        - send_media()로 오디오 전송
 
         Args:
             session_id: 세션 ID
@@ -213,22 +199,31 @@ class StreamingSTTManager:
             Exception: 세션 생성 실패 시
         """
         try:
-            # ✅ SDK 3.x+: listen.v2.connect()로 WebSocket 연결 생성
-            # async context manager 사용 (자동으로 cleanup 처리)
-            connection = await self.client.listen.v2.connect(
+            # ✅ SDK 5.3.0: listen.v2.connect()는 Iterator 반환
+            connection_iterator = self.client.listen.v2.connect(
                 model=settings.DEEPGRAM_MODEL,
-                language=settings.DEEPGRAM_LANGUAGE,
-                smart_format=settings.DEEPGRAM_SMART_FORMAT,
                 encoding=settings.DEEPGRAM_ENCODING,
                 sample_rate=settings.DEEPGRAM_SAMPLE_RATE,
-                interim_results=settings.DEEPGRAM_INTERIM_RESULTS,
             )
 
-            # 연결 저장 (cleanup 시 필요)
+            # Iterator에서 V2SocketClient 획득
+            connection = next(connection_iterator)
+            logger.debug(f"V2SocketClient obtained for session {session_id}")
+
+            # 연결 저장
             self._connections[session_id] = connection
 
+            # 세션 생성
             session = StreamingSTTSession(connection)
             self._sessions[session_id] = session
+
+            # ✅ 백그라운드에서 recv() 반복 시작
+            # V2SocketClient는 non-blocking recv()를 제공하지 않으므로
+            # 별도 태스크에서 recv()를 호출하고 이벤트 발생
+            listening_task = asyncio.create_task(
+                self._listening_loop(session_id, connection)
+            )
+            self._listening_tasks[session_id] = listening_task
 
             logger.info(f"Streaming STT session created: {session_id}")
             return session
@@ -236,6 +231,42 @@ class StreamingSTTManager:
         except Exception as e:
             logger.error(f"Failed to create streaming session: {e}", exc_info=True)
             raise
+
+    async def _listening_loop(self, session_id: str, connection: Any) -> None:
+        """
+        백그라운드에서 메시지 수신 루프 (비동기)
+
+        Deepgram V2SocketClient의 recv()는 동기 함수이지만,
+        asyncio 루프를 블로킹하지 않기 위해 별도 태스크에서 실행
+        """
+        try:
+            logger.debug(f"Starting listening loop for session {session_id}")
+
+            while session_id in self._sessions:
+                try:
+                    # recv()는 동기 함수이지만 이벤트로 메시지 전달됨
+                    response = connection.recv()
+
+                    if response:
+                        logger.debug(f"Received message: {type(response).__name__}")
+
+                    # 이벤트 핸들러가 메시지 처리
+                    await asyncio.sleep(0)  # 다른 태스크에 기회 제공
+
+                except Exception as e:
+                    if "Connection" in str(e) or "closed" in str(e).lower():
+                        logger.debug(f"Connection closed for session {session_id}")
+                        break
+                    else:
+                        logger.warning(f"Error in listening loop: {e}")
+                        await asyncio.sleep(0.1)  # 에러 후 재시도
+
+        except asyncio.CancelledError:
+            logger.debug(f"Listening loop cancelled for session {session_id}")
+        except Exception as e:
+            logger.error(f"Listening loop error for session {session_id}: {e}", exc_info=True)
+        finally:
+            logger.debug(f"Listening loop ended for session {session_id}")
 
     async def process_chunk(
         self, session_id: str, chunk: bytes
@@ -277,12 +308,22 @@ class StreamingSTTManager:
         """
         session = self._sessions.pop(session_id, None)
         connection = self._connections.pop(session_id, None)
+        listening_task = self._listening_tasks.pop(session_id, None)
 
         if not session:
             logger.warning(f"Session not found for finalization: {session_id}")
             return ""
 
         try:
+            # 수신 루프 종료
+            if listening_task and not listening_task.done():
+                listening_task.cancel()
+                try:
+                    await listening_task
+                except asyncio.CancelledError:
+                    pass
+
+            # 최종 결과 대기
             result = await session.finalize()
             logger.info(f"Session finalized: {session_id}")
             return result
@@ -295,7 +336,10 @@ class StreamingSTTManager:
             # 연결 정리
             if connection:
                 try:
-                    await connection.aclose()
+                    # V2SocketClient는 finish() 메서드 제공
+                    if hasattr(connection, 'finish'):
+                        connection.finish()
+                    logger.info(f"Connection closed: {session_id}")
                 except Exception as e:
                     logger.warning(f"Error closing connection: {e}")
 
@@ -308,10 +352,19 @@ class StreamingSTTManager:
         """
         session = self._sessions.pop(session_id, None)
         connection = self._connections.pop(session_id, None)
+        listening_task = self._listening_tasks.pop(session_id, None)
+
+        if listening_task and not listening_task.done():
+            listening_task.cancel()
+            try:
+                await listening_task
+            except asyncio.CancelledError:
+                pass
 
         if connection:
             try:
-                await connection.aclose()
+                if hasattr(connection, 'finish'):
+                    connection.finish()
                 logger.info(f"Connection closed: {session_id}")
             except Exception as e:
                 logger.warning(f"Error closing connection: {e}")
