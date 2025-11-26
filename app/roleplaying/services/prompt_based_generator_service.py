@@ -23,6 +23,7 @@ from sqlalchemy import text
 
 from app.roleplaying.services.llm_service import LLMService
 from app.roleplaying.schemas import ScenarioInfoDto
+from app.roleplaying.services.title_utils import compact_title
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,14 @@ class PromptBasedScenarioService:
         title = await self.llm_service.generate_title_for_prompt(
             situation=concrete_situation,
             ai_role=ai_role,
-            topic_type="direct"
+            topic_type="direct",
+            my_role=my_role
+        )
+        title = compact_title(
+            raw_title=title,
+            banned_phrases=[ai_role, my_role],
+            fallback="Direct Dialogue Focus",
+            max_length=50
         )
         logger.debug(f"Generated title: {title}")
 
