@@ -135,17 +135,6 @@ class LLMService:
             "QA Engineer": "testing strategy, quality assurance, edge cases"
         }
 
-        role_localized = {
-            "Project Manager": "Project Manager",
-            "Tech Lead": "Tech Lead",
-            "QA Engineer": "QA Engineer"
-        }
-
-        topic_localized = {
-            "overview": "Overview",
-            "detail": "Detail"
-        }
-
         prompt = f"""Create an English conversation practice scenario.
 
                 Context:
@@ -158,7 +147,7 @@ class LLMService:
                 - {topic_instructions.get(topic_type, '')}
 
                 Generate:
-                1. A descriptive title for this scenario (max 200 characters)
+                1. A compact English title for this scenario (max 50 characters) that does NOT mention the user's role ("{my_role}") or the AI role ("{ai_role}"). Focus the wording only on the situation/topic.
                 2. Exactly 3 questions that the {ai_role} would naturally ask in this conversation
 
                 IMPORTANT: You MUST provide exactly 3 questions. Not 2, not 4, but exactly 3.
@@ -169,16 +158,9 @@ class LLMService:
                   - overview: broad, high-level questions
                   - detail: specific, technical questions
                 - Help the user practice professional English conversation
-                - Craft a distinctive title that:
-                  - Names the {ai_role}'s perspective explicitly
-                  - Highlights a concrete aspect of "{situation}" (specific metric, component, risk, or KPI)
-                  - Signals whether this is an overview vs detail conversation
-                  - Avoids generic phrases like "Discussion" or "Deep Dive" unless paired with unique detail
-                  - Sounds like a real meeting agenda item, not a template
                 - Language requirements:
-                  - Provide the title in English.
-                  - If you add any extra descriptive fields, they must also be written in English
-                  - The three fixedQuestions must remain in English to let the learner practice English speaking
+                  - Provide the title in English only.
+                  - Keep every question in English and make them concise but natural.
 
                 Return ONLY valid JSON format:
                 {{
@@ -214,12 +196,11 @@ class LLMService:
 
             # title 정리 (Unicode 문제 방지)
             if not title:
-                localized_role = role_localized.get(ai_role, "AI Partner")
-                depth_label = topic_localized.get(topic_type, "Discussion")
-                title = f"{localized_role} {depth_label} Discussion"
+                fallback_title = "Key Discussion Points" if topic_type == "overview" else "Focused Detail Review"
+                title = fallback_title
 
             # title을 안전하게 처리
-            title = str(title).strip()[:200]
+            title = str(title).strip()[:50]
 
             return {
                 "title": title,
@@ -229,11 +210,8 @@ class LLMService:
         except (json.JSONDecodeError, KeyError, Exception) as e:
             logger.error(f"Failed to generate scenario for {ai_role}/{topic_type}: {e}")
             # 기본값 반환
-            localized_role = role_localized.get(ai_role, "AI Partner")
-            depth_label = topic_localized.get(topic_type, "Discussion")
-
             return {
-                "title": f"{localized_role} {depth_label} Discussion",
+                "title": "Key Discussion Points" if topic_type == "overview" else "Focused Detail Review",
                 "fixedQuestions": [
                     f"What's your perspective on this as a {my_role}?",
                     "Can you elaborate on that?",
@@ -666,7 +644,8 @@ Response: Return only the enhanced situation description (no other text)"""
         self,
         situation: str,
         ai_role: str,
-        topic_type: str
+        topic_type: str,
+        my_role: str
     ) -> str:
         """
         시나리오 제목을 생성합니다.
@@ -675,9 +654,10 @@ Response: Return only the enhanced situation description (no other text)"""
             situation: 구체화된 상황
             ai_role: AI의 역할
             topic_type: 토픽 타입 (direct, overview, detail)
+            my_role: 사용자의 역할 (제거 대상)
 
         Returns:
-            생성된 시나리오 제목 (최대 100자)
+            생성된 시나리오 제목 (최대 50자)
         """
         prompt = f"""You are creating an engaging title for an English roleplay scenario.
 
@@ -685,16 +665,13 @@ Situation: {situation}
 AI role: {ai_role}
 Topic type: {topic_type}
 
-Based on the above information, generate an attractive and clear title (max 100 characters) that:
-- Names the {ai_role}'s perspective explicitly
-- Highlights the key aspect of the situation
-- Is professional and sounds like a real meeting agenda item
+Generate a concise English title (max 50 characters) that:
+- Focuses only on the situation/topic details
+- Does NOT mention the user's role ("{my_role}") or the AI role ("{ai_role}")
+- Sounds like a real meeting agenda item
+- Uses only English words
 
-Examples:
-- Project Manager Deep Dive: Negotiating Project Timeline Adjustments
-- Tech Lead Perspective: Architecture Design Review and Decision Making
-
-Response: Return only the title without any quotes or special formatting (no other text)"""
+Response: Return only the title without any quotes or special formatting (no other text)."""
 
         try:
             response = ollama.chat(
@@ -716,8 +693,8 @@ Response: Return only the title without any quotes or special formatting (no oth
             title = title.strip('"\'')
 
             # 길이 제한
-            if len(title) > 200:
-                title = title[:197] + "..."
+            if len(title) > 50:
+                title = title[:50].rstrip()
 
             return title
 
