@@ -588,3 +588,233 @@ class LLMService:
                 "How do you plan to proceed with this?"
             ]
             return default[:count]
+
+    async def enhance_situation_from_prompt(
+        self,
+        user_input: str,
+        my_role: str,
+        ai_role: str,
+        context: List[Dict[str, Any]] = None
+    ) -> str:
+        """
+        사용자 입력으로부터 구체화된 상황을 생성합니다.
+
+        Args:
+            user_input: 사용자가 입력한 상황 (추상적)
+            my_role: 사용자의 역할
+            ai_role: AI의 역할
+            context: 과거 시나리오 컨텍스트
+
+        Returns:
+            구체화된 상황 설명 (1-2문장)
+        """
+        context_text = ""
+        if context:
+            context_text = "\n[User's past scenarios context]\n"
+            for idx, ctx in enumerate(context[:3], 1):
+                situation = ctx.get("situation", "")
+                context_text += f"{idx}. {situation}\n"
+
+        prompt = f"""You are an expert at creating detailed business scenarios for English practice in IT companies.
+Consider the terminology and conversations used in IT companies when creating roleplay scenarios.
+Note: Since this is real-time roleplay, please ensure questions are concise and not overly lengthy.
+
+User's role: {my_role}
+AI's role: {ai_role}
+Situation provided by user: {user_input}
+
+{context_text}
+
+Based on the above information, please:
+1. Expand the user's abstract input into a concrete business situation
+2. Clarify the relationship and goals between {my_role} and {ai_role}
+3. Write a 1-2 sentence situation description
+
+Example format:
+"{my_role} discussing {{detail}} related to project with {ai_role} for {{objective}}"
+
+Response: Return only the enhanced situation description (no other text)"""
+
+        try:
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'You are an expert at creating detailed business scenarios for English practice.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ]
+            )
+            situation = response['message']['content'].strip()
+
+            # 너무 길면 자르기
+            sentences = situation.split('.')
+            if len(sentences) > 2:
+                situation = '. '.join(sentences[:2]) + '.'
+
+            return situation
+
+        except Exception as error:
+            logger.error(f"Failed to enhance situation: {error}")
+            raise
+
+    async def generate_title_for_prompt(
+        self,
+        situation: str,
+        ai_role: str,
+        topic_type: str
+    ) -> str:
+        """
+        시나리오 제목을 생성합니다.
+
+        Args:
+            situation: 구체화된 상황
+            ai_role: AI의 역할
+            topic_type: 토픽 타입 (direct, overview, detail)
+
+        Returns:
+            생성된 시나리오 제목 (최대 100자)
+        """
+        prompt = f"""You are creating an engaging title for an English roleplay scenario.
+
+Situation: {situation}
+AI role: {ai_role}
+Topic type: {topic_type}
+
+Based on the above information, generate an attractive and clear title (max 100 characters) that:
+- Names the {ai_role}'s perspective explicitly
+- Highlights the key aspect of the situation
+- Is professional and sounds like a real meeting agenda item
+
+Examples:
+- Project Manager Deep Dive: Negotiating Project Timeline Adjustments
+- Tech Lead Perspective: Architecture Design Review and Decision Making
+
+Response: Return only the title without any quotes or special formatting (no other text)"""
+
+        try:
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'You are an expert at creating engaging titles for roleplay scenarios. Always return the title without quotes or asterisks.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ]
+            )
+            title = response['message']['content'].strip()
+
+            # 따옴표 제거
+            title = title.strip('"\'')
+
+            # 길이 제한
+            if len(title) > 200:
+                title = title[:197] + "..."
+
+            return title
+
+        except Exception as error:
+            logger.error(f"Failed to generate title: {error}")
+            raise
+
+    async def generate_fixed_questions_for_prompt(
+        self,
+        situation: str,
+        my_role: str,
+        ai_role: str
+    ) -> List[str]:
+        """
+        프롬프트 기반 시나리오용 고정 질문을 생성합니다. (정확히 3개)
+
+        Slack 기반과 동일한 역할의 질문:
+        - Question 1 (Turn 1): Conversation Starter
+        - Question 2 (Turn 5): Transition & Deepening
+        - Question 3 (Turn 10): Wrap-up & Closure
+
+        Args:
+            situation: 구체화된 상황
+            my_role: 사용자의 역할
+            ai_role: AI의 역할
+
+        Returns:
+            정확히 3개의 고정 질문
+
+        Raises:
+            ValueError: 질문 생성 실패
+        """
+        prompt = f"""You are creating fixed questions for an English roleplay scenario.
+
+Situation: {situation}
+User's role: {my_role}
+AI's role: {ai_role}
+
+Generate exactly 3 DIFFERENT questions that {ai_role} would naturally ask {my_role} in this situation.
+
+IMPORTANT - Each question must have a SPECIFIC ROLE:
+
+Question 1 (Turn 1 - Conversation Starter):
+- Start the conversation naturally with a greeting or introduction
+- Ask an opening question to set the context and build rapport
+
+Question 2 (Turn 5 - Transition & Deepening):
+- Transition to a deeper or different aspect of the topic
+- Shift focus to more specific or technical details related to the situation
+
+Question 3 (Turn 10 - Wrap-up & Closure):
+- Ask about next steps, action items, or how to move forward
+- Provide closure to the conversation
+
+Requirements:
+- Each question must match its designated role and turn number
+- Create ORIGINAL questions specific to this situation, not generic questions
+- Reflect both {my_role} and {ai_role} perspectives
+- Avoid yes/no questions
+- Use professional, natural English
+
+Return ONLY a JSON array of exactly 3 question strings in this format:
+["question 1 text", "question 2 text", "question 3 text"]"""
+
+        try:
+            response = ollama.chat(
+                model=self.model_name,
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': 'Always respond with a JSON array of exactly 3 English questions.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                format='json'
+            )
+            response_text = response['message']['content']
+            questions = json.loads(response_text)
+
+            if isinstance(questions, dict) and 'questions' in questions:
+                questions = questions['questions']
+            elif not isinstance(questions, list):
+                raise ValueError("Expected a JSON array of strings.")
+
+            normalized: List[str] = []
+            for question in questions:
+                if isinstance(question, str):
+                    normalized.append(question.strip())
+
+            if len(normalized) != 3:
+                raise ValueError(f"Expected 3 questions, got {len(normalized)}")
+
+            return normalized
+
+        except Exception as error:
+            logger.error(f"Failed to generate fixed questions for prompt: {error}")
+            raise
