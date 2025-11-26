@@ -10,3 +10,11 @@ router = APIRouter()
 @router.get("/health/ping")
 async def ping():
     return {"status": "ok"}
+
+
+@router.get("/health", include_in_schema=False)
+async def root_health():
+    """
+    Backward-compatible endpoint for legacy clients hitting GET /health.
+    """
+    return await ping()
