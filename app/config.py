@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     deepgram_api_key: Optional[str] = Field(default=None, alias="DEEPGRAM_API_KEY")
 
     # -------------------------------------
+    # Azure Speech Service
+    # -------------------------------------
+    azure_speech_key: Optional[str] = Field(default=None, alias="AZURE_SPEECH_KEY")
+    azure_speech_region: str = Field("koreacentral", alias="AZURE_SPEECH_REGION")
+
+    # -------------------------------------
     # Redis
     # -------------------------------------
     REDIS_URL: str = Field("redis://localhost:6379/0", alias="REDIS_URL")

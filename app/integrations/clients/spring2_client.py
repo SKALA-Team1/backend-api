@@ -294,6 +294,176 @@ class Spring2Client:
             logger.error(f"Session completion error: {e}", exc_info=True)
             raise
 
+    async def save_turn_feedback(
+        self,
+        session_id: int,
+        scenario_id: int,
+        turn_number: int,
+        user_message: str,
+        system_message: str,
+        accuracy_score: float,
+        accuracy_level: str,
+        fluency_score: float,
+        fluency_level: str,
+        completeness_score: float,
+        completeness_level: str,
+        pronunciation_score: float,
+        pronunciation_level: str,
+        overall_feedback: str,
+        suggested_sentence: str,
+        grammar_notes: list[str] = None,
+        vocabulary_suggestions: list[dict] = None,
+        evaluation_json: str = None,
+    ) -> dict:
+        """
+        턴 피드백 저장 API 호출
+
+        FastAPI에서 생성한 피드백을 Spring으로 전송하여 DB에 저장
+
+        Args:
+            session_id: 세션 ID
+            scenario_id: 시나리오 ID
+            turn_number: 턴 번호
+            user_message: 사용자 발화
+            system_message: AI 발화
+            accuracy_score: 정확도 점수
+            accuracy_level: 정확도 레벨
+            fluency_score: 유창성 점수
+            fluency_level: 유창성 레벨
+            completeness_score: 완성도 점수
+            completeness_level: 완성도 레벨
+            pronunciation_score: 발음 점수
+            pronunciation_level: 발음 레벨
+            overall_feedback: 종합 피드백
+            suggested_sentence: 추천 문장
+            grammar_notes: 문법 지적 사항
+            vocabulary_suggestions: 어휘 제안
+
+        Returns:
+            API 응답
+        """
+        url = "/internal/feedback/turn"
+
+        payload = {
+            "sessionId": session_id,
+            "scenarioId": scenario_id,
+            "turnNumber": turn_number,
+            "userMessage": user_message,
+            "systemMessage": system_message,
+            "accuracy": {
+                "score": accuracy_score,
+                "level": accuracy_level
+            },
+            "fluency": {
+                "score": fluency_score,
+                "level": fluency_level
+            },
+            "completeness": {
+                "score": completeness_score,
+                "level": completeness_level
+            },
+            "pronunciation": {
+                "score": pronunciation_score,
+                "level": pronunciation_level
+            },
+            "overallFeedback": overall_feedback,
+            "suggestedSentence": suggested_sentence,
+            "grammarNotes": grammar_notes or [],
+            "vocabularySuggestions": vocabulary_suggestions or [],
+            "evaluationJson": evaluation_json,
+        }
+
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"Turn feedback saved: session={session_id}, turn={turn_number}"
+            )
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to save turn feedback: session={session_id}, turn={turn_number}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Turn feedback save error: {e}", exc_info=True)
+            raise
+
+    async def get_session_feedbacks(self, session_id: int) -> list[dict]:
+        """
+        세션의 모든 턴 피드백 조회
+
+        Args:
+            session_id: 세션 ID
+
+        Returns:
+            턴 피드백 목록
+        """
+        url = f"/internal/feedback/session/{session_id}"
+
+        try:
+            client = await self._get_client()
+            response = await client.get(url)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(f"Session feedbacks retrieved: session={session_id}")
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to get session feedbacks: session={session_id}, "
+                f"status={e.response.status_code}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Session feedbacks retrieval error: {e}", exc_info=True)
+            raise
+
+    async def get_session_messages(self, session_id: str) -> list[dict]:
+        """
+        세션의 모든 메시지 조회
+
+        scenario_message 테이블에서 해당 세션의 메시지를 가져옵니다.
+
+        Args:
+            session_id: 세션 ID (UUID 문자열)
+
+        Returns:
+            메시지 목록 (turn_index 순 정렬)
+            - turn_index: 턴 인덱스
+            - content: 메시지 내용
+            - speaker: 발화자 (user/ai)
+        """
+        url = f"/internal/sessions/{session_id}/messages"
+
+        try:
+            client = await self._get_client()
+            response = await client.get(url)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(f"Session messages retrieved: session={session_id}, count={len(result)}")
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to get session messages: session={session_id}, "
+                f"status={e.response.status_code}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Session messages retrieval error: {e}", exc_info=True)
+            raise
+
     async def close(self):
         """HTTP 클라이언트 종료"""
         if self.client:
