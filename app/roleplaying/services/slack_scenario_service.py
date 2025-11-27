@@ -187,7 +187,8 @@ class SlackScenarioService:
             aiRole=ai_role,
             topicType=topic_type,
             title=formatted_title,
-            fixedQuestions=questions
+            fixedQuestions=questions,
+            creationType="slack"
         )
 
     async def _build_conversation_summary(
