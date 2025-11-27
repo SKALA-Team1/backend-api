@@ -95,6 +95,23 @@ class SessionCreateResponse(BaseModel):
 
 
 # =====================================================
+# 사용자 프롬프트 기반 시나리오 생성 스키마
+# =====================================================
+
+class PromptBasedScenarioRequestDto(BaseModel):
+    """사용자 프롬프트 기반 시나리오 생성 요청 DTO"""
+    userId: int = Field(..., description="사용자 ID", gt=0)
+    myRole: str = Field(..., description="사용자의 역할", min_length=1, max_length=100)
+    aiRole: str = Field(..., description="AI의 역할", min_length=1, max_length=100)
+    situation: str = Field(..., description="롤플레잉 상황 및 주제", min_length=1, max_length=500)
+
+
+class PromptBasedScenarioResponseDto(BaseModel):
+    """사용자 프롬프트 기반 시나리오 생성 응답 DTO"""
+    scenario: ScenarioInfoDto = Field(..., description="생성된 시나리오 정보")
+
+
+# =====================================================
 # Spring 1 Gateway 전용 내부 API 스키마
 # =====================================================
 
