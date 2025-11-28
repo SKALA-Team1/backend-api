@@ -67,6 +67,7 @@ class ScenarioInfoDto(BaseModel):
     topicType: str = Field(..., description="토픽 타입 (overview, detail)")
     title: str = Field(..., max_length=200, description="시나리오 제목")
     fixedQuestions: List[str] = Field(..., min_items=3, max_items=3, description="고정 질문 목록 (3개)")
+    creationType: str = Field(..., description="시나리오 생성 방식 (prompt, slack)")
 
 
 class AnalysisResultDto(BaseModel):
