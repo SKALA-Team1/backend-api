@@ -108,7 +108,8 @@ class PromptBasedScenarioService:
             aiRole=ai_role,
             topicType="direct",
             title=title,
-            fixedQuestions=fixed_questions
+            fixedQuestions=fixed_questions,
+            creationType="prompt"
         )
 
         logger.info(f"Successfully generated scenario for user {user_id}")
