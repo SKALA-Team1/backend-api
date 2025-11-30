@@ -4,29 +4,35 @@ Index Store (Vector Store)
 임베딩된 청크를 저장하고 검색 인덱스를 관리하는 모듈.
 
 역할:
-    - ChromaDB 벡터 인덱스 생성/업데이트/저장
+    - Qdrant 벡터 인덱스 생성/업데이트/저장
     - 메타데이터 포함 검색 및 필터링 지원
     - 교재 단원별, 주제별 인덱스 분리 관리
 
 의존성:
-    - chromadb, langchain-openai
+    - qdrant-client, langchain-openai
 """
 
 import logging
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
+import uuid
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qdrant_models
+from qdrant_client.http.models import Distance, VectorParams, PointStruct
 
 from app.textbook.rag.chunker import Chunk
 from app.textbook.rag.embedder import get_embedder
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ChromaDB 저장 경로
-CHROMA_PERSIST_DIR = Path("data/chroma_db")
+# Qdrant 저장 경로 (로컬 파일 기반)
+QDRANT_PERSIST_DIR = Path("data/qdrant_db")
+
+# 임베딩 벡터 차원 (OpenAI text-embedding-3-small 기준)
+EMBEDDING_DIMENSION = 1536
 
 
 @dataclass
@@ -37,48 +43,67 @@ class SearchResult:
     chapter: str
     page_start: int
     page_end: int
-    score: float  # 유사도 점수 (거리가 작을수록 유사)
+    score: float  # 유사도 점수 (높을수록 유사)
     metadata: dict
 
 
 class VectorStore:
-    """ChromaDB 기반 벡터 저장소"""
+    """Qdrant 기반 벡터 저장소"""
 
     def __init__(
         self,
         collection_name: str = "ags_textbook",
-        persist_directory: Optional[str] = None
+        persist_directory: Optional[str] = None,
+        qdrant_url: Optional[str] = None
     ):
         """
         Args:
-            collection_name: ChromaDB 컬렉션 이름
-            persist_directory: 영구 저장 디렉토리 (없으면 기본값 사용)
+            collection_name: Qdrant 컬렉션 이름
+            persist_directory: 로컬 영구 저장 디렉토리 (없으면 기본값 사용)
+            qdrant_url: Qdrant 서버 URL (없으면 로컬 파일 모드)
         """
         self.collection_name = collection_name
-        self.persist_directory = Path(persist_directory) if persist_directory else CHROMA_PERSIST_DIR
+        self.persist_directory = Path(persist_directory) if persist_directory else QDRANT_PERSIST_DIR
 
-        # 디렉토리 생성
-        self.persist_directory.mkdir(parents=True, exist_ok=True)
+        # Qdrant URL 설정 (config에서 가져오거나 로컬 모드)
+        self.qdrant_url = qdrant_url or getattr(settings, 'QDRANT_URL', None)
 
-        # ChromaDB 클라이언트 (영구 저장)
-        self.client = chromadb.PersistentClient(
-            path=str(self.persist_directory),
-            settings=ChromaSettings(anonymized_telemetry=False)
-        )
+        if self.qdrant_url:
+            # 원격 Qdrant 서버 연결
+            self.client = QdrantClient(url=self.qdrant_url)
+            logger.info(f"Connected to Qdrant server: {self.qdrant_url}")
+        else:
+            # 로컬 파일 기반 Qdrant
+            self.persist_directory.mkdir(parents=True, exist_ok=True)
+            self.client = QdrantClient(path=str(self.persist_directory))
+            logger.info(f"Using local Qdrant: {self.persist_directory}")
 
-        # 컬렉션 가져오기 또는 생성
-        self.collection = self.client.get_or_create_collection(
-            name=collection_name,
-            metadata={"description": "AGS English Textbook Embeddings"}
-        )
+        # 컬렉션 생성 또는 확인
+        self._ensure_collection()
 
         # 임베더
         self._embedder = None
 
         logger.info(
-            f"VectorStore initialized: collection={collection_name}, "
-            f"persist_dir={self.persist_directory}"
+            f"VectorStore initialized: collection={collection_name}"
         )
+
+    def _ensure_collection(self):
+        """컬렉션 존재 확인 및 생성"""
+        collections = self.client.get_collections().collections
+        collection_names = [c.name for c in collections]
+
+        if self.collection_name not in collection_names:
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=VectorParams(
+                    size=EMBEDDING_DIMENSION,
+                    distance=Distance.COSINE
+                )
+            )
+            logger.info(f"Created collection: {self.collection_name}")
+        else:
+            logger.info(f"Collection already exists: {self.collection_name}")
 
     @property
     def embedder(self):
@@ -107,10 +132,20 @@ class VectorStore:
         for i in range(0, len(chunks), batch_size):
             batch = chunks[i:i + batch_size]
 
-            ids = [chunk.id for chunk in batch]
             texts = [chunk.text for chunk in batch]
-            metadatas = [
-                {
+
+            # 임베딩 생성
+            embeddings = self.embedder.embed_texts(texts)
+
+            # Qdrant 포인트 생성
+            points = []
+            for j, chunk in enumerate(batch):
+                # UUID 형식으로 ID 생성 (Qdrant는 UUID 또는 정수 ID 필요)
+                point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, chunk.id))
+
+                payload = {
+                    "text": chunk.text,
+                    "chunk_id": chunk.id,
                     "chapter": chunk.chapter,
                     "page_start": chunk.page_start,
                     "page_end": chunk.page_end,
@@ -118,18 +153,17 @@ class VectorStore:
                     "token_count": chunk.token_count,
                     **chunk.metadata
                 }
-                for chunk in batch
-            ]
 
-            # 임베딩 생성
-            embeddings = self.embedder.embed_texts(texts)
+                points.append(PointStruct(
+                    id=point_id,
+                    vector=embeddings[j],
+                    payload=payload
+                ))
 
-            # ChromaDB에 추가
-            self.collection.add(
-                ids=ids,
-                embeddings=embeddings,
-                documents=texts,
-                metadatas=metadatas
+            # Qdrant에 추가
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=points
             )
 
             total_added += len(batch)
@@ -159,48 +193,68 @@ class VectorStore:
         query_embedding = self.embedder.embed_text(query)
 
         # 필터 설정
-        where_filter = None
+        query_filter = None
         if chapter_filter:
-            where_filter = {"chapter": {"$eq": chapter_filter}}
+            query_filter = qdrant_models.Filter(
+                must=[
+                    qdrant_models.FieldCondition(
+                        key="chapter",
+                        match=qdrant_models.MatchValue(value=chapter_filter)
+                    )
+                ]
+            )
 
         # 검색
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where_filter,
-            include=["documents", "metadatas", "distances"]
+        results = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_embedding,
+            limit=n_results,
+            query_filter=query_filter
         )
 
         # 결과 변환
         search_results = []
-        if results["ids"] and results["ids"][0]:
-            for i, doc_id in enumerate(results["ids"][0]):
-                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
-                search_results.append(SearchResult(
-                    id=doc_id,
-                    text=results["documents"][0][i] if results["documents"] else "",
-                    chapter=metadata.get("chapter", ""),
-                    page_start=metadata.get("page_start", 0),
-                    page_end=metadata.get("page_end", 0),
-                    score=results["distances"][0][i] if results["distances"] else 0,
-                    metadata=metadata
-                ))
+        for hit in results.points:
+            payload = hit.payload or {}
+            search_results.append(SearchResult(
+                id=payload.get("chunk_id", str(hit.id)),
+                text=payload.get("text", ""),
+                chapter=payload.get("chapter", ""),
+                page_start=payload.get("page_start", 0),
+                page_end=payload.get("page_end", 0),
+                score=hit.score,  # Qdrant는 코사인 유사도 (높을수록 유사)
+                metadata=payload
+            ))
 
         return search_results
 
     def get_chunk_count(self) -> int:
         """저장된 청크 수 반환"""
-        return self.collection.count()
+        collection_info = self.client.get_collection(self.collection_name)
+        return collection_info.points_count
 
     def get_chapters(self) -> list[str]:
         """저장된 챕터 목록 반환"""
-        # 모든 메타데이터에서 chapter 추출
-        result = self.collection.get(include=["metadatas"])
+        # Qdrant에서 모든 포인트의 chapter 필드 조회
+        # scroll을 사용하여 페이지네이션 처리
         chapters = set()
-        if result["metadatas"]:
-            for metadata in result["metadatas"]:
-                if "chapter" in metadata:
-                    chapters.add(metadata["chapter"])
+        offset = None
+
+        while True:
+            results, offset = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=1000,
+                offset=offset,
+                with_payload=["chapter"]
+            )
+
+            for point in results:
+                if point.payload and "chapter" in point.payload:
+                    chapters.add(point.payload["chapter"])
+
+            if offset is None:
+                break
+
         return sorted(list(chapters))
 
     def delete_collection(self):
@@ -211,10 +265,7 @@ class VectorStore:
     def reset(self):
         """컬렉션 초기화 (삭제 후 재생성)"""
         self.delete_collection()
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"description": "AGS English Textbook Embeddings"}
-        )
+        self._ensure_collection()
         logger.info(f"Reset collection: {self.collection_name}")
 
 

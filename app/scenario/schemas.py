@@ -43,12 +43,14 @@ class DialogueTurn(BaseModel):
 
 class ScenarioGenerateRequest(BaseModel):
     """시나리오 생성 요청"""
+    user_id: int = Field(..., description="사용자 ID (Spring DB 저장용)")
     topic: str = Field(..., min_length=1, max_length=200, description="시나리오 주제")
     scenario_type: ScenarioType = Field(ScenarioType.GENERAL, description="시나리오 유형")
     difficulty: DifficultyLevel = Field(DifficultyLevel.INTERMEDIATE, description="난이도")
     num_turns: int = Field(6, ge=2, le=20, description="대화 턴 수")
     chapter_filter: Optional[str] = Field(None, description="특정 챕터로 제한")
     include_korean_hints: bool = Field(True, description="한국어 힌트 포함 여부")
+    save_to_db: bool = Field(True, description="DB에 저장 여부")
 
 
 class ScenarioResponse(BaseModel):
@@ -74,6 +76,10 @@ class ScenarioResponse(BaseModel):
 
     # 메타데이터
     source_chapters: list[str] = Field(default_factory=list, description="참조 챕터 목록")
+
+    # DB 저장 정보
+    db_scenario_id: Optional[int] = Field(None, description="DB에 저장된 시나리오 ID")
+    saved_to_db: bool = Field(False, description="DB 저장 성공 여부")
 
 
 class ChapterListResponse(BaseModel):

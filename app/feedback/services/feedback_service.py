@@ -101,25 +101,36 @@ class FeedbackService:
             TurnFeedbackResponse: 6개 항목 피드백 응답
         """
         # 1. Azure 발음 평가 (오디오 파일이 있는 경우)
+        # 주석처리: 롤플레잉에서 이미 생성한 피드백을 가져오므로 음성 평가 비활성화
         pronunciation_result: Optional[PronunciationResult] = None
 
-        if request.audio_file_path:
-            try:
-                azure_service = self._get_azure_service()
-                pronunciation_result = azure_service.evaluate_pronunciation_from_file(
-                    audio_file_path=request.audio_file_path,
-                    reference_text=request.user_message
-                )
-                logger.info(f"Azure evaluation completed for turn {request.turn_number}")
-            except Exception as e:
-                logger.error(f"Azure evaluation failed: {e}")
+        # if request.audio_file_path:
+        #     try:
+        #         azure_service = self._get_azure_service()
+        #         pronunciation_result = azure_service.evaluate_pronunciation_from_file(
+        #             audio_file_path=request.audio_file_path,
+        #             reference_text=request.user_message
+        #         )
+        #         logger.info(f"Azure evaluation completed for turn {request.turn_number}")
+        #     except Exception as e:
+        #         logger.error(f"Azure evaluation failed: {e}")
 
         # 2. OpenAI 피드백 생성
-        openai_service = self._get_openai_service()
-        feedback_result: FeedbackResult = openai_service.generate_feedback(
-            user_text=request.user_message,
-            ai_prompt_text=request.system_message,
-            pronunciation_result=pronunciation_result
+        # 주석처리: 롤플레잉에서 이미 생성한 피드백을 가져오므로 OpenAI 피드백 생성 비활성화
+        # openai_service = self._get_openai_service()
+        # feedback_result: FeedbackResult = openai_service.generate_feedback(
+        #     user_text=request.user_message,
+        #     ai_prompt_text=request.system_message,
+        #     pronunciation_result=pronunciation_result
+        # )
+
+        # 임시로 빈 FeedbackResult 생성 (실제로는 롤플레잉에서 가져온 데이터 사용)
+        from app.feedback.services.openai_feedback_service import FeedbackResult
+        feedback_result = FeedbackResult(
+            overall_feedback="",
+            suggested_sentence="",
+            grammar_notes=[],
+            vocabulary_suggestions=[]
         )
 
         # 3. 점수 설정
@@ -314,8 +325,28 @@ class FeedbackService:
             "total_turns": total_turns
         }
 
-        # 전체 요약 코멘트 생성
-        summary_comment = self._generate_summary_comment(avg_scores)
+        # 전체 요약 코멘트 생성 (LLM 사용)
+        turn_summaries = []
+        for tf in spring_feedbacks:
+            turn_summaries.append({
+                "turn_number": tf.get("turnNumber", 0),
+                "user_message": tf.get("userMessage", ""),
+                "suggested_sentence": tf.get("suggestedSentence", ""),
+                "grammar_notes": tf.get("grammarNotes", [])
+            })
+
+        # OpenAI로 상세한 종합 피드백 생성
+        try:
+            openai_service = self._get_openai_service()
+            summary_comment = openai_service.generate_final_feedback(
+                avg_scores=avg_scores,
+                turn_summaries=turn_summaries
+            )
+            logger.info(f"Final feedback generated via LLM for session {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to generate LLM final feedback: {e}")
+            # LLM 실패 시 기본 코멘트 사용
+            summary_comment = self._generate_summary_comment(avg_scores)
 
         return SessionFeedbackResponse(
             session_id=session_id,

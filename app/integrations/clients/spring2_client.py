@@ -464,6 +464,120 @@ class Spring2Client:
             logger.error(f"Session messages retrieval error: {e}", exc_info=True)
             raise
 
+    async def save_textbook_scenario(
+        self,
+        user_id: int,
+        title: str,
+        description: str,
+        scenario_type: str,
+        difficulty: str,
+        situation: str,
+        user_role: str,
+        ai_role: str,
+        dialogues_json: str,
+        key_expressions: list[str],
+        vocabulary: list[str],
+        grammar_points: list[str],
+        chapter: str,
+        source_chapters: list[str]
+    ) -> dict:
+        """
+        교재 기반 시나리오 저장 API 호출 (에이전트2)
+
+        FastAPI(에이전트2)에서 RAG 기반으로 생성한 시나리오를 Spring으로 전송하여 DB에 저장
+
+        Args:
+            user_id: 사용자 ID
+            title: 시나리오 제목
+            description: 시나리오 설명
+            scenario_type: 시나리오 유형 (business_email, phone_call, etc.)
+            difficulty: 난이도 (beginner, intermediate, advanced)
+            situation: 상황 설명
+            user_role: 사용자 역할
+            ai_role: AI 역할
+            dialogues_json: 대화 내용 JSON 문자열
+            key_expressions: 핵심 표현 목록
+            vocabulary: 주요 어휘
+            grammar_points: 문법 포인트
+            chapter: 참조 챕터
+            source_chapters: 참조 챕터 목록
+
+        Returns:
+            API 응답 (저장된 시나리오 정보)
+        """
+        url = "/internal/scenarios/textbook"
+
+        payload = {
+            "userId": user_id,
+            "title": title,
+            "description": description,
+            "scenarioType": scenario_type,
+            "difficulty": difficulty,
+            "situation": situation,
+            "userRole": user_role,
+            "aiRole": ai_role,
+            "dialoguesJson": dialogues_json,
+            "keyExpressions": key_expressions,
+            "vocabulary": vocabulary,
+            "grammarPoints": grammar_points,
+            "chapter": chapter,
+            "sourceChapters": source_chapters
+        }
+
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"Textbook scenario saved: user_id={user_id}, title={title}"
+            )
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to save textbook scenario: user_id={user_id}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Textbook scenario save error: {e}", exc_info=True)
+            raise
+
+    async def get_user_scenarios(self, user_id: int) -> list[dict]:
+        """
+        사용자의 시나리오 목록 조회
+
+        Args:
+            user_id: 사용자 ID
+
+        Returns:
+            시나리오 목록
+        """
+        url = f"/internal/scenarios/user/{user_id}"
+
+        try:
+            client = await self._get_client()
+            response = await client.get(url)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(f"User scenarios retrieved: user_id={user_id}, count={len(result)}")
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to get user scenarios: user_id={user_id}, "
+                f"status={e.response.status_code}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"User scenarios retrieval error: {e}", exc_info=True)
+            raise
+
     async def close(self):
         """HTTP 클라이언트 종료"""
         if self.client:

@@ -238,32 +238,40 @@ Return ONLY the JSON object, no additional text."""
         overall = avg_scores.get('overall_score', 0)
 
         prompt = f"""You are an expert English conversation coach for Korean learners.
-Create a mobile-friendly feedback (iPhone 16 screen) that is concise but impactful.
+사용자의 영어 회화 세션 전체를 분석하여 상세하고 따뜻한 종합 피드백을 작성해주세요.
 
 ## 점수 분석
-- 종합: {overall:.0f}점
-- 강점: {best_category} ({scores[best_category]:.0f}점)
-- 약점: {worst_category} ({scores[worst_category]:.0f}점)
+- 종합 점수: {overall:.0f}점
+- 정확도(Accuracy): {scores['정확도']:.0f}점
+- 유창성(Fluency): {scores['유창성']:.0f}점
+- 완성도(Completeness): {scores['완성도']:.0f}점
+- 발음(Pronunciation): {scores['발음']:.0f}점
+- 강점 영역: {best_category}
+- 개선 필요 영역: {worst_category}
 
-## 출력 형식 (정확히 3줄, 각 줄 25자 이내)
-1줄: [레벨 이모지] + 한 줄 총평 (예: "🌟 중급 실력, 기초 탄탄!")
-2줄: [강점 이모지] + 강점 키워드 (예: "💪 발음 정확도 우수")
-3줄: [팁 이모지] + 개선 팁 (예: "📝 억양 연습 추천")
+## 출력 형식
+다음 구조로 한국어 피드백을 작성하세요:
 
-## 레벨 기준
-- 90점 이상: 🏆 상급
-- 75-89점: 🌟 중급
-- 60-74점: 📚 초중급
-- 40-59점: 🌱 초급
-- 40점 미만: 🔰 입문
+1. **레벨 판정** (1줄): 종합 점수 기반으로 현재 실력 레벨을 알려주세요
+   - 90점 이상: 상급 (Advanced)
+   - 75-89점: 중급 (Intermediate)
+   - 60-74점: 초중급 (Pre-Intermediate)
+   - 40-59점: 초급 (Elementary)
+   - 40점 미만: 입문 (Beginner)
+
+2. **강점 분석** (2-3줄): 가장 잘한 부분을 구체적으로 칭찬해주세요
+
+3. **개선 포인트** (2-3줄): 부족한 부분과 구체적인 개선 방법을 제안해주세요
+
+4. **학습 팁** (1-2줄): 실력 향상을 위한 실용적인 조언을 해주세요
+
+5. **응원 메시지** (1줄): 따뜻한 격려로 마무리해주세요
 
 ## 규칙
-- 한국어로 작성
-- 이모지는 줄 시작에만 1개
-- 핵심 키워드 중심으로 간결하게
-- 격려 톤 유지
-
-출력은 3줄만, 다른 설명 없이."""
+- 반드시 한국어로 작성
+- 격려하면서도 솔직한 피드백
+- 구체적이고 실용적인 조언 포함
+- 전체 5-8줄 정도로 작성"""
 
         try:
             response = self.client.chat.completions.create(
@@ -271,12 +279,12 @@ Create a mobile-friendly feedback (iPhone 16 screen) that is concise but impactf
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert English coach. Write exactly 3 lines of concise feedback in Korean for mobile display."
+                        "content": "You are an expert English conversation coach for Korean learners. Provide detailed, warm, and constructive feedback in Korean."
                     },
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=200
+                max_tokens=500
             )
 
             content = response.choices[0].message.content.strip()
@@ -289,7 +297,7 @@ Create a mobile-friendly feedback (iPhone 16 screen) that is concise but impactf
             return self._generate_default_final_feedback(avg_scores)
 
     def _generate_default_final_feedback(self, avg_scores: dict) -> str:
-        """기본 최종 피드백 생성 (iPhone 16 최적화 - 3줄)"""
+        """기본 최종 피드백 생성 (API 오류 시 사용)"""
         overall = avg_scores.get('overall_score', 0)
 
         # 강점/약점 분석
@@ -303,25 +311,49 @@ Create a mobile-friendly feedback (iPhone 16 screen) that is concise but impactf
         worst = min(scores, key=scores.get)
 
         if overall >= 90:
-            return f"""🏆 상급 실력, 원어민급 표현력!
-💪 {best} 특히 뛰어남
-📈 다양한 주제로 실력 확장 추천"""
+            return f"""[레벨: 상급 (Advanced)] 종합 {overall:.0f}점
+
+훌륭합니다! 원어민에 가까운 영어 실력을 보여주셨습니다. 특히 {best} 영역에서 뛰어난 능력을 발휘하셨네요.
+
+현재 실력을 유지하면서 다양한 주제의 대화에 도전해보세요. 비즈니스 영어나 학술적인 표현도 시도해보시면 좋겠습니다.
+
+앞으로도 꾸준히 영어를 사용하시면서 실력을 더욱 발전시켜 나가세요!"""
+
         elif overall >= 75:
-            return f"""🌟 중급 실력, 자연스러운 대화!
-💪 {best} 우수
-📝 {worst} 보완하면 상급 도달"""
+            return f"""[레벨: 중급 (Intermediate)] 종합 {overall:.0f}점
+
+잘하고 계십니다! 영어로 자연스러운 의사소통이 가능한 수준입니다. {best} 영역이 특히 우수하네요.
+
+{worst} 부분을 조금 더 연습하시면 상급 레벨로 도약할 수 있습니다. 매일 영어 뉴스나 팟캐스트를 듣는 것을 추천드립니다.
+
+꾸준한 노력이 빛을 발하고 있습니다. 조금만 더 힘내세요!"""
+
         elif overall >= 60:
-            return f"""📚 초중급, 의사소통 가능!
-💪 {best} 강점으로 활용
-📝 {worst} 집중 연습 필요"""
+            return f"""[레벨: 초중급 (Pre-Intermediate)] 종합 {overall:.0f}점
+
+좋은 진전을 보이고 계십니다! 기본적인 영어 의사소통이 가능한 단계입니다. {best} 영역에서 강점을 보여주셨어요.
+
+{worst} 부분에 집중해서 연습하시면 빠르게 실력이 향상될 거예요. 짧은 영어 문장을 매일 따라 말하는 연습을 해보세요.
+
+지금처럼 꾸준히 노력하시면 분명 목표를 달성하실 수 있습니다!"""
+
         elif overall >= 40:
-            return f"""🌱 초급, 꾸준히 성장 중!
-💪 {best} 좋은 시작점
-📝 매일 10분 발화 연습 추천"""
+            return f"""[레벨: 초급 (Elementary)] 종합 {overall:.0f}점
+
+영어 학습을 잘 시작하셨습니다! {best} 영역에서 가능성을 보여주셨어요.
+
+기초 문장 패턴을 반복해서 연습하고, 매일 10분씩 영어로 말하는 습관을 들여보세요. 처음엔 어렵지만 점점 나아질 거예요.
+
+모든 전문가도 처음엔 초보였습니다. 포기하지 마시고 꾸준히 도전하세요!"""
+
         else:
-            return f"""🔰 입문, 첫걸음 시작!
-💪 도전하는 자세가 최고
-📝 짧은 문장부터 천천히"""
+            return f"""[레벨: 입문 (Beginner)] 종합 {overall:.0f}점
+
+영어 학습의 첫 걸음을 내딛으셨군요! 도전하는 자세가 정말 멋집니다.
+
+기본 인사말과 자기소개부터 천천히 시작해보세요. 짧고 쉬운 문장을 자신감 있게 말하는 것이 중요합니다.
+
+매일 조금씩 연습하면 분명 실력이 늘 거예요. 응원합니다!"""
 
 
 # 싱글톤 인스턴스

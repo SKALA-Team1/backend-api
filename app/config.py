@@ -119,6 +119,11 @@ class Settings(BaseSettings):
     AUDIO_AGC_TARGET_LEVEL: float = Field(0.8, alias="AUDIO_AGC_TARGET_LEVEL")
     AUDIO_MIN_TEXT_LENGTH: int = Field(2, alias="AUDIO_MIN_TEXT_LENGTH")  # 침묵 감지 기준
 
+    # -------------------------------------
+    # Qdrant Vector DB (RAG)
+    # -------------------------------------
+    QDRANT_URL: Optional[str] = Field(default=None, alias="QDRANT_URL")  # 원격 서버 URL (없으면 로컬 파일 모드)
+
     # ========================================
     # ✅ Field Validators
     # ========================================
