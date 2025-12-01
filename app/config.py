@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     # OpenAI
     # -------------------------------------
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    OPENAI_MODEL: str = Field("gpt-4o-mini", alias="OPENAI_MODEL")
+    OPENAI_MODEL: str = Field("gpt-3.5-turbo", alias="OPENAI_MODEL")
     deepgram_api_key: Optional[str] = Field(default=None, alias="DEEPGRAM_API_KEY")
 
     # ========================================
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     # ========================================
     # LLM Provider Selection
     # ========================================
-    FEEDBACK_LLM_PROVIDER: str = Field("openai", alias="FEEDBACK_LLM_PROVIDER")
+    FEEDBACK_LLM_PROVIDER: str = Field("ollama", alias="FEEDBACK_LLM_PROVIDER")
 
     # -------------------------------------
     # Redis
