@@ -439,7 +439,7 @@ async def _handle_user_text(
             logger.info(f"⏱️  [피드백 평가 시작] session={session_id}, 텍스트 길이: {len(user_text)} 글자")
 
             # 텍스트 기반이므로 audio_data=None
-            # 타임아웃: 30초 (OpenAI 병렬 평가 ~3초 + 피드백 생성 ~2초 + 버퍼)
+            # 타임아웃: 60초 (OpenAI 병렬 평가 + LangSmith 추적 + 버퍼)
             feedback_result = await asyncio.wait_for(
                 feedback_agent_service.evaluate_response_fast(
                     user_text=user_text,
@@ -452,7 +452,7 @@ async def _handle_user_text(
                     },
                     retry_count=session_state.current_question_retry_count if session_state else 0
                 ),
-                timeout=30.0  # 30초 타임아웃 (OpenAI 병렬 평가 + 피드백 생성)
+                timeout=60.0  # 60초 타임아웃 (OpenAI + LangSmith 추적)
             )
             feedback_elapsed = time.time() - feedback_start
             logger.info(f"✅ [피드백 평가 완료 (ws_realtime)] 총 소요 시간: {feedback_elapsed:.2f}초")
@@ -531,8 +531,8 @@ async def _handle_user_text(
                     session_state.reset_retry_count()
 
         except asyncio.TimeoutError:
-            logger.error(f"Feedback evaluation timeout (30s exceeded): session={session_id}")
-            logger.warning("Ollama may not be running or is taking too long to respond")
+            logger.error(f"Feedback evaluation timeout (60s exceeded): session={session_id}")
+            logger.warning("OpenAI API or LangSmith may be responding slowly. Check network/API status.")
             # 타임아웃 시에도 폴백 점수로 계속 진행
             feedback_result = {
                 "needs_correction": False,
@@ -543,14 +543,14 @@ async def _handle_user_text(
                     "relevance_score": 70,
                     "overall_score": 46
                 },
-                "feedback_text": "평가 중 타임아웃이 발생했습니다. Ollama가 실행 중인지 확인하세요.",
+                "feedback_text": "평가 중 타임아웃이 발생했습니다. OpenAI API 연결을 확인하세요.",
                 "retry_count": 0
             }
             # 타임아웃 에러를 사용자에게 전달
             await websocket.send_json(
                 ErrorMessage(
                     code="FEEDBACK_TIMEOUT",
-                    message="Feedback evaluation timeout. Check if Ollama is running.",
+                    message="Feedback evaluation timeout (60s). Check OpenAI API connection.",
                     severity="warning"
                 ).model_dump()
             )
@@ -787,7 +787,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             feedback_start = time.time()
             logger.info(f"⏱️  [피드백 평가 시작] session={session_id}, STT 텍스트: '{stt_text[:50]}...', Azure={can_use_azure}")
 
-            # 피드백 평가 실행 (30초 타임아웃)
+            # 피드백 평가 실행 (60초 타임아웃)
             feedback_result = await asyncio.wait_for(
                 feedback_agent_service.evaluate_response_fast(
                     user_text=stt_text,
@@ -800,7 +800,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                     },
                     retry_count=session_state.current_question_retry_count if session_state else 0
                 ),
-                timeout=30.0  # 30초 타임아웃 (OpenAI 병렬 평가 + 피드백 생성)
+                timeout=60.0  # 60초 타임아웃 (OpenAI + LangSmith 추적)
             )
             feedback_elapsed = time.time() - feedback_start
             logger.info(f"✅ [피드백 평가 완료 (오디오)] 총 소요 시간: {feedback_elapsed:.2f}초")
@@ -884,13 +884,13 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                     session_state.reset_retry_count()
 
         except asyncio.TimeoutError:
-            logger.error(f"Feedback evaluation timeout (30s exceeded): session={session_id}")
-            logger.warning("Ollama may not be running or is taking too long to respond")
+            logger.error(f"Feedback evaluation timeout (60s exceeded): session={session_id}")
+            logger.warning("OpenAI API or LangSmith may be responding slowly. Check network/API status.")
             # 타임아웃 시에도 폴백 점수로 계속 진행
             await websocket.send_json(
                 ErrorMessage(
                     code="FEEDBACK_TIMEOUT",
-                    message="Feedback evaluation timeout. Check if Ollama is running.",
+                    message="Feedback evaluation timeout (60s). Check OpenAI API connection.",
                     severity="warning"
                 ).model_dump()
             )
