@@ -468,17 +468,51 @@ async def _handle_user_text(
             await websocket.send_json(feedback_msg.model_dump())
             logger.info(f"Feedback scores sent (text-based): {feedback_result['scores']}")
 
-            # 피드백 텍스트 생성 (백그라운드)
+            # 피드백 텍스트 스트리밍 (백그라운드)
             async def _generate_and_send_feedback():
                 try:
-                    feedback_text = feedback_result.get("feedback_text", "평가 완료")
+                    # 각 피드백 부분을 즉시 전송 (스트리밍)
+                    feedback_parts = []
+
+                    # 각 평가 결과에서 피드백 추출 (이미 평가 결과에 포함됨)
+                    # feedback_result는 이미 완성된 피드백을 포함하고 있음
+                    feedback_text = feedback_result.get("feedback_text", "")
+
                     if feedback_text:
+                        # 문장 단위로 나누어 스트리밍 (완벽하지 않은 응답도 처리)
+                        # 구분자: ". ", "! ", "? ", " | " 등
+                        import re
+                        sentences = re.split(r'(?<=[.!?|])\s+', feedback_text)
+
+                        for i, sentence in enumerate(sentences):
+                            if sentence.strip():
+                                # 구분자 복원 (마지막 문장이 아니면)
+                                if i < len(sentences) - 1 and not sentence.endswith(('|', '.')):
+                                    chunk = sentence.strip() + " "
+                                else:
+                                    chunk = sentence.strip()
+
+                                await websocket.send_json(
+                                    FeedbackStreamingMessage(chunk=chunk).model_dump()
+                                )
+                                # 소량의 지연으로 스트리밍 효과 추가
+                                await asyncio.sleep(0.1)
+
+                        logger.info(f"Feedback text streamed ({len(sentences)} parts): {feedback_text[:60]}...")
+                    else:
+                        # 피드백이 없으면 기본 메시지
                         await websocket.send_json(
-                            FeedbackStreamingMessage(chunk=feedback_text).model_dump()
+                            FeedbackStreamingMessage(chunk="평가 완료").model_dump()
                         )
-                        logger.info(f"Feedback text sent: {feedback_text[:50]}...")
                 except Exception as e:
                     logger.error(f"Failed to send feedback text: {e}")
+                    # 에러 발생 시에도 최소한의 피드백 전송
+                    try:
+                        await websocket.send_json(
+                            FeedbackStreamingMessage(chunk="평가가 완료되었습니다.").model_dump()
+                        )
+                    except:
+                        pass
 
             feedback_task = asyncio.create_task(_generate_and_send_feedback())
             context = f"feedback_text_generation_text(session={session_id})"
@@ -820,17 +854,45 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             await websocket.send_json(feedback_msg.model_dump())
             logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
-            # 피드백 텍스트 생성 (백그라운드에서)
+            # 피드백 텍스트 스트리밍 (백그라운드에서)
             async def _generate_and_send_feedback():
                 try:
-                    feedback_text = feedback_result.get("feedback_text", "평가 완료")
+                    feedback_text = feedback_result.get("feedback_text", "")
+
                     if feedback_text:
+                        # 문장 단위로 나누어 스트리밍 (완벽하지 않은 응답도 처리)
+                        import re
+                        sentences = re.split(r'(?<=[.!?|])\s+', feedback_text)
+
+                        for i, sentence in enumerate(sentences):
+                            if sentence.strip():
+                                # 구분자 복원 (마지막 문장이 아니면)
+                                if i < len(sentences) - 1 and not sentence.endswith(('|', '.')):
+                                    chunk = sentence.strip() + " "
+                                else:
+                                    chunk = sentence.strip()
+
+                                await websocket.send_json(
+                                    FeedbackStreamingMessage(chunk=chunk).model_dump()
+                                )
+                                # 소량의 지연으로 스트리밍 효과 추가
+                                await asyncio.sleep(0.1)
+
+                        logger.info(f"Feedback text streamed ({len(sentences)} parts): {feedback_text[:60]}...")
+                    else:
+                        # 피드백이 없으면 기본 메시지
                         await websocket.send_json(
-                            FeedbackStreamingMessage(chunk=feedback_text).model_dump()
+                            FeedbackStreamingMessage(chunk="평가 완료").model_dump()
                         )
-                        logger.info(f"Feedback text sent: {feedback_text[:50]}...")
                 except Exception as e:
                     logger.error(f"Failed to send feedback text: {e}")
+                    # 에러 발생 시에도 최소한의 피드백 전송
+                    try:
+                        await websocket.send_json(
+                            FeedbackStreamingMessage(chunk="평가가 완료되었습니다.").model_dump()
+                        )
+                    except:
+                        pass
 
             # 백그라운드에서 피드백 텍스트 생성 (비동기)
             feedback_task = asyncio.create_task(_generate_and_send_feedback())
