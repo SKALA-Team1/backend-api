@@ -34,3 +34,6 @@ dist/
 
 # Node.js
 node_modules/
+
+# Data files (large PDFs, etc.)
+data/
