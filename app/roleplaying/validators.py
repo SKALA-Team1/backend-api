@@ -1,11 +1,78 @@
 """
-세션 및 메시지 검증 로직
-===============================================
+Validation Module for WebSocket Sessions & Messages
+====================================================
 
-역할:
-- 세션 상태 검증
-- 메시지 초기화 상태 검증
-- 에러 메시지 생성 및 전송
+🔍 목적: WebSocket 실시간 통신에서의 세션/메시지 검증 및 에러 처리
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+이 모듈은 WebSocket 핸들러에서 모든 요청을 처리하기 전에
+필수적인 검증을 수행합니다. 세션 상태, 메시지 형식, 초기화 상태 등을 확인하고
+적절한 에러 응답을 클라이언트에 전송합니다.
+
+📊 검증 종류:
+
+    [세션 검증] - SessionValidator
+    ├─ validate_active(): 세션 존재/활성/만료 확인
+    ├─ validate_session_for_operation(): 특정 작업 전 포괄 검증
+    └─ validate_initialized(): 세션 초기화 여부 확인
+
+    [메시지 검증] - InitStateValidator
+    ├─ requires_initialization(): 초기화 필수 메시지 타입 판별
+    ├─ validate_for_message(): 메시지 타입별 초기화 상태 검증
+    └─ 규칙: AUDIO_CHUNK, UTTERANCE_END, USER_TEXT는 초기화 후에만 허용
+
+    [에러 처리] - ErrorHandler
+    ├─ send_error(): 구조화된 에러 메시지 클라이언트 전송
+    ├─ handle_service_error(): 서비스 레이어 에러 처리
+    ├─ log_error(): 일관된 형식의 에러 로깅
+    └─ 심각도 레벨: INFO, WARNING, ERROR
+
+🔄 검증 흐름:
+
+    WebSocket 메시지 수신
+    ↓
+    InitStateValidator.validate_for_message() ← 메시지 타입별 초기화 상태 확인
+    ↓ (통과)
+    SessionValidator.validate_session_for_operation() ← 세션 상태 확인
+    ↓ (통과)
+    실제 메시지 처리 (STT, AI 응답 등)
+    ↓ (실패)
+    ErrorHandler.handle_service_error() ← 서비스 에러 처리
+
+⚠️ 설계 원칙:
+
+    1. 빠른 실패 (Fast Fail): 검증 실패 시 즉시 에러 반환
+    2. 명확한 에러 코드: 클라이언트가 에러 원인 파악 용이
+    3. 컨텍스트 보존: 로깅에 session_id, operation 등 포함
+    4. 심각도 구분: 치명적 오류와 경고 구분
+    5. 서비스 회복력: 일부 에러는 폴백으로 처리
+
+예시:
+
+    # 세션 검증
+    session_state = await SessionValidator.validate_active(websocket, session_id)
+    if not session_state:
+        return  # 에러 이미 클라이언트로 전송됨
+
+    # 메시지 초기화 상태 검증
+    if not await InitStateValidator.validate_for_message(
+        websocket, message_type, session_initialized
+    ):
+        return
+
+    # 서비스 에러 처리
+    try:
+        result = await some_service.process()
+    except Exception as e:
+        await ErrorHandler.handle_service_error(
+            websocket, "SomeService", e, critical=True
+        )
+        return
+
+의존성:
+    - session_manager: SessionState, SessionStatus, session_manager 인스턴스
+    - ws_models: ErrorMessage DTO
+    - logging: 에러 로깅
 """
 
 import logging

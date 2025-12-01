@@ -1,42 +1,111 @@
 """
 Roleplaying Router
 ==================
-AI 롤플레잉(시나리오 기반 대화) 관련 API 엔드포인트를 정의하는 라우터 모듈.
 
-역할:
-    - WebSocket을 통한 실시간 음성 기반 롤플레잉 지원
-    - STT (Deepgram), AI 응답 생성, 세션 관리
+🎯 목적: FastAPI 롤플레잉 기능의 모든 API 엔드포인트 정의
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-구현된 엔드포인트:
+이 모듈은 실시간 영어 회화 롤플레잉을 위한 모든 HTTP/WebSocket 엔드포인트를
+정의합니다. FastAPI와 Spring 마이크로서비스 간의 통신을 조정하는 게이트웨이 역할.
 
-    1. Health Check
-        - GET /health/ping
-        - 역할: 서버 상태 확인
+📡 마이크로서비스 통신 구조:
 
-    2. 내부 API (Spring 2에서 호출)
-        - POST /internal/scenarios/analyze-conversation
-        - 역할: Slack 대화 분석 및 시나리오 생성
+    Spring 1 (메인 게이트웨이)
+    ├─ 사용자 인증/세션 관리
+    ├─ ClientController → [SessionID 생성]
+    └─ POST /internal/sessions/setup (FastAPI)
+                    ↓
+    FastAPI (이 모듈)
+    ├─ 세션 정보 Redis 저장
+    ├─ WebSocket URL 생성 및 반환
+    └─ WebSocket 연결 대기
+                    ↓
+    Spring 2 (데이터/분석 서버)
+    ├─ Slack 대화 분석 요청
+    └─ POST /internal/scenarios/analyze-conversation (FastAPI)
 
-    3. 내부 API (Spring 1 Gateway에서 호출)
-        - POST /internal/sessions/setup
-        - 역할: Spring 1이 생성한 session_id를 받아서
-                FastAPI 내부용으로 Redis에 저장하고 WebSocket URL 반환
+🔌 구현 엔드포인트:
 
-    4. 실시간 대화 (WebSocket)
-        - WS /ws/roleplaying/{session_id}
-        - 역할: 음성 입력, STT, AI 응답, 세션 관리
-        - 메시지 타입:
-            - INIT: 세션 초기화
-            - AUDIO_CHUNK: 오디오 청크 전송
-            - UTTERANCE_END: 발화 종료
-            - USER_TEXT: 텍스트 입력 (테스트용)
-            - END_SESSION: 세션 종료
+    [헬스 체크]
+    GET /health/ping
+        상태: 200 OK
+        목적: 서버 살아있음 확인
 
-참고:
-    - 추가 REST API (userInfo, roleplayList 등)는 Spring 2에서 구현
-    - 클라이언트 세션 생성은 Spring 1 Gateway에서만 처리
-    - FastAPI는 WebSocket + STT + AI 응답에 집중
-    - 데이터 관리는 Spring 2 책임
+    [Slack 시나리오 분석] (Spring 2 → FastAPI)
+    POST /internal/scenarios/analyze-conversation
+        입력: AnalysisRequestDto (Slack 메시지 목록 + 사용자 정보)
+        처리:
+            1. 메시지들을 MessageRole로 변환
+            2. SlackScenarioService에 비동기 호출
+            3. LLM이 대화 분석 (주제, 상황 추출)
+            4. 4개 시나리오 생성 (overview + 3개 role별)
+        출력: AnalysisResultDto (주제정보 + 4개 시나리오)
+        에러: 400 (빈 메시지), 500 (LLM 실패)
+
+    [프롬프트 기반 시나리오 생성] (클라이언트 → FastAPI)
+    POST /internal/scenarios/generate-from-prompt
+        입력: PromptBasedScenarioRequestDto (역할/상황 자유입력)
+        처리:
+            1. 입력 검증 (Pydantic 자동)
+            2. 사용자의 과거 시나리오 조회 (컨텍스트)
+            3. LLM이 상황 강화, 제목 생성, 질문 생성
+            4. 1개 시나리오 생성
+        출력: PromptBasedScenarioResponseDto (1개 시나리오)
+        에러: 400 (검증실패), 500 (생성실패)
+
+    [세션 설정] (Spring 1 → FastAPI)
+    POST /internal/sessions/setup
+        입력: InternalSessionSetupRequest (sessionID, userID, scenarioID)
+        처리:
+            1. SessionService에 비동기 호출
+            2. 시나리오 정보 조회 (DB)
+            3. 세션 정보 Redis에 저장 (TTL 설정)
+            4. WebSocket URL 생성 (WS_BASE_URL + /ws/roleplaying/{sessionID})
+            5. 클라이언트에 전송할 정보 패킹
+        출력: InternalSessionSetupResponse (sessionID, wsURL, scenario, expiresAt)
+        에러: 404 (시나리오 없음), 500 (DB/Redis 오류)
+
+    [실시간 롤플레잉] (WebSocket)
+    WS /ws/roleplaying/{session_id}
+        구현: ws_realtime.py의 websocket_endpoint() 함수
+        메시지 타입:
+            - INIT: 초기화 메시지 (시나리오 로드, 첫 질문 전송)
+            - AUDIO_CHUNK: 오디오 바이너리 청크 (STT 처리)
+            - UTTERANCE_END: 발화 완료 신호 (STT 최종화, AI 응답 생성)
+            - USER_TEXT: 텍스트 입력 (테스트/접근성용)
+            - END_SESSION: 세션 종료 요청
+            - FEEDBACK_STREAMING: 실시간 피드백 문장 스트리밍
+        상태관리:
+            - 세션: Redis에 저장된 사용자/시나리오 정보
+            - 턴 추적: 현재 질문 인덱스, 이전 응답들
+            - AI 응답: LLM이 생성한 대화 내용
+            - 피드백: 문법, 발음, 맥락 평가
+
+🏗️ 설계 원칙:
+
+    1. Dependency Injection: services.dependencies에서 주입받음
+    2. Async/Await: 모든 I/O 비동기 처리 (LLM, DB, Redis)
+    3. SOLID 준수: 로직은 Service 계층, 라우터는 HTTP 계층만 담당
+    4. 에러 처리: HTTPException으로 명확한 HTTP 상태 코드 반환
+    5. 로깅: 주요 지점에서 request/response 로깅 (디버깅용)
+
+⚠️ 중요한 구조:
+
+    FastAPI 라우터 역할 분담:
+    ├─ 이 파일: REST/내부 API 엔드포인트
+    ├─ ws_realtime.py: WebSocket 엔드포인트 (실시간 대화)
+    └─ services/: 모든 비즈니스 로직 (LLM, 세션, 피드백)
+
+    마이크로서비스 책임:
+    ├─ Spring 1: 사용자 인증, 세션 ID 생성, 호스팅
+    ├─ Spring 2: DB 접근, Slack API, 데이터 관리
+    └─ FastAPI: 실시간 통신, LLM 호출, 피드백 생성
+
+의존성:
+    - fastapi: 라우터 및 HTTP 처리
+    - sqlalchemy: DB 접근 (시나리오, 주제 정보)
+    - pydantic: 요청/응답 검증
+    - services: 비즈니스 로직 (SlackScenarioService, SessionService 등)
 """
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -63,18 +132,36 @@ from app.core.deps import get_db
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# ============================================
+# Health Check Endpoints
+# ============================================
+
 @router.get("/health/ping")
 async def ping():
+    """
+    서버 상태 확인 엔드포인트
+
+    응답: {"status": "ok"} (200 OK)
+    목적: 로드밸런서/모니터링에서 서버 살아있음 확인
+    """
     return {"status": "ok"}
 
 
 @router.get("/roleplaying/health/ping", include_in_schema=False)
 async def legacy_ping():
     """
-    Backward-compatible endpoint for clients still calling /roleplaying/health/ping.
+    레거시 호환성 엔드포인트
+
+    이전 클라이언트들이 /roleplaying/health/ping으로 호출하던 것을
+    새로운 /health/ping으로 리다이렉트하기 위한 호환성 엔드포인트.
+    OpenAPI 스키마에는 포함하지 않음 (중복 제거).
     """
     return await ping()
 
+
+# ============================================
+# Session Management Helpers
+# ============================================
 
 async def _process_internal_session_setup(
     request: InternalSessionSetupRequest,
@@ -82,17 +169,49 @@ async def _process_internal_session_setup(
     session_service: SessionServiceDep
 ) -> InternalSessionSetupResponse:
     """
-    Shared session setup handler used by both the canonical and legacy routes.
+    세션 설정 공통 처리 함수
+
+    정규 경로 (/internal/sessions/setup)와 레거시 경로 (/roleplaying/internal/sessions/setup)
+    모두에서 호출되는 공통 함수. 코드 중복을 제거하고 유지보수성을 높임.
+
+    주요 처리 흐름:
+        1. SessionService를 통해 세션 설정 (Redis 저장, 만료 시간 설정)
+        2. 시나리오 정보 조회 및 검증
+        3. WebSocket URL 생성 (WS_BASE_URL 설정값 활용)
+        4. 응답 패킹 (sessionID, wsURL, scenario정보, 만료시각)
+
+    Args:
+        request: 세션 설정 요청 (sessionID, userID, scenarioID)
+        db: SQLAlchemy 세션 (시나리오 조회용)
+        session_service: 의존성 주입된 세션 서비스 인스턴스
+
+    Returns:
+        InternalSessionSetupResponse: 클라이언트 연결에 필요한 모든 정보
+
+    Raises:
+        HTTPException(404): 요청한 시나리오 ID가 DB에 없을 때 (ValueError)
+        HTTPException(500): Redis, DB 접근 오류, 세션 생성 실패 등
+
+    주의:
+        - WebSocket URL은 환경설정(WS_BASE_URL)에서 가져옴
+        - 세션은 Redis에 TTL과 함께 저장되므로 자동 만료됨
+        - 클라이언트는 반환된 wsUrl로 WebSocket 연결 수립
     """
     try:
+        # SessionService가 처리하는 작업:
+        # 1. scenarioId를 DB에서 조회하여 검증
+        # 2. 시나리오 정보와 사용자 정보를 Redis에 저장
+        # 3. TTL(Time To Live)을 설정하여 자동 만료 구성
         session_id, scenario, expires_at = await session_service.setup_session(
-            session_id=request.sessionId,
-            user_id=request.userId,
-            scenario_id=request.scenarioId,
-            db=db
+            session_id=request.sessionId,  # Spring 1에서 생성한 고유 ID
+            user_id=request.userId,         # 사용자 DB PK
+            scenario_id=request.scenarioId,  # 선택된 시나리오 DB PK
+            db=db                          # 시나리오 정보 조회용
         )
 
-        base_ws_url = settings.WS_BASE_URL.rstrip("/")
+        # WebSocket 연결 URL 생성
+        # 예: wss://api.example.com/ws/roleplaying/session-uuid-12345
+        base_ws_url = settings.WS_BASE_URL.rstrip("/")  # 마지막 슬래시 제거
         ws_url = f"{base_ws_url}/ws/roleplaying/{session_id}"
 
         logger.info(
@@ -100,18 +219,21 @@ async def _process_internal_session_setup(
             f"user_id={request.userId}, scenario_id={request.scenarioId}"
         )
 
+        # 클라이언트에 반환할 응답 생성
         return InternalSessionSetupResponse(
-            sessionId=session_id,
-            wsUrl=ws_url,
-            scenario=scenario,
-            expiresAt=expires_at
+            sessionId=session_id,        # Spring 1이 생성한 세션 ID (확인용)
+            wsUrl=ws_url,                # 클라이언트가 연결할 WebSocket URL
+            scenario=scenario,           # 선택된 시나리오 상세 정보
+            expiresAt=expires_at        # 세션 유효 만료 시각
         )
 
     except ValueError as e:
+        # 시나리오 ID가 DB에 없는 경우
         logger.warning(f"Scenario not found: {e}")
         raise HTTPException(status_code=404, detail=str(e))
 
     except Exception as e:
+        # 기타 예상 외 오류 (Redis 연결 실패, DB 오류 등)
         logger.error(f"Failed to setup session: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
@@ -119,58 +241,115 @@ async def _process_internal_session_setup(
         )
 
 
+# ============================================
+# Slack Scenario Analysis & Generation
+# ============================================
+
 @router.post("/internal/scenarios/analyze-conversation", response_model=AnalysisResultDto)
 async def analyze_conversation(
     request: AnalysisRequestDto,
     slack_scenario_service: SlackScenarioServiceDep
 ):
     """
-    Slack 대화를 분석하고 영어 연습 시나리오를 생성합니다.
+    Slack 대화를 분석하고 영어 연습 시나리오를 생성하는 엔드포인트
 
-    Spring 2 서버에서 호출하는 내부 API입니다.
+    Spring 2 (데이터 서버)에서 호출하는 내부 API.
+    사용자의 Slack 메시지들을 받아 LLM이 분석하고 시나리오를 생성.
+
+    처리 흐름:
+        1. 입력 검증 (메시지 목록 비어있는지 확인)
+        2. SlackMessageDto → MessageRole로 변환 (LLM 처리용)
+        3. SlackScenarioService 호출 (비동기)
+            - ConversationAnalyzer: 대화 주제/상황 추출
+            - ScenarioGenerator: 4개 시나리오 생성 (overview + 3개 role)
+        4. AnalysisResultDto로 응답
 
     Args:
-        request: Slack 메시지 및 사용자 정보
-        slack_scenario_service: 의존성 주입된 시나리오 생성 서비스
+        request: AnalysisRequestDto
+            - userId: 사용자 ID
+            - myRole: 사용자의 IT 역할
+            - conversationDate: Slack 메시지 추출 날짜
+            - messages: SlackMessageDto 목록 (timestamp, sender, text, myMessage)
+            - aiRoles: 생성할 시나리오의 AI 역할 목록
+
+        slack_scenario_service: SlackScenarioService 인스턴스 (의존성 주입)
 
     Returns:
-        분석된 주제 정보 + 6개의 시나리오
+        AnalysisResultDto:
+            - subject: SubjectInfoDto (분석된 주제정보)
+                - myRole, situation, conversationDate, messageCount
+            - scenarios: List[ScenarioInfoDto] (4개 시나리오)
+                - [0]: overview 시나리오
+                - [1-3]: detail 시나리오 (역할별)
 
     Raises:
-        400: 메시지가 비어있을 때
-        500: LLM 분석 실패 또는 기타 서버 오류
+        HTTPException(400): 메시지 목록이 비어있을 때
+        HTTPException(500): LLM 분석 실패, 서비스 오류 등
+
+    예시:
+        요청:
+            {
+                "userId": 123,
+                "myRole": "Software Engineer",
+                "conversationDate": "2024-12-02",
+                "messages": [
+                    {"timestamp": "2024-12-02T10:00:00Z", "senderName": "user", "text": "...", "myMessage": true},
+                    {"timestamp": "2024-12-02T10:05:00Z", "senderName": "pm", "text": "...", "myMessage": false}
+                ],
+                "aiRoles": ["Project Manager", "Tech Lead", "QA Engineer"]
+            }
+
+        응답: 4개 시나리오 + 주제 정보
+
+    주의:
+        - 메시지 순서는 시간순으로 정렬되어 있어야 함 (보통 Spring 2에서 정렬 후 전송)
+        - messageCount는 분석할 메시지 개수 (컨텍스트 크기 지표)
+        - 각 시나리오는 정확히 3개의 고정 질문을 포함
     """
-    # 입력 검증
+    # ========== 단계 1: 입력 검증 ==========
+    # 메시지가 비어있으면 분석할 수 없으므로 400 에러 반환
     if not request.messages:
         logger.warning(f"Empty messages received for user {request.userId}")
         raise HTTPException(status_code=400, detail="No messages provided")
 
+    # ========== 단계 2: 데이터 변환 ==========
+    # SlackMessageDto를 LLM이 처리할 수 있는 MessageRole로 변환
+    # MessageRole: LLM 메시지 히스토리 형식 (content, sender, mine)
     conversation_roles = [
         MessageRole(
-            content=message.text,
-            sender=message.senderName,
-            mine=bool(message.myMessage)
+            content=message.text,              # 메시지 내용
+            sender=message.senderName,         # 발신자 (사람 이름)
+            mine=bool(message.myMessage)       # 사용자 본인 발화 여부
         )
         for message in request.messages
     ]
 
     try:
-        # 의존성 주입된 서비스 사용
+        # ========== 단계 3: LLM 분석 및 생성 ==========
+        # SlackScenarioService가 처리:
+        # - ConversationAnalyzer: 주제/상황 추출
+        # - ScenarioGenerator: 4개 시나리오 생성 (overview + 3개 role)
+        # 모두 비동기로 처리되며, 병렬 처리 가능
         result = await slack_scenario_service.analyze_and_generate(
-            request=request,
-            conversation_roles=conversation_roles
+            request=request,                   # 원본 요청 (사용자 정보 포함)
+            conversation_roles=conversation_roles  # 변환된 메시지들
         )
 
         logger.info(f"Successfully generated scenarios for user {request.userId}")
         return result
 
     except Exception as e:
+        # LLM 호출 실패, 네트워크 오류, 기타 예상 외 오류
         logger.error(f"Failed to analyze conversation for user {request.userId}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to analyze conversation: {str(e)}"
         )
 
+
+# ============================================
+# Session Setup Endpoints
+# ============================================
 
 @router.post("/internal/sessions/setup", response_model=InternalSessionSetupResponse)
 async def internal_setup_session(
@@ -179,16 +358,45 @@ async def internal_setup_session(
     db: Session = Depends(get_db)
 ):
     """
-    Spring 1 Gateway에서 호출하는 내부 API입니다.
+    Spring 1 Gateway에서 호출하는 세션 설정 엔드포인트 (정규 경로)
 
-    Spring 1이 생성한 session_id를 받아서,
-    FastAPI 내부용으로 세션 정보를 Redis에 저장하고,
-    WebSocket 연결 URL을 반환합니다.
+    Spring 1이 사용자 세션을 생성하고, FastAPI에게 실시간 세션 정보를 등록하도록 요청.
+    반환되는 WebSocket URL을 클라이언트에 제공하면 클라이언트가 연결.
 
-    Note:
-        - 이 엔드포인트는 Spring 1 Gateway에서만 호출합니다.
-        - session_id는 Spring 1이 생성합니다.
-        - FastAPI는 이 session_id를 받아서 Redis에 저장하기만 합니다.
+    통신 흐름:
+        1. Spring 1 ClientController: 사용자가 시나리오 선택
+        2. Spring 1: sessionId 생성 (UUID)
+        3. Spring 1: FastAPI POST /internal/sessions/setup 호출
+        4. FastAPI: 세션을 Redis에 저장, WebSocket URL 생성, 응답
+        5. Spring 1: 클라이언트에 WebSocket URL 제공
+        6. 클라이언트: WebSocket 연결 수립
+
+    Args:
+        request: InternalSessionSetupRequest
+            - sessionId: Spring 1이 생성한 세션 ID (UUID)
+            - userId: 사용자 DB PK
+            - scenarioId: 사용자가 선택한 시나리오 DB PK
+
+        session_service: SessionService 인스턴스 (의존성 주입)
+
+        db: SQLAlchemy 세션 (시나리오 정보 조회용, 자동 주입)
+
+    Returns:
+        InternalSessionSetupResponse
+            - sessionId: 입력받은 sessionId (확인용)
+            - wsUrl: 클라이언트가 연결할 WebSocket URL
+            - scenario: 선택된 시나리오 상세정보
+            - expiresAt: 세션 만료 시각
+
+    Raises:
+        HTTPException(404): 시나리오 ID가 DB에 없음
+        HTTPException(500): Redis, DB 접근 오류
+
+    중요:
+        - sessionId는 Spring 1이 생성 (FastAPI는 그대로 사용)
+        - Redis에 저장되는 정보로 세션 추적
+        - TTL 설정으로 자동 만료 (expiresAt)
+        - WebSocket 연결은 별도 ws_realtime.py에서 처리
     """
     return await _process_internal_session_setup(request, db, session_service)
 
@@ -196,7 +404,7 @@ async def internal_setup_session(
 @router.post(
     "/roleplaying/internal/sessions/setup",
     response_model=InternalSessionSetupResponse,
-    include_in_schema=False
+    include_in_schema=False  # OpenAPI 스키마에서 숨김 (정규 경로 존재하므로)
 )
 async def legacy_internal_setup_session(
     request: InternalSessionSetupRequest,
@@ -204,10 +412,22 @@ async def legacy_internal_setup_session(
     db: Session = Depends(get_db)
 ):
     """
-    Legacy compatibility route so existing callers of /roleplaying/internal/sessions/setup continue to work.
+    레거시 호환성 엔드포인트 (세션 설정)
+
+    이전에 /roleplaying/internal/sessions/setup으로 호출하던 클라이언트를 위한 호환성 경로.
+    내부적으로는 정규 경로(/internal/sessions/setup)와 동일한 로직 사용.
+
+    주의:
+        - OpenAPI 스키마에서는 숨김 (정규 경로만 노출)
+        - 새로운 클라이언트는 /internal/sessions/setup 사용 권장
+        - 이전 클라이언트는 자동으로 호환됨
     """
     return await _process_internal_session_setup(request, db, session_service)
 
+
+# ============================================
+# Prompt-Based Scenario Generation
+# ============================================
 
 @router.post("/internal/scenarios/generate-from-prompt", response_model=PromptBasedScenarioResponseDto)
 async def generate_scenario_from_prompt(
@@ -216,47 +436,114 @@ async def generate_scenario_from_prompt(
     db: Session = Depends(get_db)
 ):
     """
-    사용자 프롬프트로부터 롤플레잉 시나리오를 생성합니다.
+    사용자가 직접 입력한 프롬프트로부터 롤플레잉 시나리오를 생성하는 엔드포인트
 
-    클라이언트에서 직접 호출하는 내부 API입니다.
-    (Spring 1에서 JWT 검증 후 FastAPI URL을 반환하면, 클라이언트가 직접 호출)
+    Slack 분석과 달리, 사용자가 원하는 상황과 역할을 자유롭게 입력하여 시나리오 생성.
+    클라이언트에서 직접 호출하는 API (Spring 1이 JWT 검증 후 FastAPI URL 반환).
+
+    처리 흐름:
+        1. 입력 검증 (Pydantic 자동)
+            - userId: 양수
+            - myRole: 1-100자
+            - aiRole: 1-100자
+            - situation: 1-500자
+        2. 사용자의 과거 시나리오 조회 (DB, 컨텍스트용)
+        3. LLM 처리:
+            - ScenarioEnhancer: 상황 강화
+            - 제목 생성
+            - 3개 질문 생성
+        4. PromptBasedScenarioResponseDto로 응답
 
     Args:
-        request: 사용자 프롬프트 정보
-        prompt_scenario_service: 의존성 주입된 프롬프트 기반 시나리오 생성 서비스
-        db: DB 세션 (과거 시나리오 컨텍스트 조회용)
+        request: PromptBasedScenarioRequestDto
+            - userId: 사용자 DB PK (양수)
+            - myRole: 사용자 역할 (예: "Software Engineer", "Product Manager")
+            - aiRole: AI 역할 (예: "CEO", "HR Manager", "Marketing Lead")
+            - situation: 롤플레이 상황 (예: "회사 성과 평가 면담")
+
+        prompt_scenario_service: PromptBasedScenarioService 인스턴스 (의존성 주입)
+
+        db: SQLAlchemy 세션 (과거 시나리오 조회용, 자동 주입)
 
     Returns:
-        생성된 시나리오 정보
+        PromptBasedScenarioResponseDto:
+            - scenario: ScenarioInfoDto (생성된 시나리오)
+                - aiRole, topicType("direct"), title, fixedQuestions(3개), creationType("prompt")
 
     Raises:
-        400: 입력 검증 실패
-        500: LLM 분석 실패 또는 기타 서버 오류
+        HTTPException(400): 입력 검증 실패 (ValueError)
+            - userId가 0 이하
+            - myRole/aiRole이 범위 벗어남
+            - situation이 너무 짧거나 김
+        HTTPException(500): LLM 생성 실패, 서비스 오류 등
+
+    예시:
+        요청:
+            {
+                "userId": 123,
+                "myRole": "Senior Software Engineer",
+                "aiRole": "CEO",
+                "situation": "회사의 AI 도입 전략에 대해 경영진과 논의하는 상황"
+            }
+
+        응답:
+            {
+                "scenario": {
+                    "aiRole": "CEO",
+                    "topicType": "direct",
+                    "title": "AI 전략 논의: CEO와의 기술 리더십 대화",
+                    "fixedQuestions": [
+                        "우리 회사에서 AI 도입을 고려하고 있는데, 기술적으로 어떤 준비가 필요할까요?",
+                        "구체적인 도입 일정과 ROI 목표는 무엇인가요?",
+                        "이 프로젝트를 성공하기 위해 우리 팀이 해야 할 가장 중요한 일은 무엇일까요?"
+                    ],
+                    "creationType": "prompt"
+                }
+            }
+
+    주요 특징:
+        - Slack 분석과 달리 단일 시나리오만 생성 (4개가 아님)
+        - topicType은 항상 "direct" (사용자와 AI의 직접 대화)
+        - creationType은 "prompt" (사용자 입력 기반)
+        - 사용자의 과거 시나리오를 컨텍스트로 활용하여 중복 최소화
     """
     try:
-        # 입력 검증은 Pydantic에서 자동으로 수행됨
+        # ========== 단계 1: 입력 검증 ==========
+        # Pydantic이 자동으로 수행:
+        # - userId > 0 확인
+        # - myRole, aiRole: 1-100자
+        # - situation: 1-500자
         logger.info(
             f"Generating scenario from prompt for user {request.userId}: "
             f"my_role={request.myRole}, ai_role={request.aiRole}"
         )
 
-        # 의존성 주입된 서비스 사용
+        # ========== 단계 2: 시나리오 생성 ==========
+        # PromptBasedScenarioService가 처리:
+        # - 사용자의 과거 시나리오 조회 (중복 방지용)
+        # - ScenarioEnhancer: 상황 강화
+        # - 제목 생성 (역할 and 상황 함축)
+        # - 3개 질문 생성 (Turn 1, Turn 5, Turn 10)
         scenario = await prompt_scenario_service.generate_from_prompt(
-            user_id=request.userId,
-            my_role=request.myRole,
-            ai_role=request.aiRole,
-            situation=request.situation,
-            db=db
+            user_id=request.userId,     # 사용자 DB PK
+            my_role=request.myRole,     # 사용자의 역할
+            ai_role=request.aiRole,     # AI의 역할
+            situation=request.situation, # 롤플레이 상황
+            db=db                       # 과거 시나리오 컨텍스트용
         )
 
         logger.info(f"Successfully generated scenario for user {request.userId}")
+
+        # ========== 단계 3: 응답 ==========
         return PromptBasedScenarioResponseDto(scenario=scenario)
 
     except ValueError as e:
+        # 입력 검증 실패 (Pydantic 또는 비즈니스 로직)
         logger.warning(f"Validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
     except Exception as e:
+        # 예상 외 오류 (LLM 호출 실패, 네트워크 오류 등)
         logger.error(
             f"Failed to generate scenario for user {request.userId}: {e}",
             exc_info=True
