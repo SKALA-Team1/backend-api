@@ -536,7 +536,9 @@ async def _handle_user_text(
             "overall_score": None
         }
 
-        # Spring 2 저장 (피드백 포함)
+        # Spring 2 저장
+        # TODO: 피드백 데이터 추가 시 Spring 2 API 업데이트 필요
+        # (pronunciation_score, grammar_score, relevance_score, overall_score, feedback_text, needs_correction, retry_count)
         async def _save_user_text_with_feedback():
             try:
                 from app.integrations.clients.spring2_client import spring2_client
@@ -551,18 +553,10 @@ async def _handle_user_text(
                     completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
                     finish_reason=None,
                     status="IN_PROGRESS",
-                    # ✅ 피드백 데이터 추가
-                    pronunciation_score=0,  # 텍스트 기반
-                    grammar_score=feedback_scores.get("grammar_score"),
-                    relevance_score=feedback_scores.get("relevance_score"),
-                    overall_score=feedback_scores.get("overall_score"),
-                    feedback_text=feedback_result.get("feedback_text") if feedback_result else None,
-                    needs_correction=feedback_result.get("needs_correction", False) if feedback_result else False,
-                    retry_count=session_state.current_question_retry_count if session_state else 0,
                 )
             except Exception as e:
                 logger.error(
-                    f"Failed to save user text with feedback: session={session_id}, index={utterance_index}, error={e}",
+                    f"Failed to save user text: session={session_id}, index={utterance_index}, error={e}",
                     exc_info=True
                 )
 

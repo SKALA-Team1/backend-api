@@ -321,8 +321,13 @@ class FeedbackAgentService:
         if history:
             context_parts.append("\n최근 대화:")
             for turn in history[-6:]:  # 최근 3턴 (사용자 + AI 쌍)
-                speaker = turn.get("speaker", "")
-                text = turn.get("text", "")[:100]
+                # Turn 객체 (dataclass) 또는 dict 모두 지원
+                if hasattr(turn, 'speaker'):  # Turn dataclass
+                    speaker = turn.speaker
+                    text = turn.text[:100] if turn.text else ""
+                else:  # dict
+                    speaker = turn.get("speaker", "")
+                    text = turn.get("text", "")[:100]
                 context_parts.append(f"{speaker}: {text}")
 
         return "\n".join(context_parts)
