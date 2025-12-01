@@ -74,7 +74,7 @@ class SessionState:
         subject_id: 시나리오 주제 ID
         my_role: 사용자 직무 역할
         ai_role: AI 역할
-        fixed_questions: 고정 질문 3개 (턴 1, 5, 10 사용)
+        fixed_questions: 고정 질문 3개 (턴 1, 4, 7 사용)
         history: 대화 히스토리 (Turn 목록)
         status: 세션 상태
         created_at: 세션 생성 시각 (timezone-aware UTC)
@@ -82,6 +82,11 @@ class SessionState:
         current_utterance_audio: 현재 발화 오디오 버퍼
         utterance_index: 발화 인덱스 (0부터 시작)
         ai_turn_count: AI 턴 카운트 (고정 질문 판단용)
+        current_question_text: 현재 질문 보관 (재시도 시 사용)
+        current_question_retry_count: 현재 질문 재시도 횟수
+        total_retry_count: 전체 재시도 횟수
+        max_retry_per_question: 질문당 최대 재시도 횟수
+        feedback_history: 피드백 기록
 
     주의: 모든 datetime 필드는 timezone-aware (UTC)여야 합니다.
     """
@@ -99,6 +104,15 @@ class SessionState:
     utterance_index: int = 0
     ai_turn_count: int = 0  # AI가 질문한 횟수 (1부터 시작)
     user_turn_count: int = 0  # 사용자가 답한 횟수
+
+    # ========================================
+    # Feedback & Retry Fields (신규)
+    # ========================================
+    current_question_text: str = ""
+    current_question_retry_count: int = 0
+    total_retry_count: int = 0
+    max_retry_per_question: int = 3
+    feedback_history: List[dict] = field(default_factory=list)
 
     def is_expired(self) -> bool:
         """세션 만료 여부 확인"""
@@ -131,23 +145,23 @@ class SessionState:
         다음 AI 턴이 고정 질문 턴인지 확인
 
         Returns:
-            True if 턴 1, 5, 10
+            True if 턴 1, 4, 7 (기존 1, 5, 10에서 변경)
         """
         next_turn = self.get_ai_turn_number()
-        return next_turn in [1, 5, 10]
+        return next_turn in [1, 4, 7]
 
     def get_fixed_question_index(self) -> Optional[int]:
         """
         다음 AI 턴의 고정 질문 인덱스 반환
 
         Returns:
-            0 (턴 1), 1 (턴 5), 2 (턴 10), None (그 외)
+            0 (턴 1), 1 (턴 4), 2 (턴 7), None (그 외)
         """
         next_turn = self.get_ai_turn_number()
         fixed_question_map = {
             1: 0,   # 대화 시작
-            5: 1,   # 대화 흐름 전환
-            10: 2   # 대화 마무리
+            4: 1,   # 대화 중반
+            7: 2    # 대화 마무리
         }
         return fixed_question_map.get(next_turn)
 
@@ -163,6 +177,22 @@ class SessionState:
         )
         message_limit = self.utterance_index >= max_turns * 2
         return turn_pair_limit or message_limit
+
+    # ========================================
+    # Feedback & Retry Methods (신규)
+    # ========================================
+    def can_retry(self) -> bool:
+        """재시도 가능 여부"""
+        return self.current_question_retry_count < self.max_retry_per_question
+
+    def increment_retry_count(self) -> None:
+        """재시도 카운터 증가"""
+        self.current_question_retry_count += 1
+        self.total_retry_count += 1
+
+    def reset_retry_count(self) -> None:
+        """다음 질문으로 진행 시 재시도 카운터 초기화"""
+        self.current_question_retry_count = 0
 
 
 class SessionManager:

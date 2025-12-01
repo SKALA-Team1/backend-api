@@ -214,6 +214,44 @@ class AiTypingMessage(BaseModel):
     type: Literal["AI_TYPING"] = "AI_TYPING"
 
 
+class FeedbackMessage(BaseModel):
+    """
+    피드백 점수 전송 메시지
+
+    사용자 응답 평가 후 발음, 문법, 맥락 적절성 점수 전송.
+    """
+
+    type: Literal["FEEDBACK"] = "FEEDBACK"
+    pronunciation_score: int = Field(..., ge=0, le=100, description="발음 점수 (0-100)")
+    grammar_score: int = Field(..., ge=0, le=100, description="문법 점수 (0-100)")
+    relevance_score: int = Field(..., ge=0, le=100, description="맥락 적절성 점수 (0-100)")
+    overall_score: int = Field(..., ge=0, le=100, description="종합 점수 (평균)")
+
+
+class FeedbackStreamingMessage(BaseModel):
+    """
+    피드백 텍스트 스트리밍 메시지
+
+    교정 제안을 청크 단위로 실시간 전송.
+    """
+
+    type: Literal["FEEDBACK_STREAMING"] = "FEEDBACK_STREAMING"
+    chunk: str = Field(..., description="피드백 텍스트 청크")
+
+
+class RetryRequiredMessage(BaseModel):
+    """
+    재시도 요청 메시지
+
+    교정이 필요하여 같은 질문 재시도 요청.
+    """
+
+    type: Literal["RETRY_REQUIRED"] = "RETRY_REQUIRED"
+    reason: str = Field(..., description="재시도 이유 (pronunciation, grammar, relevance 등)")
+    retry_count: int = Field(..., ge=1, description="현재 재시도 횟수")
+    max_retries: int = Field(..., ge=1, description="최대 재시도 횟수")
+
+
 class SessionEndedMessage(BaseModel):
     """
     세션 종료 메시지
@@ -255,6 +293,9 @@ OutboundMessage = (
     | SttFinalMessage
     | UtteranceSavedMessage
     | AiTypingMessage
+    | FeedbackMessage
+    | FeedbackStreamingMessage
+    | RetryRequiredMessage
     | SessionEndedMessage
     | ErrorMessage
 )
@@ -266,8 +307,8 @@ OutboundMessage = (
 
 FIXED_QUESTION_TURNS = {
     1: 0,  # 턴 1 → fixedQuestions[0] (대화 시작)
-    5: 1,  # 턴 5 → fixedQuestions[1] (대화 흐름 전환)
-    10: 2,  # 턴 10 → fixedQuestions[2] (대화 마무리)
+    4: 1,  # 턴 4 → fixedQuestions[1] (대화 중반)
+    7: 2,  # 턴 7 → fixedQuestions[2] (대화 마무리)
 }
 
 

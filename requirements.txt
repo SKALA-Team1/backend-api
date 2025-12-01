@@ -40,6 +40,9 @@ botocore>=1.31.0
 ollama>=0.1.0  # Slack 시나리오 생성용
 openai>=1.0.0  # OpenAI API (선택)
 anthropic>=0.7.0  # Anthropic Claude API (선택)
+langchain>=0.1.0  # LangChain 프레임워크 (에이전트)
+langchain-community>=0.0.20  # LangChain 커뮤니티 (Ollama 통합)
+langchain-openai>=0.0.10  # LangChain OpenAI 통합
 
 # ========================================
 # STT (Speech-to-Text)
@@ -47,7 +50,7 @@ anthropic>=0.7.0  # Anthropic Claude API (선택)
 openai-whisper>=20231117  # Whisper 로컬 STT
 deepgram-sdk>=3.0.0  # Deepgram STT (실시간 스트리밍)
 # google-cloud-speech>=2.21.0  # Google STT (선택)
-# azure-cognitiveservices-speech>=1.31.0  # Azure STT (선택)
+azure-cognitiveservices-speech>=1.38.0  # Azure Speech (발음 평가)
 
 # ========================================
 # Audio Processing

@@ -5,7 +5,7 @@ AI Tutor Service
 
 역할:
 - 대화 컨텍스트 기반 AI 응답 생성
-- 고정 질문 처리 (턴 1, 5, 10)
+- 고정 질문 처리 (턴 1, 4, 7)
 - LLM 동적 질문 생성
 - 대화 흐름 관리
 
@@ -67,7 +67,7 @@ class AITutorService:
             )
 
             # ========================================
-            # Step 1: 고정 질문 턴 확인 (턴 1, 5, 10)
+            # Step 1: 고정 질문 턴 확인 (턴 1, 4, 7)
             # ========================================
             if session_state.should_use_fixed_question():
                 fixed_index = session_state.get_fixed_question_index()
@@ -121,7 +121,7 @@ class AITutorService:
             )
 
             # ========================================
-            # Step 1: 고정 질문 턴 확인 (턴 1, 5, 10)
+            # Step 1: 고정 질문 턴 확인 (턴 1, 4, 7)
             # ========================================
             if session_state.should_use_fixed_question():
                 fixed_index = session_state.get_fixed_question_index()

@@ -39,7 +39,9 @@ from app.roleplaying.validators import (ErrorHandler, InitStateValidator,
                                         SessionValidator)
 from app.roleplaying.ws_models import (AckMessage, AiTextMessage,
                                        AiTypingMessage, EndSessionMessage,
-                                       InitMessage, SessionEndedMessage,
+                                       FeedbackMessage, FeedbackStreamingMessage,
+                                       InitMessage, RetryRequiredMessage,
+                                       SessionEndedMessage,
                                        SttFinalMessage, SttPartialMessage,
                                        UserTextMessage, UtteranceEndMessage,
                                        UtteranceSavedMessage)
@@ -296,6 +298,11 @@ async def _handle_init(
         # 첫 AI 질문 전송 (고정 질문[0] 사용 - 턴 1)
         first_question = init_msg.fixedQuestions[0]
 
+        # 세션에 현재 질문 저장 (피드백 평가용)
+        session_state = session_manager.get_session(session_id)
+        if session_state:
+            session_state.current_question_text = first_question
+
         # 세션 히스토리에 추가
         session_manager.append_message(
             session_id=session_id,
@@ -420,29 +427,159 @@ async def _handle_user_text(
         )
 
         # ========================================
-        # Step 2: Spring 2에 텍스트 저장 (비동기)
+        # Step 2: 피드백 평가 (텍스트 기반 - 발음 제외)
+        # ========================================
+        from app.roleplaying.services.feedback_agent_service import feedback_agent_service
+
+        feedback_result = None
+        try:
+            # 텍스트 기반이므로 audio_data=None
+            feedback_result = await feedback_agent_service.evaluate_response_fast(
+                user_text=user_text,
+                audio_data=None,  # 텍스트 기반이므로 발음 평가 불가
+                conversation_history=session_state.history if session_state else [],
+                scenario_context={
+                    "my_role": session_state.my_role if session_state else "",
+                    "ai_role": session_state.ai_role if session_state else "",
+                    "current_question": session_state.current_question_text if session_state else ""
+                },
+                retry_count=session_state.current_question_retry_count if session_state else 0
+            )
+
+            # 점수 전송 (즉시)
+            feedback_msg = FeedbackMessage(
+                pronunciation_score=0,  # 텍스트 기반이므로 0
+                grammar_score=feedback_result["scores"]["grammar_score"],
+                relevance_score=feedback_result["scores"]["relevance_score"],
+                overall_score=feedback_result["scores"]["overall_score"]
+            )
+            await websocket.send_json(feedback_msg.model_dump())
+            logger.info(f"Feedback scores sent (text-based): {feedback_result['scores']}")
+
+            # 피드백 텍스트 생성 (백그라운드)
+            async def _generate_and_send_feedback():
+                try:
+                    feedback_text = feedback_result.get("feedback_text", "평가 완료")
+                    if feedback_text:
+                        await websocket.send_json(
+                            FeedbackStreamingMessage(chunk=feedback_text).model_dump()
+                        )
+                        logger.info(f"Feedback text sent: {feedback_text[:50]}...")
+                except Exception as e:
+                    logger.error(f"Failed to send feedback text: {e}")
+
+            feedback_task = asyncio.create_task(_generate_and_send_feedback())
+            context = f"feedback_text_generation_text(session={session_id})"
+            feedback_task.add_done_callback(lambda t: _handle_task_error(t, context))
+
+            # 교정 필요 여부 확인
+            needs_correction = feedback_result.get("needs_correction", False)
+
+            if needs_correction and session_state and session_state.can_retry():
+                # 재시도 필요
+                logger.info(
+                    f"Correction needed (text-based): session={session_id}, "
+                    f"issue={feedback_result.get('primary_issue')}, "
+                    f"retry_count={session_state.current_question_retry_count + 1}"
+                )
+
+                # 재시도 카운트 증가
+                session_state.increment_retry_count()
+
+                # 재시도 필요 메시지 전송
+                retry_msg = RetryRequiredMessage(
+                    reason=feedback_result.get("primary_issue", "correction_needed"),
+                    retry_count=session_state.current_question_retry_count,
+                    max_retries=session_state.max_retry_per_question
+                )
+                await websocket.send_json(retry_msg.model_dump())
+
+                # 현재 질문 다시 전송 (다시 입력 대기)
+                if session_state.current_question_text:
+                    await websocket.send_json(
+                        AiTextMessage(
+                            text=session_state.current_question_text,
+                            is_fixed_question=False
+                        ).model_dump()
+                    )
+                    logger.info(f"Re-sending question for retry (text): {session_state.current_question_text[:50]}...")
+
+                # 사용자 발화는 저장하지 않고 반환 (재시도 대기)
+                return
+            else:
+                # 교정 불필요 또는 최대 재시도 초과 → 진행
+                if needs_correction and not session_state.can_retry():
+                    logger.info(
+                        f"Max retries exceeded (text-based): session={session_id}, "
+                        f"retry_count={session_state.current_question_retry_count if session_state else 0}"
+                    )
+
+                # 재시도 카운트 리셋 (다음 질문을 위해)
+                if session_state:
+                    session_state.reset_retry_count()
+
+        except Exception as e:
+            logger.error(f"Feedback evaluation failed (text-based): {e}", exc_info=True)
+            logger.warning(f"Continuing despite feedback evaluation error: {session_id}")
+
+        # ========================================
+        # Step 3: Spring 2에 텍스트 저장 (비동기, 피드백 포함)
         # ========================================
         utterance_index = session_manager.increment_utterance_index(session_id)
 
-        _schedule_spring2_save(
-            session_id=session_id,
-            text=user_text,
-            utterance_index=utterance_index,
-            speaker="USER",
-        )
+        # 피드백 데이터 추출 (없으면 None)
+        feedback_scores = feedback_result["scores"] if feedback_result else {
+            "pronunciation_score": 0,
+            "grammar_score": None,
+            "relevance_score": None,
+            "overall_score": None
+        }
 
-        # 클라이언트에 저장 완료 알림 (실제로는 비동기 진행 중)
+        # Spring 2 저장 (피드백 포함)
+        async def _save_user_text_with_feedback():
+            try:
+                from app.integrations.clients.spring2_client import spring2_client
+                await spring2_client.save_utterance(
+                    session_id=session_id,
+                    stt_text=user_text,
+                    utterance_index=utterance_index,
+                    speaker="user",
+                    text=user_text,
+                    audio_data=None,  # 텍스트 기반이므로 None
+                    played_turns=session_state.ai_turn_count if session_state else None,
+                    completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
+                    finish_reason=None,
+                    status="IN_PROGRESS",
+                    # ✅ 피드백 데이터 추가
+                    pronunciation_score=0,  # 텍스트 기반
+                    grammar_score=feedback_scores.get("grammar_score"),
+                    relevance_score=feedback_scores.get("relevance_score"),
+                    overall_score=feedback_scores.get("overall_score"),
+                    feedback_text=feedback_result.get("feedback_text") if feedback_result else None,
+                    needs_correction=feedback_result.get("needs_correction", False) if feedback_result else False,
+                    retry_count=session_state.current_question_retry_count if session_state else 0,
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to save user text with feedback: session={session_id}, index={utterance_index}, error={e}",
+                    exc_info=True
+                )
+
+        task = asyncio.create_task(_save_user_text_with_feedback())
+        context = f"spring2_save_user_text(session={session_id}, speaker=user, index={utterance_index})"
+        task.add_done_callback(lambda t: _handle_task_error(t, context))
+
+        # 클라이언트에 저장 완료 알림
         await websocket.send_json(
             UtteranceSavedMessage(index=utterance_index).model_dump()
         )
 
         # 턴 제한 확인 (사용자 답변 후, AI 응답 생성 전)
-        # AI가 이미 10번 질문했고, 사용자가 10번 답변했으면 세션 종료
         if await _check_turn_limit(websocket, session_id, session_state):
             return
 
         # ========================================
-        # Step 3: AI 응답 생성 (스트리밍)
+        # Step 4: AI 응답 생성 (스트리밍)
         # ========================================
         await websocket.send_json(AiTypingMessage().model_dump())
 
@@ -482,6 +619,11 @@ async def _handle_user_text(
             text=full_ai_response,
             is_fixed_question=is_fixed_question,
         )
+
+        # 현재 질문을 세션에 저장 (다음 피드백 평가용)
+        if session_state:
+            session_state.current_question_text = full_ai_response
+            session_state.reset_retry_count()  # 새 질문이므로 재시도 카운트 리셋
 
         ai_index = session_manager.increment_utterance_index(session_id)
         _schedule_spring2_save(
@@ -588,7 +730,112 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         await websocket.send_json(SttFinalMessage(text=stt_text).model_dump())
 
         # ========================================
-        # Step 3: AI 응답 생성 (동시 진행 가능)
+        # Step 3: 피드백 평가 (실시간)
+        # ========================================
+        from app.roleplaying.services.feedback_agent_service import feedback_agent_service
+        from app.roleplaying.services.azure_usage_tracker import usage_tracker
+
+        try:
+            # Azure Speech 사용량 확인
+            can_use_azure = await usage_tracker.can_use_azure()
+
+            # 피드백 평가 실행
+            feedback_result = await feedback_agent_service.evaluate_response_fast(
+                user_text=stt_text,
+                audio_data=audio_data if can_use_azure else None,  # 발음 평가는 Azure 가능할 때만
+                conversation_history=session_state.history if session_state else [],
+                scenario_context={
+                    "my_role": session_state.my_role if session_state else "",
+                    "ai_role": session_state.ai_role if session_state else "",
+                    "current_question": session_state.current_question_text if session_state else ""
+                },
+                retry_count=session_state.current_question_retry_count if session_state else 0
+            )
+
+            # Azure Speech 사용량 증가
+            if can_use_azure:
+                await usage_tracker.increment_usage()
+
+            # 점수 전송 (즉시)
+            feedback_msg = FeedbackMessage(
+                pronunciation_score=feedback_result["scores"]["pronunciation_score"],
+                grammar_score=feedback_result["scores"]["grammar_score"],
+                relevance_score=feedback_result["scores"]["relevance_score"],
+                overall_score=feedback_result["scores"]["overall_score"]
+            )
+            await websocket.send_json(feedback_msg.model_dump())
+            logger.info(f"Feedback scores sent: {feedback_result['scores']}")
+
+            # 피드백 텍스트 생성 (백그라운드에서)
+            async def _generate_and_send_feedback():
+                try:
+                    feedback_text = feedback_result.get("feedback_text", "평가 완료")
+                    if feedback_text:
+                        await websocket.send_json(
+                            FeedbackStreamingMessage(chunk=feedback_text).model_dump()
+                        )
+                        logger.info(f"Feedback text sent: {feedback_text[:50]}...")
+                except Exception as e:
+                    logger.error(f"Failed to send feedback text: {e}")
+
+            # 백그라운드에서 피드백 텍스트 생성 (비동기)
+            feedback_task = asyncio.create_task(_generate_and_send_feedback())
+            context = f"feedback_text_generation(session={session_id})"
+            feedback_task.add_done_callback(lambda t: _handle_task_error(t, context))
+
+            # 교정 필요 여부 확인
+            needs_correction = feedback_result.get("needs_correction", False)
+
+            if needs_correction and session_state and session_state.can_retry():
+                # 재시도 필요
+                logger.info(
+                    f"Correction needed: session={session_id}, "
+                    f"issue={feedback_result.get('primary_issue')}, "
+                    f"retry_count={session_state.current_question_retry_count + 1}"
+                )
+
+                # 재시도 카운트 증가
+                session_state.increment_retry_count()
+
+                # 재시도 필요 메시지 전송
+                retry_msg = RetryRequiredMessage(
+                    reason=feedback_result.get("primary_issue", "correction_needed"),
+                    retry_count=session_state.current_question_retry_count,
+                    max_retries=session_state.max_retry_per_question
+                )
+                await websocket.send_json(retry_msg.model_dump())
+
+                # 현재 질문 다시 전송 (오디오 재녹음 대기)
+                if session_state.current_question_text:
+                    await websocket.send_json(
+                        AiTextMessage(
+                            text=session_state.current_question_text,
+                            is_fixed_question=False
+                        ).model_dump()
+                    )
+                    logger.info(f"Re-sending question for retry: {session_state.current_question_text[:50]}...")
+
+                # 사용자 발화는 저장하지 않고 반환 (재시도 대기)
+                return
+            else:
+                # 교정 불필요 또는 최대 재시도 초과 → AI 응답 생성
+                if needs_correction and not session_state.can_retry():
+                    logger.info(
+                        f"Max retries exceeded: session={session_id}, "
+                        f"retry_count={session_state.current_question_retry_count if session_state else 0}"
+                    )
+
+                # 재시도 카운트 리셋 (다음 질문을 위해)
+                if session_state:
+                    session_state.reset_retry_count()
+
+        except Exception as e:
+            logger.error(f"Feedback evaluation failed: {e}", exc_info=True)
+            # 에러 시에도 계속 진행 (피드백 평가 실패는 세션 중단 사유가 아님)
+            logger.warning(f"Continuing session despite feedback evaluation error: {session_id}")
+
+        # ========================================
+        # Step 4: AI 응답 생성 (동시 진행 가능)
         # ========================================
         utterance_index = session_manager.increment_utterance_index(session_id)
 
@@ -667,6 +914,11 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             is_fixed_question=is_fixed_question,
         )
 
+        # 현재 질문을 세션에 저장 (다음 피드백 평가용)
+        if session_state:
+            session_state.current_question_text = full_ai_response
+            session_state.reset_retry_count()  # 새 질문이므로 재시도 카운트 리셋
+
         # AI 응답 저장 (Spring 2 - 백그라운드)
         ai_index = session_manager.increment_utterance_index(session_id)
         _schedule_spring2_save(
@@ -674,8 +926,8 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             text=full_ai_response,
             utterance_index=ai_index,
             speaker="AI",
-            played_turns=session_state.ai_turn_count,
-            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS),
+            played_turns=session_state.ai_turn_count if session_state else None,
+            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
             finish_reason=None,
             status="IN_PROGRESS",
         )
