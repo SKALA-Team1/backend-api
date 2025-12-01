@@ -434,18 +434,24 @@ async def _handle_user_text(
 
         feedback_result = None
         try:
+            logger.info(f"Starting feedback evaluation for session={session_id}")
             # 텍스트 기반이므로 audio_data=None
-            feedback_result = await feedback_agent_service.evaluate_response_fast(
-                user_text=user_text,
-                audio_data=None,  # 텍스트 기반이므로 발음 평가 불가
-                conversation_history=session_state.history if session_state else [],
-                scenario_context={
-                    "my_role": session_state.my_role if session_state else "",
-                    "ai_role": session_state.ai_role if session_state else "",
-                    "current_question": session_state.current_question_text if session_state else ""
-                },
-                retry_count=session_state.current_question_retry_count if session_state else 0
+            # 타임아웃: 30초 (Ollama 응답 대기)
+            feedback_result = await asyncio.wait_for(
+                feedback_agent_service.evaluate_response_fast(
+                    user_text=user_text,
+                    audio_data=None,  # 텍스트 기반이므로 발음 평가 불가
+                    conversation_history=session_state.history if session_state else [],
+                    scenario_context={
+                        "my_role": session_state.my_role if session_state else "",
+                        "ai_role": session_state.ai_role if session_state else "",
+                        "current_question": session_state.current_question_text if session_state else ""
+                    },
+                    retry_count=session_state.current_question_retry_count if session_state else 0
+                ),
+                timeout=30.0  # 30초 타임아웃
             )
+            logger.info(f"Feedback evaluation completed: {feedback_result}")
 
             # 점수 전송 (즉시)
             feedback_msg = FeedbackMessage(
@@ -519,9 +525,47 @@ async def _handle_user_text(
                 if session_state:
                     session_state.reset_retry_count()
 
+        except asyncio.TimeoutError:
+            logger.error(f"Feedback evaluation timeout (30s exceeded): session={session_id}")
+            logger.warning("Ollama may not be running or is taking too long to respond")
+            # 타임아웃 시에도 폴백 점수로 계속 진행
+            feedback_result = {
+                "needs_correction": False,
+                "primary_issue": "timeout",
+                "scores": {
+                    "pronunciation_score": 0,
+                    "grammar_score": 70,
+                    "relevance_score": 70,
+                    "overall_score": 46
+                },
+                "feedback_text": "평가 중 타임아웃이 발생했습니다. Ollama가 실행 중인지 확인하세요.",
+                "retry_count": 0
+            }
+            # 타임아웃 에러를 사용자에게 전달
+            await websocket.send_json(
+                ErrorMessage(
+                    code="FEEDBACK_TIMEOUT",
+                    message="Feedback evaluation timeout. Check if Ollama is running.",
+                    severity="warning"
+                ).model_dump()
+            )
+            logger.info(f"Continuing with fallback scores: {feedback_result['scores']}")
         except Exception as e:
             logger.error(f"Feedback evaluation failed (text-based): {e}", exc_info=True)
             logger.warning(f"Continuing despite feedback evaluation error: {session_id}")
+            # 예외 발생 시에도 폴백 점수로 계속 진행
+            feedback_result = {
+                "needs_correction": False,
+                "primary_issue": "error",
+                "scores": {
+                    "pronunciation_score": 0,
+                    "grammar_score": 70,
+                    "relevance_score": 70,
+                    "overall_score": 46
+                },
+                "feedback_text": "평가 중 오류가 발생했습니다.",
+                "retry_count": 0
+            }
 
         # ========================================
         # Step 3: Spring 2에 텍스트 저장 (비동기, 피드백 포함)
@@ -734,18 +778,23 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             # Azure Speech 사용량 확인
             can_use_azure = await usage_tracker.can_use_azure()
 
-            # 피드백 평가 실행
-            feedback_result = await feedback_agent_service.evaluate_response_fast(
-                user_text=stt_text,
-                audio_data=audio_data if can_use_azure else None,  # 발음 평가는 Azure 가능할 때만
-                conversation_history=session_state.history if session_state else [],
-                scenario_context={
-                    "my_role": session_state.my_role if session_state else "",
-                    "ai_role": session_state.ai_role if session_state else "",
-                    "current_question": session_state.current_question_text if session_state else ""
-                },
-                retry_count=session_state.current_question_retry_count if session_state else 0
+            logger.info(f"Starting feedback evaluation for session={session_id}, can_use_azure={can_use_azure}")
+            # 피드백 평가 실행 (30초 타임아웃)
+            feedback_result = await asyncio.wait_for(
+                feedback_agent_service.evaluate_response_fast(
+                    user_text=stt_text,
+                    audio_data=audio_data if can_use_azure else None,  # 발음 평가는 Azure 가능할 때만
+                    conversation_history=session_state.history if session_state else [],
+                    scenario_context={
+                        "my_role": session_state.my_role if session_state else "",
+                        "ai_role": session_state.ai_role if session_state else "",
+                        "current_question": session_state.current_question_text if session_state else ""
+                    },
+                    retry_count=session_state.current_question_retry_count if session_state else 0
+                ),
+                timeout=30.0  # 30초 타임아웃
             )
+            logger.info(f"Feedback evaluation completed: {feedback_result}")
 
             # Azure Speech 사용량 증가
             if can_use_azure:
@@ -824,6 +873,19 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                 if session_state:
                     session_state.reset_retry_count()
 
+        except asyncio.TimeoutError:
+            logger.error(f"Feedback evaluation timeout (30s exceeded): session={session_id}")
+            logger.warning("Ollama may not be running or is taking too long to respond")
+            # 타임아웃 시에도 폴백 점수로 계속 진행
+            await websocket.send_json(
+                ErrorMessage(
+                    code="FEEDBACK_TIMEOUT",
+                    message="Feedback evaluation timeout. Check if Ollama is running.",
+                    severity="warning"
+                ).model_dump()
+            )
+            # 기본 점수로 계속 진행
+            logger.info(f"Continuing session despite feedback evaluation timeout: {session_id}")
         except Exception as e:
             logger.error(f"Feedback evaluation failed: {e}", exc_info=True)
             # 에러 시에도 계속 진행 (피드백 평가 실패는 세션 중단 사유가 아님)
