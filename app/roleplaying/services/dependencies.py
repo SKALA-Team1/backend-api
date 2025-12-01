@@ -1,20 +1,127 @@
 """
-Dependency Injection Helpers
-=============================
-FastAPI Depends를 활용한 의존성 주입 헬퍼 함수.
+Dependency Injection Configuration Module
+==========================================
 
-사용 방식:
-- FastAPI 라우터에서 함수 파라미터로 타입을 지정하면 자동으로 의존성 주입
-- @lru_cache()로 싱글톤 패턴 유지
-- 타입 안전성과 테스트 용이성 확보
+🔧 목적: FastAPI 의존성 주입(DI) 컨테이너 설정 및 싱글톤 인스턴스 관리
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-예시:
+이 모듈은 SOLID 원칙 중 Dependency Inversion을 구현합니다.
+서비스 인스턴스를 중앙에서 관리하고, FastAPI의 Depends()를 통해
+라우터에 자동 주입하는 역할을 합니다.
+
+📋 핵심 역할:
+
+    1. 싱글톤 인스턴스 생성 및 캐싱
+        - @lru_cache(maxsize=1): 애플리케이션 생명주기 동안 1개만 생성
+        - OpenAI LLM 인스턴스, 분석기, 생성기 등
+
+    2. 팩토리 함수 제공
+        - get_*_service(): 필요시 새로운 인스턴스 생성
+        - get_*_repository(): DB 세션별 새로운 저장소 인스턴스
+
+    3. Annotated 타입 별칭 정의
+        - 라우터에서 간편하게 사용
+        - 자동 의존성 주입 메커니즘
+
+⚙️ 서비스 계층 구조:
+
+    [LLM 서비스 계층] (Singleton - @lru_cache)
+    ├─ ConversationAnalyzer: Slack 대화 분석
+    ├─ ScenarioGenerator: 시나리오 생성
+    ├─ QuestionGenerator: 질문 생성
+    ├─ AIResponseGenerator: AI 응답 생성
+    ├─ GrammarEvaluator: 문법 평가
+    ├─ RelevanceEvaluator: 맥락 관련성 평가
+    ├─ PronunciationEvaluator: 발음 평가 (Azure Speech)
+    ├─ FeedbackJudge: 피드백 판정
+    ├─ FeedbackOrchestrator: 피드백 조율
+    ├─ MessageSummarizer: 메시지 요약
+    ├─ FixedQuestionBuilder: 고정 질문 생성
+    └─ ScenarioEnhancer: 시나리오 강화
+
+    [저장소 계층] (Request-scoped)
+    ├─ SessionRepository: Redis 기반 세션 관리
+    └─ ScenarioRepository: DB 기반 시나리오 조회
+
+    [복합 비즈니스 로직 계층] (의존성 자동 주입)
+    ├─ AITutorService: 튜터 로직
+    ├─ SlackScenarioService: Slack 대화 분석 및 시나리오 생성
+    ├─ PromptBasedScenarioService: 사용자 프롬프트 기반 생성
+    ├─ SessionService: 세션 설정 및 관리
+    └─ FeedbackAgentService: 피드백 생성 및 전송
+
+💡 사용 방법 예시:
+
+    # 방법 1: Annotated 타입 별칭 사용 (권장)
     @router.post("/analyze")
     async def analyze(
         request: AnalysisRequest,
         analyzer: ConversationAnalyzerDep
     ):
+        # analyzer는 자동으로 get_conversation_analyzer() 결과가 주입됨
         result = await analyzer.analyze_situation(...)
+        return result
+
+    # 방법 2: Depends() 명시적 사용
+    @router.post("/setup")
+    async def setup(
+        request: SessionSetupRequest,
+        session_service: SessionService = Depends(get_session_service)
+    ):
+        ...
+
+    # 방법 3: 복합 서비스 (의존성 자동 재귀)
+    # SessionService의 파라미터인 session_repo, scenario_repo도 자동 주입
+    @router.post("/initialize")
+    async def init(
+        service: SessionServiceDep
+    ):
+        ...
+
+🔄 의존성 주입 작동 흐름:
+
+    1️⃣ 라우터 함수 정의
+       @router.post("/analyze")
+       async def analyze(analyzer: ConversationAnalyzerDep):
+           ...
+
+    2️⃣ FastAPI가 ConversationAnalyzerDep 감지
+       → typing.get_args() 분석
+       → Depends(get_conversation_analyzer) 발견
+
+    3️⃣ get_conversation_analyzer() 실행
+       → ConversationAnalyzerImpl 인스턴스 생성
+       → OpenAI API 클라이언트 초기화
+       → @lru_cache로 캐싱 (동일 프로세스에서 재사용)
+
+    4️⃣ 인스턴스가 함수 파라미터로 주입됨
+       analyzer = <ConversationAnalyzerImpl 인스턴스>
+
+⚠️ 설계 결정 사항:
+
+    [싱글톤 vs 요청별 생성]
+    LLM 서비스: Singleton (@lru_cache 사용)
+    - 이유: API 비용 절감, 초기 로딩 시간 절약
+    - 문제: 상태 변경 금지 (thread-safe 필수)
+
+    저장소: Request-scoped (매번 새로운 인스턴스)
+    - 이유: DB 연결/Redis 풀 효율적 관리
+    - 이점: 각 요청마다 독립적인 상태 유지
+
+    [설정값 주입 패턴]
+    - settings.openai_api_key: 환경변수 (OpenAI 인증)
+    - settings.OPENAI_MODEL_*: 모델명 선택 (GPT-4 등)
+    - settings.FEEDBACK_LLM_PROVIDER: 피드백 LLM 공급자
+
+    [순환 의존성 방지]
+    - 서비스 간 순환 의존 금지 (아키텍처 규칙)
+    - 명확한 계층 구조 유지 (의존성 그래프 DAG)
+
+의존성:
+    - fastapi.Depends: 의존성 주입 메커니즘
+    - functools.lru_cache: 싱글톤 패턴 구현
+    - app.config.settings: 환경설정 (API 키, 모델명 등)
+    - app.roleplaying.services.*: 모든 서비스 구현체
 """
 
 from functools import lru_cache
