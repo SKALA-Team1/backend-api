@@ -87,3 +87,31 @@ async def test_generate_fixed_questions_includes_summaries_in_prompt():
     assert questions == ["Q1", "Q2", "Q3"]
     assert "[AI role: Tech Lead]" in stub_llm.build_calls[0][0]
     assert "[AI role: Tech Lead]" in stub_llm.build_calls[0][1]
+
+
+def test_format_title_removes_roles_and_limits_length():
+    service = SlackScenarioService()
+
+    formatted = service._format_title(
+        title="Tech Lead Deep Dive | Backend Engineer Handoff Strategy",
+        ai_role="Tech Lead",
+        topic_type="detail",
+        my_role="Backend Engineer"
+    )
+
+    assert "Tech Lead" not in formatted
+    assert "Backend Engineer" not in formatted
+    assert len(formatted) <= 50
+
+
+def test_format_title_fallback_when_empty():
+    service = SlackScenarioService()
+
+    formatted = service._format_title(
+        title="",
+        ai_role="Project Manager",
+        topic_type="overview",
+        my_role="Data Analyst"
+    )
+
+    assert formatted == "Focused Overview"

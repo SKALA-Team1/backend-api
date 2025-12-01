@@ -80,8 +80,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Backend Skeleton", lifespan=lifespan)
 register_exception_handlers(app)
 
-app.include_router(health_router, prefix="/health", tags=["health"])
-app.include_router(roleplaying_router, prefix="/roleplaying", tags=["roleplaying"])
+app.include_router(health_router, tags=["health"])
+app.include_router(roleplaying_router, tags=["roleplaying"])
 app.include_router(ws_realtime_router, tags=["websocket"])
 app.include_router(feedback_router, tags=["feedback"])
 app.include_router(rag_router, prefix="/textbook", tags=["RAG (에이전트1)"])

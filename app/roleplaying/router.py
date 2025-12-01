@@ -48,9 +48,12 @@ from app.roleplaying.schemas import (
     AnalysisResultDto,
     MessageRole,
     InternalSessionSetupRequest,
-    InternalSessionSetupResponse
+    InternalSessionSetupResponse,
+    PromptBasedScenarioRequestDto,
+    PromptBasedScenarioResponseDto
 )
 from app.roleplaying.services.slack_scenario_service import SlackScenarioService
+from app.roleplaying.services.prompt_based_generator_service import PromptBasedScenarioService
 from app.config import settings
 from app.roleplaying.services.session_service import session_service
 from app.core.deps import get_db
@@ -61,6 +64,56 @@ logger = logging.getLogger(__name__)
 @router.get("/health/ping")
 async def ping():
     return {"status": "ok"}
+
+
+@router.get("/roleplaying/health/ping", include_in_schema=False)
+async def legacy_ping():
+    """
+    Backward-compatible endpoint for clients still calling /roleplaying/health/ping.
+    """
+    return await ping()
+
+
+async def _process_internal_session_setup(
+    request: InternalSessionSetupRequest,
+    db: Session
+) -> InternalSessionSetupResponse:
+    """
+    Shared session setup handler used by both the canonical and legacy routes.
+    """
+    try:
+        session_id, scenario, expires_at = await session_service.setup_session(
+            session_id=request.sessionId,
+            user_id=request.userId,
+            scenario_id=request.scenarioId,
+            db=db
+        )
+
+        base_ws_url = settings.WS_BASE_URL.rstrip("/")
+        ws_url = f"{base_ws_url}/ws/roleplaying/{session_id}"
+
+        logger.info(
+            f"Session setup successfully: session_id={session_id}, "
+            f"user_id={request.userId}, scenario_id={request.scenarioId}"
+        )
+
+        return InternalSessionSetupResponse(
+            sessionId=session_id,
+            wsUrl=ws_url,
+            scenario=scenario,
+            expiresAt=expires_at
+        )
+
+    except ValueError as e:
+        logger.warning(f"Scenario not found: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+
+    except Exception as e:
+        logger.error(f"Failed to setup session: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to setup session: {str(e)}"
+        )
 
 
 @router.post("/internal/scenarios/analyze-conversation", response_model=AnalysisResultDto)
@@ -130,36 +183,76 @@ async def internal_setup_session(
         - session_id는 Spring 1이 생성합니다.
         - FastAPI는 이 session_id를 받아서 Redis에 저장하기만 합니다.
     """
+    return await _process_internal_session_setup(request, db)
+
+
+@router.post(
+    "/roleplaying/internal/sessions/setup",
+    response_model=InternalSessionSetupResponse,
+    include_in_schema=False
+)
+async def legacy_internal_setup_session(
+    request: InternalSessionSetupRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Legacy compatibility route so existing callers of /roleplaying/internal/sessions/setup continue to work.
+    """
+    return await _process_internal_session_setup(request, db)
+
+
+@router.post("/internal/scenarios/generate-from-prompt", response_model=PromptBasedScenarioResponseDto)
+async def generate_scenario_from_prompt(
+    request: PromptBasedScenarioRequestDto,
+    db: Session = Depends(get_db)
+):
+    """
+    사용자 프롬프트로부터 롤플레잉 시나리오를 생성합니다.
+
+    클라이언트에서 직접 호출하는 내부 API입니다.
+    (Spring 1에서 JWT 검증 후 FastAPI URL을 반환하면, 클라이언트가 직접 호출)
+
+    Args:
+        request: 사용자 프롬프트 정보
+        db: DB 세션 (과거 시나리오 컨텍스트 조회용)
+
+    Returns:
+        생성된 시나리오 정보
+
+    Raises:
+        400: 입력 검증 실패
+        500: LLM 분석 실패 또는 기타 서버 오류
+    """
     try:
-        session_id, scenario, expires_at = await session_service.setup_session(
-            session_id=request.sessionId,
+        # 입력 검증은 Pydantic에서 자동으로 수행됨
+        logger.info(
+            f"Generating scenario from prompt for user {request.userId}: "
+            f"my_role={request.myRole}, ai_role={request.aiRole}"
+        )
+
+        # PromptBasedScenarioService 실행
+        service = PromptBasedScenarioService()
+        scenario = await service.generate_from_prompt(
             user_id=request.userId,
-            scenario_id=request.scenarioId,
+            my_role=request.myRole,
+            ai_role=request.aiRole,
+            situation=request.situation,
             db=db
         )
 
-        base_ws_url = settings.WS_BASE_URL.rstrip("/")
-        ws_url = f"{base_ws_url}/ws/roleplaying/{session_id}"
-
-        logger.info(
-            f"Session setup successfully: session_id={session_id}, "
-            f"user_id={request.userId}, scenario_id={request.scenarioId}"
-        )
-
-        return InternalSessionSetupResponse(
-            sessionId=session_id,
-            wsUrl=ws_url,
-            scenario=scenario,
-            expiresAt=expires_at
-        )
+        logger.info(f"Successfully generated scenario for user {request.userId}")
+        return PromptBasedScenarioResponseDto(scenario=scenario)
 
     except ValueError as e:
-        logger.warning(f"Scenario not found: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.warning(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
     except Exception as e:
-        logger.error(f"Failed to setup session: {e}", exc_info=True)
+        logger.error(
+            f"Failed to generate scenario for user {request.userId}: {e}",
+            exc_info=True
+        )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to setup session: {str(e)}"
+            detail=f"Failed to generate scenario: {str(e)}"
         )

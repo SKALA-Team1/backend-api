@@ -67,6 +67,7 @@ class ScenarioInfoDto(BaseModel):
     topicType: str = Field(..., description="토픽 타입 (overview, detail)")
     title: str = Field(..., max_length=200, description="시나리오 제목")
     fixedQuestions: List[str] = Field(..., min_items=3, max_items=3, description="고정 질문 목록 (3개)")
+    creationType: str = Field(..., description="시나리오 생성 방식 (prompt, slack)")
 
 
 class AnalysisResultDto(BaseModel):
@@ -92,6 +93,23 @@ class SessionCreateResponse(BaseModel):
     ws_url: str = Field(..., description="WebSocket 연결 URL")
     scenario: ScenarioDetail = Field(..., description="선택된 시나리오 정보")
     expires_at: datetime = Field(..., description="세션 만료 시각")
+
+
+# =====================================================
+# 사용자 프롬프트 기반 시나리오 생성 스키마
+# =====================================================
+
+class PromptBasedScenarioRequestDto(BaseModel):
+    """사용자 프롬프트 기반 시나리오 생성 요청 DTO"""
+    userId: int = Field(..., description="사용자 ID", gt=0)
+    myRole: str = Field(..., description="사용자의 역할", min_length=1, max_length=100)
+    aiRole: str = Field(..., description="AI의 역할", min_length=1, max_length=100)
+    situation: str = Field(..., description="롤플레잉 상황 및 주제", min_length=1, max_length=500)
+
+
+class PromptBasedScenarioResponseDto(BaseModel):
+    """사용자 프롬프트 기반 시나리오 생성 응답 DTO"""
+    scenario: ScenarioInfoDto = Field(..., description="생성된 시나리오 정보")
 
 
 # =====================================================

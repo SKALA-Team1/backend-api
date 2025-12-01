@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from app.roleplaying.services.llm_service import LLMService
+from app.roleplaying.services.title_utils import compact_title
 from app.roleplaying.schemas import (
     AnalysisRequestDto,
     AnalysisResultDto,
@@ -175,13 +176,19 @@ class SlackScenarioService:
             fallback_questions=base_questions
         )
 
-        formatted_title = self._format_title(scenario_data.get("title"), ai_role, topic_type)
+        formatted_title = self._format_title(
+            title=scenario_data.get("title"),
+            ai_role=ai_role,
+            topic_type=topic_type,
+            my_role=my_role
+        )
 
         return ScenarioInfoDto(
             aiRole=ai_role,
             topicType=topic_type,
             title=formatted_title,
-            fixedQuestions=questions
+            fixedQuestions=questions,
+            creationType="slack"
         )
 
     async def _build_conversation_summary(
@@ -315,25 +322,19 @@ class SlackScenarioService:
             "How would you like your counterpart to support you next?"
         ]
 
-    def _format_title(self, title: str, ai_role: str, topic_type: str) -> str:
-        """
-        Post-process LLM titles so each scenario clearly communicates the role perspective and depth.
-        This helps the scenario table feel more varied even when the LLM returns similar base phrases.
-        """
-        base_title = (title or "").strip() or "Scenario"
-        role_label_map = {
-            "Project Manager": "Project Manager",
-            "Tech Lead": "Tech Lead",
-            "QA Engineer": "QA Engineer"
-        }
-        role_label = (role_label_map.get(ai_role) or "AI Partner").strip()
-        depth_label = "Overview Sync" if topic_type == "overview" else "Deep Dive Focus"
-        prefix = f"{role_label} {depth_label}"
-
-        lowered_base = base_title.lower()
-        if role_label.lower() in lowered_base and depth_label.lower() in lowered_base:
-            formatted = base_title
-        else:
-            formatted = f"{prefix} | {base_title}"
-
-        return formatted[:200]
+    def _format_title(self, *, title: str, ai_role: str, topic_type: str, my_role: str) -> str:
+        """Normalize scenario titles to exclude explicit role names and keep them short."""
+        fallback = "Focused Overview" if topic_type == "overview" else "Focused Detail"
+        banned_phrases = [
+            ai_role,
+            my_role,
+            "Project Manager",
+            "Tech Lead",
+            "QA Engineer"
+        ]
+        return compact_title(
+            raw_title=title,
+            banned_phrases=banned_phrases,
+            fallback=fallback,
+            max_length=50
+        )
