@@ -21,6 +21,7 @@ from app.scenario.schemas import (
     ScenarioGenerateRequest,
     ScenarioResponse,
     ChapterListResponse,
+    UnitChapters,
     ScenarioType,
     DifficultyLevel
 )
@@ -113,17 +114,66 @@ async def generate_scenario(request: ScenarioGenerateRequest):
 @router.get("/chapters", response_model=ChapterListResponse)
 async def get_chapters():
     """
-    사용 가능한 챕터 목록 조회
+    사용 가능한 챕터 목록 조회 (Unit별 그룹화)
 
-    시나리오 생성에 사용할 수 있는 교재 챕터 목록을 반환합니다.
+    교재 구조:
+    - Unit 1: Meeting (미팅) - Chapter 01-03
+    - Unit 2: Requesting (요청) - Chapter 04-06
+    - Unit 3: Writing Emails (이메일 작성) - Chapter 07-09
+    - Unit 4: Feedback & Issues (피드백 & 이슈) - Chapter 10-12
+
+    시나리오 생성 시 반드시 하나의 Chapter를 선택해야 합니다.
     """
     try:
         rag_service = get_rag_service()
-        chapters = rag_service.get_available_chapters()
+        all_chapters = rag_service.get_available_chapters()
+
+        # Answer Key 제외
+        all_chapters = [ch for ch in all_chapters if not ch.startswith("Answer")]
+
+        # Unit별로 챕터 그룹화
+        unit_definitions = [
+            {
+                "unit_number": 1,
+                "unit_name": "Unit 1: Meeting (미팅)",
+                "chapter_range": (1, 3)
+            },
+            {
+                "unit_number": 2,
+                "unit_name": "Unit 2: Requesting (요청)",
+                "chapter_range": (4, 6)
+            },
+            {
+                "unit_number": 3,
+                "unit_name": "Unit 3: Writing Emails (이메일 작성)",
+                "chapter_range": (7, 9)
+            },
+            {
+                "unit_number": 4,
+                "unit_name": "Unit 4: Feedback & Issues (피드백 & 이슈)",
+                "chapter_range": (10, 12)
+            }
+        ]
+
+        units = []
+        for unit_def in unit_definitions:
+            start, end = unit_def["chapter_range"]
+            # 해당 Unit에 속하는 챕터 필터링
+            unit_chapters = [
+                ch for ch in all_chapters
+                if any(f"Chapter {num:02d}" in ch for num in range(start, end + 1))
+            ]
+
+            units.append(UnitChapters(
+                unit_number=unit_def["unit_number"],
+                unit_name=unit_def["unit_name"],
+                chapters=unit_chapters
+            ))
 
         return ChapterListResponse(
-            chapters=chapters,
-            total_count=len(chapters)
+            units=units,
+            all_chapters=all_chapters,
+            total_count=len(all_chapters)
         )
 
     except Exception as e:

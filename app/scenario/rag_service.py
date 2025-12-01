@@ -72,11 +72,19 @@ class RAGService:
             topic: 시나리오 주제
             scenario_type: 시나리오 유형
             n_results: 검색 결과 수
-            chapter_filter: 챕터 필터
+            chapter_filter: 챕터 필터 (REQUIRED - 특정 챕터만 사용)
 
         Returns:
             TextbookContext 객체
         """
+        # 챕터 필터 필수 검증
+        if not chapter_filter:
+            raise ValueError(
+                "chapter_filter is required. "
+                "You must select a specific chapter to generate scenario. "
+                "Use /scenario/chapters API to get available chapters."
+            )
+
         # 주제와 유형을 조합한 검색 쿼리
         search_query = f"{topic} {scenario_type.replace('_', ' ')}"
 
@@ -86,13 +94,24 @@ class RAGService:
             chapter_filter=chapter_filter
         )
 
-        # 검색 결과 정리
-        chapters = list(set(r.chapter for r in results))
-        contents = [r.text for r in results]
+        # ✅ 중요: chapter_filter와 일치하는 결과만 사용 (다른 챕터 제거)
+        filtered_results = [r for r in results if r.chapter == chapter_filter]
+
+        if not filtered_results:
+            raise ValueError(
+                f"No content found for chapter '{chapter_filter}'. "
+                f"Please check the chapter name and try again."
+            )
+
+        logger.info(f"Using {len(filtered_results)} chunks from chapter: {chapter_filter}")
+
+        # 검색 결과 정리 (단일 챕터만)
+        chapters = [chapter_filter]  # 선택한 챕터만
+        contents = [r.text for r in filtered_results]
 
         # 컨텍스트 텍스트 생성
         combined_parts = []
-        for r in results:
+        for r in filtered_results:
             combined_parts.append(f"[{r.chapter}]\n{r.text}")
 
         combined_text = "\n\n---\n\n".join(combined_parts)

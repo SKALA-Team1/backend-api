@@ -47,8 +47,8 @@ class ScenarioGenerateRequest(BaseModel):
     topic: str = Field(..., min_length=1, max_length=200, description="시나리오 주제")
     scenario_type: ScenarioType = Field(ScenarioType.GENERAL, description="시나리오 유형")
     difficulty: DifficultyLevel = Field(DifficultyLevel.INTERMEDIATE, description="난이도")
-    num_turns: int = Field(6, ge=2, le=20, description="대화 턴 수")
-    chapter_filter: Optional[str] = Field(None, description="특정 챕터로 제한")
+    num_turns: int = Field(20, ge=2, le=30, description="대화 턴 수 (AI와 User가 각각 절반씩 발화)")
+    chapter_filter: str = Field(..., description="특정 챕터 선택 (필수) - /scenario/chapters API로 챕터 목록 조회")
     include_korean_hints: bool = Field(True, description="한국어 힌트 포함 여부")
     save_to_db: bool = Field(True, description="DB에 저장 여부")
 
@@ -82,7 +82,15 @@ class ScenarioResponse(BaseModel):
     saved_to_db: bool = Field(False, description="DB 저장 성공 여부")
 
 
+class UnitChapters(BaseModel):
+    """Unit별 챕터"""
+    unit_number: int = Field(..., description="Unit 번호 (1-4)")
+    unit_name: str = Field(..., description="Unit 이름")
+    chapters: list[str] = Field(..., description="해당 Unit의 챕터 목록")
+
+
 class ChapterListResponse(BaseModel):
     """챕터 목록 응답"""
-    chapters: list[str] = Field(..., description="사용 가능한 챕터 목록")
+    units: list[UnitChapters] = Field(..., description="Unit별 챕터 목록")
+    all_chapters: list[str] = Field(..., description="전체 챕터 목록 (하위 호환)")
     total_count: int = Field(..., description="총 챕터 수")
