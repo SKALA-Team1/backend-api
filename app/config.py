@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     # ========================================
     # LLM Provider Selection
     # ========================================
-    FEEDBACK_LLM_PROVIDER: str = Field("ollama", alias="FEEDBACK_LLM_PROVIDER")
+    FEEDBACK_LLM_PROVIDER: str = Field("openai", alias="FEEDBACK_LLM_PROVIDER")
 
     # -------------------------------------
     # Redis

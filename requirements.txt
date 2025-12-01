@@ -43,6 +43,8 @@ anthropic>=0.7.0  # Anthropic Claude API (선택)
 langchain>=0.1.0  # LangChain 프레임워크 (에이전트)
 langchain-community>=0.0.20  # LangChain 커뮤니티 (Ollama 통합)
 langchain-openai>=0.0.10  # LangChain OpenAI 통합
+langsmith>=0.1.0  # LangSmith - LLM 토큰 사용량 추적 및 모니터링
+langchain-ollama>=0.1.0  # LangChain Ollama 통합
 
 # ========================================
 # STT (Speech-to-Text)

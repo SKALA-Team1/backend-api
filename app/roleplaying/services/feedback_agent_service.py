@@ -36,6 +36,11 @@ class FeedbackAgentService:
         self.llm = self._get_llm()
         logger.info(f"FeedbackAgentService initialized with {settings.FEEDBACK_LLM_PROVIDER}")
 
+        # LangSmith 추적 설정 확인
+        import os
+        if os.getenv("LANGCHAIN_TRACING_V2") == "true":
+            logger.info("✅ LangSmith 추적 활성화 - 토큰 사용량이 기록됩니다")
+
     def _get_llm(self):
         """환경변수에 따라 LLM 선택"""
         if settings.FEEDBACK_LLM_PROVIDER == "openai":

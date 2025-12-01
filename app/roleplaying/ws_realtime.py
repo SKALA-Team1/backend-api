@@ -439,7 +439,7 @@ async def _handle_user_text(
             logger.info(f"⏱️  [피드백 평가 시작] session={session_id}, 텍스트 길이: {len(user_text)} 글자")
 
             # 텍스트 기반이므로 audio_data=None
-            # 타임아웃: 120초 (병렬 평가 ~37초 + 피드백 생성 ~5초 + 버퍼)
+            # 타임아웃: 30초 (OpenAI 병렬 평가 ~3초 + 피드백 생성 ~2초 + 버퍼)
             feedback_result = await asyncio.wait_for(
                 feedback_agent_service.evaluate_response_fast(
                     user_text=user_text,
@@ -452,7 +452,7 @@ async def _handle_user_text(
                     },
                     retry_count=session_state.current_question_retry_count if session_state else 0
                 ),
-                timeout=120.0  # 120초 타임아웃 (llama2 병렬 평가 + 피드백 생성)
+                timeout=30.0  # 30초 타임아웃 (OpenAI 병렬 평가 + 피드백 생성)
             )
             feedback_elapsed = time.time() - feedback_start
             logger.info(f"✅ [피드백 평가 완료 (ws_realtime)] 총 소요 시간: {feedback_elapsed:.2f}초")
@@ -787,7 +787,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             feedback_start = time.time()
             logger.info(f"⏱️  [피드백 평가 시작] session={session_id}, STT 텍스트: '{stt_text[:50]}...', Azure={can_use_azure}")
 
-            # 피드백 평가 실행 (120초 타임아웃)
+            # 피드백 평가 실행 (30초 타임아웃)
             feedback_result = await asyncio.wait_for(
                 feedback_agent_service.evaluate_response_fast(
                     user_text=stt_text,
@@ -800,7 +800,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                     },
                     retry_count=session_state.current_question_retry_count if session_state else 0
                 ),
-                timeout=120.0  # 120초 타임아웃 (llama2 병렬 평가 + 피드백 생성)
+                timeout=30.0  # 30초 타임아웃 (OpenAI 병렬 평가 + 피드백 생성)
             )
             feedback_elapsed = time.time() - feedback_start
             logger.info(f"✅ [피드백 평가 완료 (오디오)] 총 소요 시간: {feedback_elapsed:.2f}초")
