@@ -197,21 +197,22 @@ class FeedbackAgentService:
             return {"score": 0, "feedback": "발음 분석 오류"}
 
     async def _evaluate_grammar_async(self, user_text: str) -> Dict:
-        """비동기 문법 평가"""
+        """비동기 문법 평가 (LLM 호출을 비동기로 래핑)"""
         import time
         start = time.time()
 
-        prompt = f"""다음 영문 문장의 문법을 확인하고 점수(0-100)를 주세요:
-"{user_text}"
-
-응답 형식: JSON {{"score": int, "feedback": str}}
-
-예시: {{"score": 85, "feedback": "문법이 올바릅니다"}}
-"""
+        # 짧은 프롬프트로 성능 개선
+        prompt = f"""문법 평가: "{user_text[:100]}"
+점수(0-100)와 간단한 피드백만 JSON으로 응답:
+{{"score": int, "feedback": str}}"""
 
         try:
             logger.info("  🟢 [문법 평가] LLM 호출 중...")
-            response = self.llm.invoke(prompt)
+
+            # ✅ 동기 호출을 비동기로 래핑
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, self.llm.invoke, prompt)
+
             elapsed = time.time() - start
             response_text = response.content if hasattr(response, 'content') else str(response)
 
@@ -242,25 +243,26 @@ class FeedbackAgentService:
         conversation_history: list,
         scenario_context: dict
     ) -> Dict:
-        """비동기 맥락 평가"""
+        """비동기 맥락 평가 (LLM 호출을 비동기로 래핑)"""
         import time
         start = time.time()
 
-        context = self._build_conversation_context(conversation_history, scenario_context)
+        # 컨텍스트 축약 (성능 개선)
+        context = self._build_conversation_context(conversation_history, scenario_context)[:200]
 
-        prompt = f"""다음 대화 맥락에서 사용자의 응답이 얼마나 적절한지 평가하세요 (0-100):
-
-맥락:
-{context}
-
-사용자 응답:
-"{user_text}"
-
-응답 형식: JSON {{"score": int, "feedback": str}}"""
+        # 짧은 프롬프트로 성능 개선
+        prompt = f"""맥락 평가: "{context}"
+응답: "{user_text[:100]}"
+점수(0-100)와 간단한 피드백만 JSON:
+{{"score": int, "feedback": str}}"""
 
         try:
             logger.info("  🔴 [맥락 평가] LLM 호출 중...")
-            response = self.llm.invoke(prompt)
+
+            # ✅ 동기 호출을 비동기로 래핑
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, self.llm.invoke, prompt)
+
             elapsed = time.time() - start
             response_text = response.content if hasattr(response, 'content') else str(response)
 
