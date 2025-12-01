@@ -62,7 +62,12 @@ class Settings(BaseSettings):
     # OpenAI
     # -------------------------------------
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    OPENAI_MODEL: str = Field("gpt-4.1", alias="OPENAI_MODEL")
+
+    # 용도별 모델 설정
+    OPENAI_MODEL_FEEDBACK: str = Field("gpt-4.1", alias="OPENAI_MODEL_FEEDBACK")
+    OPENAI_MODEL_QUESTION_GENERATION: str = Field("gpt-4.1-mini", alias="OPENAI_MODEL_QUESTION_GENERATION")
+    OPENAI_MODEL_AI_RESPONSE: str = Field("gpt-4.1-mini", alias="OPENAI_MODEL_AI_RESPONSE")
+
     deepgram_api_key: Optional[str] = Field(default=None, alias="DEEPGRAM_API_KEY")
 
     # ========================================

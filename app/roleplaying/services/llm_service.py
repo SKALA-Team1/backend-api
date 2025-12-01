@@ -1,36 +1,62 @@
 """
 LLM Service
 ===========
-Ollama를 사용하여 대화 분석 및 시나리오 생성을 수행하는 서비스.
+OpenAI를 사용하여 대화 분석 및 시나리오 생성을 수행하는 서비스.
 
 역할:
-    - Ollama 라이브러리를 통한 LLM 모델 호출
+    - OpenAI API를 통한 LLM 모델 호출
     - 대화 상황(situation) 분석 (myRole은 분석하지 않음)
     - 시나리오 생성 프롬프트 생성 및 실행
+    - LangSmith를 통한 자동 토큰 사용량 추적
 
 의존성:
-    - ollama (로컬 또는 원격 Ollama 서버 필요)
+    - langchain-openai (OpenAI API 클라이언트)
 """
 
 import json
 import logging
+import asyncio
 from typing import List, Dict, Any, AsyncGenerator
 from datetime import datetime
-import asyncio
-import ollama
+
+from langchain_openai import ChatOpenAI
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class LLMService:
-    """Ollama 기반 LLM 서비스"""
+    """OpenAI 기반 LLM 서비스"""
 
-    def __init__(self, model_name: str = "llama3.2"):
+    def __init__(self, purpose: str = "ai_response"):
         """
         Args:
-            model_name: 사용할 모델 이름 (예: llama3.2, llama2, mistral)
+            purpose: 사용 목적
+                - "question_generation": 질문 생성 (OPENAI_MODEL_QUESTION_GENERATION)
+                - "ai_response": AI 응답 생성 (OPENAI_MODEL_AI_RESPONSE)
+                - "analysis": 대화 분석 (OPENAI_MODEL_QUESTION_GENERATION)
         """
-        self.model_name = model_name
+        self.purpose = purpose
+        self.llm = self._initialize_llm()
+        logger.info(f"LLMService initialized for: {purpose}, model: {self.model_name}")
+
+    def _initialize_llm(self) -> ChatOpenAI:
+        """목적에 맞는 OpenAI 모델 초기화"""
+        if self.purpose == "question_generation":
+            self.model_name = settings.OPENAI_MODEL_QUESTION_GENERATION
+        elif self.purpose == "ai_response":
+            self.model_name = settings.OPENAI_MODEL_AI_RESPONSE
+        elif self.purpose == "analysis":
+            self.model_name = settings.OPENAI_MODEL_QUESTION_GENERATION
+        else:
+            self.model_name = settings.OPENAI_MODEL_AI_RESPONSE
+
+        return ChatOpenAI(
+            model=self.model_name,
+            api_key=settings.openai_api_key,
+            temperature=0.7
+        )
 
     async def analyze_situation(
         self,
@@ -63,735 +89,375 @@ class LLMService:
 
         prompt = f"""You are analyzing a Slack conversation to create English practice scenarios.
 
-                The user's role is: {my_role}
-                
-                Here are the messages from {conversation_date}:
-                {messages_text}
-                
-                Based on this conversation, what is the main topic or situation being discussed?
-                Provide a brief summary in 1-2 sentences written in English.
-                
-                Example: "Discussing authentication module refactoring priorities and implementation timeline"
-                
-                Return only the English situation description as a plain string, without any extra formatting or translation."""
+The user's role is: {my_role}
+
+Here are the messages from {conversation_date}:
+{messages_text}
+
+Based on this conversation, what is the main topic or situation being discussed?
+Provide a brief summary in 1-2 sentences written in English.
+
+Example: "Discussing authentication module refactoring priorities and implementation timeline"
+
+Return only the English situation description as a plain string, without any extra formatting or translation."""
 
         try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': 'You are a helpful assistant that analyzes conversations. Provide concise summaries.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ]
+            logger.info("📊 [대화 상황 분석] OpenAI 호출 중...")
+
+            # 비동기 호출
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                self.llm.invoke,
+                prompt
             )
 
-            # 응답 파싱
-            situation = response['message']['content'].strip()
+            situation = response.content if hasattr(response, 'content') else str(response)
+            situation = situation.strip()
 
             # 너무 길면 자르기 (2문장 정도로 제한)
             sentences = situation.split('.')
             if len(sentences) > 2:
                 situation = '. '.join(sentences[:2]) + '.'
 
+            logger.info(f"✅ [대화 상황 분석 완료] {situation[:100]}...")
             return situation
 
         except Exception as e:
-            logger.error(f"Failed to analyze situation: {e}")
-            # 기본값 반환
-            return "Professional workplace discussion"
+            logger.error(f"Situation analysis failed: {e}", exc_info=True)
+            return "Unable to analyze conversation situation"
 
-    async def generate_scenario(
-        self,
-        my_role: str,
-        situation: str,
-        ai_role: str,
-        topic_type: str
-    ) -> Dict[str, Any]:
-        """
-        특정 AI 역할과 토픽 타입에 대한 시나리오를 생성합니다.
-
-        Args:
-            my_role: 사용자의 역할
-            situation: 대화 주제/상황
-            ai_role: AI 역할 (Project Manager, Tech Lead, QA Engineer)
-            topic_type: 토픽 타입 (overview, detail)
-
-        Returns:
-            {"title": "...", "fixedQuestions": ["...", "...", "..."]}
-        """
-        topic_instructions = {
-            "overview": "Create a high-level, general discussion scenario",
-            "detail": "Create a deep-dive, technical/specific scenario"
-        }
-
-        role_guidance = {
-            "Project Manager": "planning, timeline, resources, business impact",
-            "Tech Lead": "architecture, design patterns, implementation details",
-            "QA Engineer": "testing strategy, quality assurance, edge cases"
-        }
-
-        prompt = f"""Create an English conversation practice scenario.
-
-                Context:
-                - User's role: {my_role}
-                - Conversation topic: {situation}
-                - AI conversation partner: {ai_role}
-                - Scenario depth: {topic_type}
-
-                Instructions:
-                - {topic_instructions.get(topic_type, '')}
-
-                Generate:
-                1. A compact English title for this scenario (max 50 characters) that does NOT mention the user's role ("{my_role}") or the AI role ("{ai_role}"). Focus the wording only on the situation/topic.
-                2. Exactly 3 questions that the {ai_role} would naturally ask in this conversation
-
-                IMPORTANT: You MUST provide exactly 3 questions. Not 2, not 4, but exactly 3.
-
-                The questions should:
-                - Match the {ai_role}'s perspective ({role_guidance.get(ai_role, '')})
-                - Be appropriate for the {topic_type} type:
-                  - overview: broad, high-level questions
-                  - detail: specific, technical questions
-                - Help the user practice professional English conversation
-                - Language requirements:
-                  - Provide the title in English only.
-                  - Keep every question in English and make them concise but natural.
-
-                Return ONLY valid JSON format:
-                {{
-                  "title": "...",
-                  "fixedQuestions": ["question 1", "question 2", "question 3"]
-                }}"""
-
-        try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': 'You are a helpful assistant that creates English learning scenarios. Always respond with valid JSON and provide exactly 3 questions.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ],
-                format='json',
-                options={
-                    'temperature': 0.3  # 더 일관된 출력을 위해 낮은 temperature
-                }
-            )
-
-            # 응답 파싱
-            response_text = response['message']['content']
-            response_data = json.loads(response_text)
-
-            title = response_data.get("title", "")
-            questions = response_data.get("fixedQuestions", [])
-
-            # title 정리 (Unicode 문제 방지)
-            if not title:
-                fallback_title = "Key Discussion Points" if topic_type == "overview" else "Focused Detail Review"
-                title = fallback_title
-
-            # title을 안전하게 처리
-            title = str(title).strip()[:50]
-
-            return {
-                "title": title,
-                "fixedQuestions": questions  # 검증은 slack_scenario_service에서 수행
-            }
-
-        except (json.JSONDecodeError, KeyError, Exception) as e:
-            logger.error(f"Failed to generate scenario for {ai_role}/{topic_type}: {e}")
-            # 기본값 반환
-            return {
-                "title": "Key Discussion Points" if topic_type == "overview" else "Focused Detail Review",
-                "fixedQuestions": [
-                    f"What's your perspective on this as a {my_role}?",
-                    "Can you elaborate on that?",
-                    "What would be your recommended approach?"
-                ]
-            }
-
-    async def summarize_messages(
-        self,
-        messages: List[str],
-        perspective: str
-    ) -> str:
-        """
-        Summarize a subset of Slack messages in English.
-        """
-        if not messages:
-            return "No relevant messages."
-
-        perspective_label = "user" if perspective == "user" else "counterpart"
-        joined_messages = "\n".join(f"- {message}" for message in messages)
-
-        prompt = f"""Summarize the following Slack messages from the {perspective_label}'s perspective.
-
-                - Write 1-2 concise English sentences.
-                - Focus on the key objectives or concerns mentioned.
-
-                Messages:
-                {joined_messages}
-
-                Return only the English summary sentences."""
-
-        try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': 'You are a helpful assistant that summarizes Slack conversations in concise English.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ]
-            )
-            return response['message']['content'].strip()
-        except Exception as error:
-            logger.error(f"Failed to summarize messages for {perspective}: {error}")
-            return "Summary could not be generated."
-
-    async def build_fixed_questions(
-        self,
-        user_summary: str,
-        counterpart_summary: str
-    ) -> List[str]:
-        """
-        Build exactly three English questions with specific roles for conversation flow.
-
-        Question roles:
-        - Question 1 (Turn 1): Conversation starter - greeting, introduction, opening question
-        - Question 2 (Turn 5): Transition - topic shift, deeper discussion
-        - Question 3 (Turn 10): Wrap-up - summary, next steps, closing
-        """
-        prompt = f"""You are crafting English practice questions for a professional Slack conversation.
-
-                Use the following summaries to understand each perspective:
-
-                User summary:
-                {user_summary}
-
-                Counterpart summary:
-                {counterpart_summary}
-
-                IMPORTANT: Generate exactly 3 questions with SPECIFIC ROLES:
-
-                Question 1 (Turn 1 - Conversation Starter):
-                - Start the conversation naturally with a greeting or introduction
-                - Ask an opening question to set the context
-                - Example: "Hi! Can you tell me about main problem of today's issue"
-
-                Question 2 (Turn 5 - Transition & Deepening):
-                - Transition to a deeper or different aspect of the topic
-                - Shift focus to more specific or technical details
-                - Example: "That's interesting. How do you plan to address the technical challenges?"
-
-                Question 3 (Turn 10 - Wrap-up & Closure):
-                - Summarize key points or ask for next steps
-                - Provide closure to the conversation
-                - Example: "Before we wrap up, what are the key action items you'll focus on?"
-
-                Requirements:
-                - Each question must match its designated role
-                - Reflect the priorities evident in BOTH summaries
-                - Avoid yes/no questions
-                - Use professional, natural English
-
-                Return ONLY a JSON array of 3 question strings in order [starter, transition, wrap-up]."""
-
-        try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': 'Always respond with a JSON array of exactly 3 English questions.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ],
-                format='json'
-            )
-            response_text = response['message']['content']
-            questions = json.loads(response_text)
-
-            if isinstance(questions, dict) and 'questions' in questions:
-                questions = questions['questions']
-            elif not isinstance(questions, list):
-                raise ValueError("Expected a JSON array of strings.")
-
-            normalized: List[str] = []
-            for question in questions:
-                if isinstance(question, str):
-                    normalized.append(question.strip())
-
-            if len(normalized) != 3:
-                raise ValueError(f"Expected 3 questions, got {len(normalized)}")
-
-            return normalized
-        except Exception as error:
-            logger.error(f"Failed to build fixed questions: {error}")
-            return [
-                "Could you walk me through your current thinking?",
-                "Where do you need the most support right now?",
-                "What is the next concrete step you plan to take?"
-            ]
-
-    async def generate_followup_question(self, prompt: str) -> str:
-        """
-        General helper to generate a single conversational follow-up question.
-
-        Args:
-            prompt: 이미 구성된 사용자 프롬프트 (역할/히스토리 포함)
-        """
-        try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': 'You are a helpful AI tutor that only outputs one concise English question.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ]
-            )
-            return response['message']['content'].strip()
-        except Exception as error:
-            logger.error(f"Failed to generate follow-up question: {error}")
-            raise
-
-    async def generate_followup_question_stream(self, prompt: str) -> AsyncGenerator[str, None]:
-        """
-        스트리밍으로 AI 답변 생성 (청크 단위로 즉시 반환)
-
-        ✅ 진정한 실시간 스트리밍:
-        - Ollama의 동기 스트리밍을 executor에서 실행
-        - 청크가 생성되는대로 즉시 asyncio.Queue에 추가
-        - 메인 루프에서 큐를 모니터링하며 청크를 즉시 yield
-
-        Args:
-            prompt: 이미 구성된 사용자 프롬프트 (역할/히스토리 포함)
-
-        Yields:
-            청크 단위로 생성된 텍스트 (한 단어 또는 여러 단어) - 실시간
-        """
-        from asyncio import Queue
-
-        # 비동기 큐 (executor와 메인 루프 간 통신용)
-        queue: Queue = Queue()
-        stream_error = None
-
-        def _stream_question_to_queue() -> None:
-            """
-            동기 스트리밍 호출 (executor에서 실행)
-            생성되는 청크를 큐에 추가 (논블로킹 방식)
-            """
-            nonlocal stream_error
-
-            try:
-                stream = ollama.chat(
-                    model=self.model_name,
-                    messages=[
-                        {
-                            'role': 'system',
-                            'content': 'You are a helpful AI tutor that only outputs one concise English question.'
-                        },
-                        {
-                            'role': 'user',
-                            'content': prompt
-                        }
-                    ],
-                    stream=True  # ✅ 스트리밍 활성화
-                )
-
-                # 스트림 반복 (executor에서 실행)
-                for chunk in stream:
-                    content = chunk.get('message', {}).get('content', '')
-                    if content:
-                        # ✅ 논블로킹 방식으로 큐에 추가
-                        try:
-                            queue.put_nowait(content)
-                        except Exception as e:
-                            logger.warning(f"Failed to put chunk to queue: {e}")
-
-                # 스트림 완료 신호
-                queue.put_nowait(None)
-
-            except Exception as error:
-                logger.error(f"Failed to generate follow-up question stream: {error}")
-                stream_error = error
-                queue.put_nowait(None)  # 종료 신호
-
-        try:
-            # ✅ executor에서 스트리밍 시작 (논블로킹)
-            loop = asyncio.get_running_loop()
-            loop.run_in_executor(None, _stream_question_to_queue)
-
-            # ✅ 큐에서 청크를 꺼내며 즉시 yield
-            while True:
-                try:
-                    # 타임아웃 설정으로 무한 대기 방지 (30초)
-                    chunk = await asyncio.wait_for(queue.get(), timeout=30.0)
-                except asyncio.TimeoutError:
-                    logger.warning("Stream timeout: no data received for 30 seconds")
-                    break
-
-                # None은 스트림 완료 신호
-                if chunk is None:
-                    break
-
-                # 청크를 즉시 yield (블로킹 없음)
-                yield chunk
-
-            # 에러 확인
-            if stream_error:
-                raise stream_error
-
-        except Exception as error:
-            logger.error(f"Failed to generate follow-up question stream: {error}")
-            raise
-
-    async def generate_additional_questions(
-        self,
-        existing_questions: List[str],
-        count: int,
-        my_role: str,
-        situation: str,
-        ai_role: str,
-        topic_type: str
-    ) -> List[str]:
-        """
-        기존 질문들을 참고하여 추가 질문을 생성합니다.
-
-        Args:
-            existing_questions: 이미 생성된 질문 목록
-            count: 추가로 필요한 질문 개수
-            my_role: 사용자의 역할
-            situation: 대화 주제/상황
-            ai_role: AI 역할
-            topic_type: 토픽 타입 (overview, detail)
-
-        Returns:
-            추가 생성된 질문 목록
-        """
-        role_guidance = {
-            "Project Manager": "planning, timeline, resources, business impact",
-            "Tech Lead": "architecture, design patterns, implementation details",
-            "QA Engineer": "testing strategy, quality assurance, edge cases"
-        }
-
-        existing_text = "\n".join([f"- {q}" for q in existing_questions])
-
-        prompt = f"""You are creating English conversation practice questions.
-
-                Context:
-                - User's role: {my_role}
-                - Conversation topic: {situation}
-                - AI conversation partner: {ai_role}
-                - Scenario depth: {topic_type}
-                
-                Already generated questions:
-                {existing_text}
-                
-                Generate {count} additional question(s) that:
-                - Complement the existing questions (don't repeat similar topics)
-                - Match the {ai_role}'s perspective ({role_guidance.get(ai_role, '')})
-                - Are appropriate for {topic_type} type conversation
-                - Help the user practice professional English
-                
-                Return ONLY a JSON array of {count} question string(s):
-                ["question 1"] if count is 1
-                ["question 1", "question 2"] if count is 2
-                etc.
-                """
-
-        try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': 'You are a helpful assistant. Always respond with valid JSON array of strings.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ],
-                format='json',
-                options={
-                    'temperature': 0.3
-                }
-            )
-
-            response_text = response['message']['content']
-            questions = json.loads(response_text)
-
-            # 배열이 아닌 경우 처리
-            if isinstance(questions, dict) and 'questions' in questions:
-                questions = questions['questions']
-            elif not isinstance(questions, list):
-                questions = [str(questions)]
-
-            # 문자열로 정규화
-            normalized = []
-            for q in questions:
-                if isinstance(q, str):
-                    normalized.append(q.strip())
-
-            return normalized[:count]
-
-        except Exception as e:
-            logger.error(f"Failed to generate additional questions: {e}")
-            # 기본 질문 반환
-            default = [
-                "Can you provide more details about this?",
-                "What are the main challenges you foresee?",
-                "How do you plan to proceed with this?"
-            ]
-            return default[:count]
-
-    async def enhance_situation_from_prompt(
-        self,
-        user_input: str,
-        my_role: str,
-        ai_role: str,
-        context: List[Dict[str, Any]] = None
-    ) -> str:
-        """
-        사용자 입력으로부터 구체화된 상황을 생성합니다.
-
-        Args:
-            user_input: 사용자가 입력한 상황 (추상적)
-            my_role: 사용자의 역할
-            ai_role: AI의 역할
-            context: 과거 시나리오 컨텍스트
-
-        Returns:
-            구체화된 상황 설명 (1-2문장)
-        """
-        context_text = ""
-        if context:
-            context_text = "\n[User's past scenarios context]\n"
-            for idx, ctx in enumerate(context[:3], 1):
-                situation = ctx.get("situation", "")
-                context_text += f"{idx}. {situation}\n"
-
-        prompt = f"""You are an expert at creating detailed business scenarios for English practice in IT companies.
-Consider the terminology and conversations used in IT companies when creating roleplay scenarios.
-Note: Since this is real-time roleplay, please ensure questions are concise and not overly lengthy.
-
-User's role: {my_role}
-AI's role: {ai_role}
-Situation provided by user: {user_input}
-
-{context_text}
-
-Based on the above information, please:
-1. Expand the user's abstract input into a concrete business situation
-2. Clarify the relationship and goals between {my_role} and {ai_role}
-3. Write a 1-2 sentence situation description
-
-Example format:
-"{my_role} discussing {{detail}} related to project with {ai_role} for {{objective}}"
-
-Response: Return only the enhanced situation description (no other text)"""
-
-        try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': 'You are an expert at creating detailed business scenarios for English practice.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ]
-            )
-            situation = response['message']['content'].strip()
-
-            # 너무 길면 자르기
-            sentences = situation.split('.')
-            if len(sentences) > 2:
-                situation = '. '.join(sentences[:2]) + '.'
-
-            return situation
-
-        except Exception as error:
-            logger.error(f"Failed to enhance situation: {error}")
-            raise
-
-    async def generate_title_for_prompt(
-        self,
-        situation: str,
-        ai_role: str,
-        topic_type: str,
-        my_role: str
-    ) -> str:
-        """
-        시나리오 제목을 생성합니다.
-
-        Args:
-            situation: 구체화된 상황
-            ai_role: AI의 역할
-            topic_type: 토픽 타입 (direct, overview, detail)
-            my_role: 사용자의 역할 (제거 대상)
-
-        Returns:
-            생성된 시나리오 제목 (최대 50자)
-        """
-        prompt = f"""You are creating an engaging title for an English roleplay scenario.
-
-Situation: {situation}
-AI role: {ai_role}
-Topic type: {topic_type}
-
-Generate a concise English title (max 50 characters) that:
-- Focuses only on the situation/topic details
-- Does NOT mention the user's role ("{my_role}") or the AI role ("{ai_role}")
-- Sounds like a real meeting agenda item
-- Uses only English words
-
-Response: Return only the title without any quotes or special formatting (no other text)."""
-
-        try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': 'You are an expert at creating engaging titles for roleplay scenarios. Always return the title without quotes or asterisks.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ]
-            )
-            title = response['message']['content'].strip()
-
-            # 따옴표 제거
-            title = title.strip('"\'')
-
-            # 길이 제한
-            if len(title) > 50:
-                title = title[:50].rstrip()
-
-            return title
-
-        except Exception as error:
-            logger.error(f"Failed to generate title: {error}")
-            raise
-
-    async def generate_fixed_questions_for_prompt(
+    async def generate_scenario_from_prompt(
         self,
         situation: str,
         my_role: str,
         ai_role: str
-    ) -> List[str]:
+    ) -> Dict[str, Any]:
         """
-        프롬프트 기반 시나리오용 고정 질문을 생성합니다. (정확히 3개)
-
-        Slack 기반과 동일한 역할의 질문:
-        - Question 1 (Turn 1): Conversation Starter
-        - Question 2 (Turn 5): Transition & Deepening
-        - Question 3 (Turn 10): Wrap-up & Closure
+        상황 기반으로 영어 학습 시나리오를 생성합니다.
 
         Args:
-            situation: 구체화된 상황
+            situation: 분석된 대화 상황
+            my_role: 사용자의 역할 (예: "Software Engineer")
+            ai_role: AI의 역할 (예: "Project Manager")
+
+        Returns:
+            {
+                "situation": str,
+                "my_role": str,
+                "ai_role": str,
+                "opening_question": str,
+                "questions": List[str]
+            }
+        """
+        prompt = f"""Generate 3 English practice questions based on the following scenario:
+
+Situation: {situation}
+User's Role: {my_role}
+AI's Role: {ai_role}
+
+Requirements:
+1. Questions should be realistic and relevant to the situation
+2. Questions should encourage detailed responses
+3. Each question should help the user practice English conversation
+4. Questions should be different from each other (covering different aspects)
+
+Return ONLY valid JSON with this exact structure (no extra text):
+{{
+    "opening_question": "The first question to start the conversation (most important, ask it first)",
+    "questions": [
+        "Question 2 (follow-up or related topic)",
+        "Question 3 (different angle or deeper exploration)",
+        "Question 4 (summary or reflection question)"
+    ]
+}}
+
+Important: Ensure the JSON is valid and parseable."""
+
+        try:
+            logger.info("🔄 [시나리오 생성] OpenAI 호출 중...")
+
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                self.llm.invoke,
+                prompt
+            )
+
+            response_text = response.content if hasattr(response, 'content') else str(response)
+
+            # JSON 파싱
+            json_match = json.loads(response_text)
+
+            logger.info(f"✅ [시나리오 생성 완료] Opening: {json_match.get('opening_question', '')[:80]}...")
+
+            return {
+                "situation": situation,
+                "my_role": my_role,
+                "ai_role": ai_role,
+                "opening_question": json_match.get("opening_question", ""),
+                "questions": json_match.get("questions", [])
+            }
+
+        except Exception as e:
+            logger.error(f"Scenario generation failed: {e}", exc_info=True)
+            return {
+                "situation": situation,
+                "my_role": my_role,
+                "ai_role": ai_role,
+                "opening_question": "What would you like to discuss?",
+                "questions": ["Can you tell me more?", "How does that relate to your role?", "What's the next step?"]
+            }
+
+    async def generate_next_question(
+        self,
+        situation: str,
+        conversation_history: List[Dict[str, str]]
+    ) -> str:
+        """
+        대화 히스토리를 기반으로 다음 질문을 생성합니다.
+
+        Args:
+            situation: 학습 상황
+            conversation_history: 지금까지의 대화 내용
+
+        Returns:
+            다음 질문
+        """
+        # 대화 히스토리 포맷팅
+        history_text = ""
+        for exchange in conversation_history[-3:]:  # 최근 3개만
+            history_text += f"User: {exchange.get('user', '')}\nAI: {exchange.get('ai', '')}\n"
+
+        prompt = f"""Based on the following conversation history in an English learning scenario, generate a natural follow-up question.
+
+Scenario: {situation}
+
+Conversation so far:
+{history_text}
+
+Requirements:
+1. Question should naturally follow from the last user response
+2. Question should help deepen the conversation
+3. Question should encourage detailed, natural English responses
+4. Keep it concise (1-2 sentences)
+
+Return ONLY the question text, nothing else."""
+
+        try:
+            logger.info("❓ [다음 질문 생성] OpenAI 호출 중...")
+
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                self.llm.invoke,
+                prompt
+            )
+
+            question = response.content if hasattr(response, 'content') else str(response)
+            question = question.strip()
+
+            logger.info(f"✅ [다음 질문 생성 완료] {question[:80]}...")
+            return question
+
+        except Exception as e:
+            logger.error(f"Next question generation failed: {e}", exc_info=True)
+            return "Can you elaborate on that?"
+
+    async def generate_scenario_streaming(
+        self,
+        situation: str,
+        my_role: str,
+        ai_role: str
+    ) -> AsyncGenerator[str, None]:
+        """
+        시나리오를 스트리밍으로 생성합니다.
+
+        Args:
+            situation: 대화 상황
             my_role: 사용자의 역할
             ai_role: AI의 역할
 
-        Returns:
-            정확히 3개의 고정 질문
-
-        Raises:
-            ValueError: 질문 생성 실패
+        Yields:
+            JSON 청크 (스트리밍)
         """
-        prompt = f"""You are creating fixed questions for an English roleplay scenario.
+        prompt = f"""Generate 3 English practice questions based on the following scenario:
 
 Situation: {situation}
-User's role: {my_role}
-AI's role: {ai_role}
-
-Generate exactly 3 DIFFERENT questions that {ai_role} would naturally ask {my_role} in this situation.
-
-IMPORTANT - Each question must have a SPECIFIC ROLE:
-
-Question 1 (Turn 1 - Conversation Starter):
-- Start the conversation naturally with a greeting or introduction
-- Ask an opening question to set the context and build rapport
-
-Question 2 (Turn 5 - Transition & Deepening):
-- Transition to a deeper or different aspect of the topic
-- Shift focus to more specific or technical details related to the situation
-
-Question 3 (Turn 10 - Wrap-up & Closure):
-- Ask about next steps, action items, or how to move forward
-- Provide closure to the conversation
+User's Role: {my_role}
+AI's Role: {ai_role}
 
 Requirements:
-- Each question must match its designated role and turn number
-- Create ORIGINAL questions specific to this situation, not generic questions
-- Reflect both {my_role} and {ai_role} perspectives
-- Avoid yes/no questions
-- Use professional, natural English
+1. Questions should be realistic and relevant to the situation
+2. Questions should encourage detailed responses
+3. Each question should help the user practice English conversation
+4. Questions should be different from each other
 
-Return ONLY a JSON array of exactly 3 question strings in this format:
-["question 1 text", "question 2 text", "question 3 text"]"""
+Return ONLY valid JSON with this exact structure:
+{{
+    "opening_question": "The first question to start the conversation",
+    "questions": [
+        "Question 2",
+        "Question 3",
+        "Question 4"
+    ]
+}}"""
 
         try:
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': 'Always respond with a JSON array of exactly 3 English questions.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ],
-                format='json'
+            logger.info("🔄 [시나리오 스트리밍 생성] OpenAI 호출 중...")
+
+            # OpenAI 스트리밍 호출
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                self.llm.invoke,
+                prompt
             )
-            response_text = response['message']['content']
-            questions = json.loads(response_text)
 
-            if isinstance(questions, dict) and 'questions' in questions:
-                questions = questions['questions']
-            elif not isinstance(questions, list):
-                raise ValueError("Expected a JSON array of strings.")
+            response_text = response.content if hasattr(response, 'content') else str(response)
 
-            normalized: List[str] = []
-            for question in questions:
-                if isinstance(question, str):
-                    normalized.append(question.strip())
+            # 청크 단위로 반환
+            chunk_size = 50
+            for i in range(0, len(response_text), chunk_size):
+                yield response_text[i:i + chunk_size]
+                await asyncio.sleep(0)  # 이벤트 루프에 양보
 
-            if len(normalized) != 3:
-                raise ValueError(f"Expected 3 questions, got {len(normalized)}")
+            logger.info("✅ [시나리오 스트리밍 생성 완료]")
 
-            return normalized
+        except Exception as e:
+            logger.error(f"Scenario streaming generation failed: {e}", exc_info=True)
+            yield json.dumps({
+                "opening_question": "What would you like to discuss?",
+                "questions": ["Can you tell me more?", "How does that relate to your role?", "What's the next step?"]
+            })
 
-        except Exception as error:
-            logger.error(f"Failed to generate fixed questions for prompt: {error}")
-            raise
+    async def generate_ai_response(
+        self,
+        situation: str,
+        my_role: str,
+        ai_role: str,
+        conversation_history: List[Dict[str, str]]
+    ) -> str:
+        """
+        AI 역할을 수행하여 응답을 생성합니다.
+
+        Args:
+            situation: 학습 상황
+            my_role: 사용자의 역할
+            ai_role: AI의 역할
+            conversation_history: 대화 내용
+
+        Returns:
+            AI의 응답
+        """
+        # 대화 히스토리 포맷팅
+        history_text = ""
+        for exchange in conversation_history:
+            if isinstance(exchange, dict):
+                user_text = exchange.get('user', exchange.get('text', ''))
+                ai_text = exchange.get('ai', '')
+                history_text += f"{my_role}: {user_text}\n{ai_role}: {ai_text}\n"
+
+        prompt = f"""You are playing the role of {ai_role} in an English conversation practice scenario.
+
+Scenario: {situation}
+Your Role: {ai_role}
+User's Role: {my_role}
+
+Conversation so far:
+{history_text}
+
+{my_role}'s last response: {conversation_history[-1].get('text', conversation_history[-1].get('user', '')) if conversation_history else '[waiting for user]'}
+
+Requirements:
+1. Respond naturally as {ai_role} in English
+2. Keep responses concise but meaningful (2-4 sentences)
+3. Ask a follow-up question or continue the conversation naturally
+4. Use professional but friendly language
+5. Stay in character as {ai_role}
+
+Respond with ONLY the {ai_role}'s response, no labels or formatting."""
+
+        try:
+            logger.info(f"💬 [AI 응답 생성 중] 역할: {ai_role}")
+
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                self.llm.invoke,
+                prompt
+            )
+
+            ai_response = response.content if hasattr(response, 'content') else str(response)
+            ai_response = ai_response.strip()
+
+            logger.info(f"✅ [AI 응답 생성 완료] {ai_response[:80]}...")
+            return ai_response
+
+        except Exception as e:
+            logger.error(f"AI response generation failed: {e}", exc_info=True)
+            return f"Thank you for that input. Could you elaborate on that a bit more?"
+
+    async def generate_ai_response_streaming(
+        self,
+        situation: str,
+        my_role: str,
+        ai_role: str,
+        conversation_history: List[Dict[str, str]]
+    ) -> AsyncGenerator[str, None]:
+        """
+        AI 응답을 스트리밍으로 생성합니다.
+
+        Args:
+            situation: 학습 상황
+            my_role: 사용자의 역할
+            ai_role: AI의 역할
+            conversation_history: 대화 내용
+
+        Yields:
+            응답 텍스트 청크 (스트리밍)
+        """
+        # 대화 히스토리 포맷팅
+        history_text = ""
+        for exchange in conversation_history:
+            if isinstance(exchange, dict):
+                user_text = exchange.get('user', exchange.get('text', ''))
+                ai_text = exchange.get('ai', '')
+                history_text += f"{my_role}: {user_text}\n{ai_role}: {ai_text}\n"
+
+        prompt = f"""You are playing the role of {ai_role} in an English conversation practice scenario.
+
+Scenario: {situation}
+Your Role: {ai_role}
+User's Role: {my_role}
+
+Conversation so far:
+{history_text}
+
+{my_role}'s last response: {conversation_history[-1].get('text', conversation_history[-1].get('user', '')) if conversation_history else '[waiting for user]'}
+
+Respond naturally as {ai_role} in English (2-4 sentences). ONLY return the response text."""
+
+        try:
+            logger.info(f"💬 [AI 응답 스트리밍 생성] 역할: {ai_role}")
+
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                self.llm.invoke,
+                prompt
+            )
+
+            response_text = response.content if hasattr(response, 'content') else str(response)
+
+            # 청크 단위로 반환
+            chunk_size = 20
+            for i in range(0, len(response_text), chunk_size):
+                yield response_text[i:i + chunk_size]
+                await asyncio.sleep(0)
+
+            logger.info("✅ [AI 응답 스트리밍 생성 완료]")
+
+        except Exception as e:
+            logger.error(f"AI response streaming generation failed: {e}", exc_info=True)
+            yield "Thank you for that input. Could you elaborate on that a bit more?"

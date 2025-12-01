@@ -44,9 +44,9 @@ class FeedbackAgentService:
     def _get_llm(self):
         """환경변수에 따라 LLM 선택"""
         if settings.FEEDBACK_LLM_PROVIDER == "openai":
-            logger.info("Using OpenAI LLM for feedback")
+            logger.info(f"Using OpenAI LLM for feedback: {settings.OPENAI_MODEL_FEEDBACK}")
             return ChatOpenAI(
-                model=settings.OPENAI_MODEL,
+                model=settings.OPENAI_MODEL_FEEDBACK,
                 api_key=settings.openai_api_key,
                 temperature=0.3
             )
