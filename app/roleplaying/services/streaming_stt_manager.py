@@ -8,8 +8,9 @@
 - 세션 초기화/종료
 
 Deepgram SDK 3.x API:
-- listen.websocket.v1() (async context manager)
-- listen.live는 SDK 3.4.0부터 deprecated (대신 websocket 사용)
+- listen.websocket.v() (async context manager)
+- listen.live는 SDK 3.4.0부터 deprecated
+- 버전 메서드: .v() (구버전에서는 .v1())
 - 모든 메서드가 async/await 기반
 """
 
@@ -33,7 +34,7 @@ class StreamingSTTSession:
     def __init__(self, connection: Any):
         """
         Args:
-            connection: Deepgram AsyncLiveConnection (SDK 3.x)
+            connection: Deepgram WebSocket Connection (SDK 3.11.0+)
         """
         self.connection = connection
         self.transcript_buffer = ""
@@ -153,7 +154,7 @@ class StreamingSTTManager:
         스트리밍 세션 생성 (SDK 3.x: async context manager)
 
         ✅ SDK 3.x 변경:
-        - listen.live() → listen.live.v1()
+        - listen.live() → listen.websocket.v() (SDK 3.11.0+)
         - 동기 → 비동기
         - Context manager 사용
 
@@ -167,9 +168,9 @@ class StreamingSTTManager:
             Exception: 세션 생성 실패 시
         """
         try:
-            # ✅ SDK 3.x: listen.websocket.v1()는 async context manager 반환
-            # (.live는 SDK 3.4.0부터 deprecated)
-            connection = await self.client.listen.websocket.v1(
+            # ✅ SDK 3.11.0: listen.websocket.v()는 async context manager 반환
+            # (버전 메서드는 .v()이고, v1() 아님)
+            connection = await self.client.listen.websocket.v(
                 model=settings.DEEPGRAM_MODEL,
                 language=settings.DEEPGRAM_LANGUAGE,
                 smart_format=settings.DEEPGRAM_SMART_FORMAT,
