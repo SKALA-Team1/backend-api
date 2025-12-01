@@ -84,13 +84,27 @@ class FeedbackAgentService:
                 "retry_count": int
             }
         """
+        import time
+        start_time = time.time()
+
         try:
+            logger.info(f"🎯 [피드백 평가 시작] 사용자 텍스트: '{user_text[:50]}...'")
+
             # 병렬 평가 (점수만 먼저)
+            eval_start = time.time()
+            logger.info("📊 [병렬 평가 시작] 발음, 문법, 맥락 평가 중...")
+
             pronunciation, grammar, relevance = await asyncio.gather(
                 self._evaluate_pronunciation_async(audio_data, user_text),
                 self._evaluate_grammar_async(user_text),
                 self._evaluate_relevance_async(user_text, conversation_history, scenario_context)
             )
+
+            eval_time = time.time() - eval_start
+            logger.info(f"✅ [병렬 평가 완료] 소요 시간: {eval_time:.2f}초")
+            logger.info(f"  - 발음: {pronunciation.get('score', '?')}점")
+            logger.info(f"  - 문법: {grammar.get('score', '?')}점")
+            logger.info(f"  - 맥락: {relevance.get('score', '?')}점")
 
             # 평가 점수 정규화 (0-100)
             pronunciation_score = max(0, min(100, pronunciation.get("score", 70)))
@@ -109,6 +123,7 @@ class FeedbackAgentService:
             )
 
             # 피드백 텍스트 생성 (백그라운드에서도 실행)
+            feedback_start = time.time()
             feedback_text = await self._generate_feedback_text_async(
                 user_text,
                 pronunciation,
@@ -116,6 +131,12 @@ class FeedbackAgentService:
                 relevance,
                 needs_correction
             )
+            feedback_time = time.time() - feedback_start
+            logger.info(f"💬 [피드백 텍스트 생성 완료] 소요 시간: {feedback_time:.2f}초")
+
+            total_time = time.time() - start_time
+            logger.info(f"🎉 [피드백 평가 전체 완료] 총 소요 시간: {total_time:.2f}초")
+            logger.info(f"   종합 점수: {overall_score}점 | 교정 필요: {needs_correction}")
 
             return {
                 "needs_correction": needs_correction,
@@ -150,23 +171,36 @@ class FeedbackAgentService:
         self, audio_data: Optional[bytes], reference_text: str
     ) -> Dict:
         """비동기 발음 평가"""
+        import time
+        start = time.time()
+
         if not audio_data:
             return {"score": 0, "feedback": "음성 데이터 없음"}
 
         try:
+            logger.info("  🔵 [발음 평가] Azure Speech 호출 중...")
             result = await azure_speech_service.assess_pronunciation(audio_data, reference_text)
+            elapsed = time.time() - start
+
             if result.get("success"):
+                score = int(result.get("pronunciation_score", 70))
+                logger.info(f"  ✅ [발음 평가 완료] {elapsed:.2f}초 → {score}점")
                 return {
-                    "score": int(result.get("pronunciation_score", 70)),
-                    "feedback": f"발음 점수: {result.get('pronunciation_score', 70)}점"
+                    "score": score,
+                    "feedback": f"발음 점수: {score}점"
                 }
+            logger.warning(f"  ⚠️ [발음 분석 실패] {elapsed:.2f}초")
             return {"score": 0, "feedback": "발음 분석 실패"}
         except Exception as e:
-            logger.error(f"Pronunciation evaluation failed: {e}")
+            elapsed = time.time() - start
+            logger.error(f"Pronunciation evaluation failed ({elapsed:.2f}초): {e}")
             return {"score": 0, "feedback": "발음 분석 오류"}
 
     async def _evaluate_grammar_async(self, user_text: str) -> Dict:
         """비동기 문법 평가"""
+        import time
+        start = time.time()
+
         prompt = f"""다음 영문 문장의 문법을 확인하고 점수(0-100)를 주세요:
 "{user_text}"
 
@@ -176,24 +210,30 @@ class FeedbackAgentService:
 """
 
         try:
+            logger.info("  🟢 [문법 평가] LLM 호출 중...")
             response = self.llm.invoke(prompt)
+            elapsed = time.time() - start
             response_text = response.content if hasattr(response, 'content') else str(response)
 
             # JSON 객체 추출 시도
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group())
+                score = int(result.get("score", 70))
+                logger.info(f"  ✅ [문법 평가 완료] {elapsed:.2f}초 → {score}점")
                 return {
-                    "score": int(result.get("score", 70)),
+                    "score": score,
                     "feedback": result.get("feedback", "")
                 }
             else:
                 # 점수만 추출
                 score_match = re.search(r'\d+', response_text)
                 score = int(score_match.group()) if score_match else 70
+                logger.info(f"  ✅ [문법 평가 완료 (파싱)] {elapsed:.2f}초 → {score}점")
                 return {"score": min(100, max(0, score)), "feedback": response_text[:100]}
         except Exception as e:
-            logger.error(f"Grammar check failed: {e}")
+            elapsed = time.time() - start
+            logger.error(f"Grammar check failed ({elapsed:.2f}초): {e}")
             return {"score": 70, "feedback": "문법 검사 중 오류 발생"}
 
     async def _evaluate_relevance_async(
@@ -203,6 +243,9 @@ class FeedbackAgentService:
         scenario_context: dict
     ) -> Dict:
         """비동기 맥락 평가"""
+        import time
+        start = time.time()
+
         context = self._build_conversation_context(conversation_history, scenario_context)
 
         prompt = f"""다음 대화 맥락에서 사용자의 응답이 얼마나 적절한지 평가하세요 (0-100):
@@ -216,24 +259,30 @@ class FeedbackAgentService:
 응답 형식: JSON {{"score": int, "feedback": str}}"""
 
         try:
+            logger.info("  🔴 [맥락 평가] LLM 호출 중...")
             response = self.llm.invoke(prompt)
+            elapsed = time.time() - start
             response_text = response.content if hasattr(response, 'content') else str(response)
 
             # JSON 객체 추출 시도
             json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group())
+                score = int(result.get("score", 70))
+                logger.info(f"  ✅ [맥락 평가 완료] {elapsed:.2f}초 → {score}점")
                 return {
-                    "score": int(result.get("score", 70)),
+                    "score": score,
                     "feedback": result.get("feedback", "")
                 }
             else:
                 # 점수만 추출
                 score_match = re.search(r'\d+', response_text)
                 score = int(score_match.group()) if score_match else 70
+                logger.info(f"  ✅ [맥락 평가 완료 (파싱)] {elapsed:.2f}초 → {score}점")
                 return {"score": min(100, max(0, score)), "feedback": response_text[:100]}
         except Exception as e:
-            logger.error(f"Context evaluation failed: {e}")
+            elapsed = time.time() - start
+            logger.error(f"Context evaluation failed ({elapsed:.2f}초): {e}")
             return {"score": 70, "feedback": "맥락 평가 중 오류 발생"}
 
     def _judge_correction_needed(

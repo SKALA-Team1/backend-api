@@ -434,7 +434,10 @@ async def _handle_user_text(
 
         feedback_result = None
         try:
-            logger.info(f"Starting feedback evaluation for session={session_id}")
+            import time
+            feedback_start = time.time()
+            logger.info(f"⏱️  [피드백 평가 시작] session={session_id}, 텍스트 길이: {len(user_text)} 글자")
+
             # 텍스트 기반이므로 audio_data=None
             # 타임아웃: 60초 (Ollama는 느린 모델이므로 더 긴 시간 필요)
             feedback_result = await asyncio.wait_for(
@@ -451,7 +454,9 @@ async def _handle_user_text(
                 ),
                 timeout=60.0  # 60초 타임아웃 (llama2는 느림)
             )
-            logger.info(f"Feedback evaluation completed: {feedback_result}")
+            feedback_elapsed = time.time() - feedback_start
+            logger.info(f"✅ [피드백 평가 완료 (ws_realtime)] 총 소요 시간: {feedback_elapsed:.2f}초")
+            logger.info(f"   결과: 점수={feedback_result['scores']['overall_score']}, 교정 필요={feedback_result['needs_correction']}")
 
             # 점수 전송 (즉시)
             feedback_msg = FeedbackMessage(
@@ -778,7 +783,10 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             # Azure Speech 사용량 확인
             can_use_azure = await usage_tracker.can_use_azure()
 
-            logger.info(f"Starting feedback evaluation for session={session_id}, can_use_azure={can_use_azure}")
+            import time
+            feedback_start = time.time()
+            logger.info(f"⏱️  [피드백 평가 시작] session={session_id}, STT 텍스트: '{stt_text[:50]}...', Azure={can_use_azure}")
+
             # 피드백 평가 실행 (60초 타임아웃)
             feedback_result = await asyncio.wait_for(
                 feedback_agent_service.evaluate_response_fast(
@@ -794,7 +802,9 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                 ),
                 timeout=60.0  # 60초 타임아웃 (llama2는 느림)
             )
-            logger.info(f"Feedback evaluation completed: {feedback_result}")
+            feedback_elapsed = time.time() - feedback_start
+            logger.info(f"✅ [피드백 평가 완료 (오디오)] 총 소요 시간: {feedback_elapsed:.2f}초")
+            logger.info(f"   결과: 점수={feedback_result['scores']['overall_score']}, 교정 필요={feedback_result['needs_correction']}")
 
             # Azure Speech 사용량 증가
             if can_use_azure:
