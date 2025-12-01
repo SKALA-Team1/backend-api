@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     # OpenAI
     # -------------------------------------
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
-    OPENAI_MODEL: str = Field("gpt-4.1-mini", alias="OPENAI_MODEL")
+    OPENAI_MODEL: str = Field("gpt-4.1", alias="OPENAI_MODEL")
     deepgram_api_key: Optional[str] = Field(default=None, alias="DEEPGRAM_API_KEY")
 
     # ========================================

@@ -206,8 +206,8 @@ class FeedbackAgentService:
         import time
         start = time.time()
 
-        # 짧은 프롬프트로 성능 개선
-        prompt = f"""문법 평가: "{user_text[:100]}"
+        # 더 많은 텍스트로 정확한 평가 (300자)
+        prompt = f"""문법 평가: "{user_text[:300]}"
 점수(0-100)와 간단한 피드백만 JSON으로 응답:
 {{"score": int, "feedback": str}}"""
 
@@ -252,12 +252,12 @@ class FeedbackAgentService:
         import time
         start = time.time()
 
-        # 컨텍스트 축약 (성능 개선)
-        context = self._build_conversation_context(conversation_history, scenario_context)[:200]
+        # 충분한 컨텍스트로 정확한 평가 (500자)
+        context = self._build_conversation_context(conversation_history, scenario_context)[:500]
 
-        # 짧은 프롬프트로 성능 개선
+        # 더 많은 텍스트로 정확한 평가 (300자)
         prompt = f"""맥락 평가: "{context}"
-응답: "{user_text[:100]}"
+응답: "{user_text[:300]}"
 점수(0-100)와 간단한 피드백만 JSON:
 {{"score": int, "feedback": str}}"""
 
