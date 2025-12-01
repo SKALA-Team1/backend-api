@@ -436,7 +436,7 @@ async def _handle_user_text(
         try:
             logger.info(f"Starting feedback evaluation for session={session_id}")
             # 텍스트 기반이므로 audio_data=None
-            # 타임아웃: 30초 (Ollama 응답 대기)
+            # 타임아웃: 60초 (Ollama는 느린 모델이므로 더 긴 시간 필요)
             feedback_result = await asyncio.wait_for(
                 feedback_agent_service.evaluate_response_fast(
                     user_text=user_text,
@@ -449,7 +449,7 @@ async def _handle_user_text(
                     },
                     retry_count=session_state.current_question_retry_count if session_state else 0
                 ),
-                timeout=30.0  # 30초 타임아웃
+                timeout=60.0  # 60초 타임아웃 (llama2는 느림)
             )
             logger.info(f"Feedback evaluation completed: {feedback_result}")
 
@@ -779,7 +779,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             can_use_azure = await usage_tracker.can_use_azure()
 
             logger.info(f"Starting feedback evaluation for session={session_id}, can_use_azure={can_use_azure}")
-            # 피드백 평가 실행 (30초 타임아웃)
+            # 피드백 평가 실행 (60초 타임아웃)
             feedback_result = await asyncio.wait_for(
                 feedback_agent_service.evaluate_response_fast(
                     user_text=stt_text,
@@ -792,7 +792,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                     },
                     retry_count=session_state.current_question_retry_count if session_state else 0
                 ),
-                timeout=30.0  # 30초 타임아웃
+                timeout=60.0  # 60초 타임아웃 (llama2는 느림)
             )
             logger.info(f"Feedback evaluation completed: {feedback_result}")
 
