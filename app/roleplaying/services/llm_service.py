@@ -264,6 +264,37 @@ Return ONLY the question text, nothing else."""
             logger.error(f"Next question generation failed: {e}", exc_info=True)
             return "Can you elaborate on that?"
 
+    async def generate_followup_question(self, prompt: str) -> str:
+        """
+        사용자 정의 프롬프트로 follow-up 질문을 생성합니다.
+        (ai_tutor_service와의 호환성 유지)
+
+        Args:
+            prompt: LLM에 전달할 프롬프트
+
+        Returns:
+            생성된 질문
+        """
+        try:
+            logger.info("❓ [Follow-up 질문 생성] OpenAI 호출 중...")
+
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                self.llm.invoke,
+                prompt
+            )
+
+            question = response.content if hasattr(response, 'content') else str(response)
+            question = question.strip()
+
+            logger.info(f"✅ [Follow-up 질문 생성 완료] {question[:80]}...")
+            return question
+
+        except Exception as e:
+            logger.error(f"Follow-up question generation failed: {e}", exc_info=True)
+            return "That's interesting. Could you elaborate on that?"
+
     async def generate_scenario_streaming(
         self,
         situation: str,
@@ -461,3 +492,39 @@ Respond naturally as {ai_role} in English (2-4 sentences). ONLY return the respo
         except Exception as e:
             logger.error(f"AI response streaming generation failed: {e}", exc_info=True)
             yield "Thank you for that input. Could you elaborate on that a bit more?"
+
+    async def generate_followup_question_stream(self, prompt: str) -> AsyncGenerator[str, None]:
+        """
+        사용자 정의 프롬프트로 follow-up 질문을 스트리밍으로 생성합니다.
+        (ai_tutor_service와의 호환성 유지)
+
+        Args:
+            prompt: LLM에 전달할 프롬프트
+
+        Yields:
+            생성된 질문 청크
+        """
+        try:
+            logger.info("❓ [Follow-up 질문 스트리밍] OpenAI 호출 중...")
+
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                self.llm.invoke,
+                prompt
+            )
+
+            response_text = response.content if hasattr(response, 'content') else str(response)
+
+            # 청크 단위로 반환
+            chunk_size = 20
+            for i in range(0, len(response_text), chunk_size):
+                yield response_text[i:i + chunk_size]
+                await asyncio.sleep(0)
+
+            logger.info("✅ [Follow-up 질문 스트리밍 완료]")
+
+        except Exception as e:
+            logger.error(f"Follow-up question streaming generation failed: {e}", exc_info=True)
+            fallback = "That's interesting. Could you elaborate on that a bit more?"
+            yield fallback
