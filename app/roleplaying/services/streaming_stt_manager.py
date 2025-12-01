@@ -7,8 +7,8 @@
 - 실시간 부분 결과 수신
 - 세션 초기화/종료
 
-Deepgram SDK 3.x 변경사항:
-- listen.live() → listen.live.v1() (async context manager)
+Deepgram SDK 3.x API:
+- listen.live.websocket.v1() (async context manager)
 - 모든 메서드가 async/await 기반
 """
 
@@ -166,8 +166,8 @@ class StreamingSTTManager:
             Exception: 세션 생성 실패 시
         """
         try:
-            # ✅ SDK 3.x: listen.live.v1()는 async context manager 반환
-            connection = await self.client.listen.live.v1(
+            # ✅ SDK 3.x: listen.live.websocket.v1()는 async context manager 반환
+            connection = await self.client.listen.live.websocket.v1(
                 model=settings.DEEPGRAM_MODEL,
                 language=settings.DEEPGRAM_LANGUAGE,
                 smart_format=settings.DEEPGRAM_SMART_FORMAT,
