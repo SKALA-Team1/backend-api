@@ -233,13 +233,13 @@ start_ollama() {
     if curl -s http://localhost:11434 > /dev/null 2>&1; then
         print_success "Ollama가 이미 실행 중입니다 (http://localhost:11434)"
 
-        # llama2 모델 확인 및 다운로드
-        if ! ollama list | grep -q "llama2"; then
-            print_warning "llama2 모델이 설치되지 않았습니다. 다운로드 중..."
-            ollama pull llama2
-            print_success "llama2 모델 다운로드 완료"
+        # mistral 모델 확인 및 다운로드
+        if ! ollama list | grep -q "mistral"; then
+            print_warning "mistral 모델이 설치되지 않았습니다. 다운로드 중..."
+            ollama pull mistral
+            print_success "mistral 모델 다운로드 완료"
         else
-            print_success "llama2 모델이 이미 설치되어 있습니다"
+            print_success "mistral 모델이 이미 설치되어 있습니다"
         fi
 
         return 0
@@ -258,14 +258,14 @@ start_ollama() {
             print_success "Ollama 시작 완료 (http://localhost:11434)"
             echo ""
 
-            # llama2 모델 자동 다운로드
-            print_info "llama2 모델 확인 중..."
-            if ! ollama list | grep -q "llama2"; then
-                print_warning "llama2 모델을 다운로드합니다 (처음 실행 시 약 5-10분 소요)..."
-                ollama pull llama2
-                print_success "llama2 모델 다운로드 완료"
+            # mistral 모델 자동 다운로드
+            print_info "mistral 모델 확인 중..."
+            if ! ollama list | grep -q "mistral"; then
+                print_warning "mistral 모델을 다운로드합니다 (처음 실행 시 약 5분 소요)..."
+                ollama pull mistral
+                print_success "mistral 모델 다운로드 완료"
             else
-                print_success "llama2 모델이 이미 설치되어 있습니다"
+                print_success "mistral 모델이 이미 설치되어 있습니다"
             fi
 
             echo ""
