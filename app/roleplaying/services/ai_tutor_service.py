@@ -20,10 +20,10 @@ AI Tutor Service
 """
 
 import logging
-from typing import AsyncGenerator, Tuple
+from typing import AsyncGenerator, Tuple, Optional
 
 from app.roleplaying.session_manager import SessionState
-from app.roleplaying.services.llm_service import LLMService
+from app.roleplaying.services.interfaces import QuestionGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +33,20 @@ class AITutorService:
     AI 튜터 서비스
 
     대화 컨텍스트를 분석하고 적절한 AI 응답을 생성합니다.
+
+    의존성 주입:
+        question_generator: QuestionGenerator 구현체 (질문 생성 담당)
     """
 
-    def __init__(self):
-        """AITutorService 초기화"""
-        self.llm_service = LLMService()
-        logger.info("AITutorService initialized")
+    def __init__(self, question_generator: QuestionGenerator):
+        """
+        AITutorService 초기화
+
+        Args:
+            question_generator: QuestionGenerator 인터페이스 구현체
+        """
+        self.question_generator = question_generator
+        logger.info("AITutorService initialized with injected dependencies")
 
     async def generate_reply(
         self,
@@ -169,7 +177,7 @@ class AITutorService:
             생성된 질문
         """
         # ========================================
-        # Step 1: 대화 컨텍스트 구성
+        # Step 1: 시나리오 & 대화 컨텍스트 구성
         # ========================================
         scenario_context = self._build_scenario_context(session_state)
         conversation_history = self._build_conversation_history(session_state)
@@ -179,10 +187,8 @@ class AITutorService:
         # ========================================
         prompt = f"""You are roleplaying as a {session_state.ai_role} in a professional English conversation practice session.
 
-Context:
-- Your role: {session_state.ai_role}
-- User's role: {session_state.my_role}
-- Conversation topic: Professional workplace discussion
+Scenario context:
+{scenario_context}
 
 Conversation so far:
 {conversation_history}
@@ -202,18 +208,18 @@ Return ONLY the question text, nothing else."""
 
         try:
             # ========================================
-            # Step 3: LLM 호출
+            # Step 3: LLM 호출 (의존성 주입)
             # ========================================
-            # TODO: LLM API 호출 (현재는 LLMService가 Ollama 사용)
-            # 향후 OpenAI GPT-4 또는 Claude로 전환 가능
-
-            response = await self.llm_service.generate_followup_question(prompt)
+            response = await self.question_generator.generate_followup_question(prompt)
             return response.strip() or "Could you expand on that a bit more?"
 
         except Exception as e:
             logger.error(f"LLM call failed: {e}", exc_info=True)
             # Fallback
-            return f"That's interesting. As a {session_state.ai_role}, I'd like to know more. Could you elaborate?"
+            return (
+                f"That's interesting. As a {session_state.ai_role}, "
+                "I'd like to know more. Could you elaborate?"
+            )
 
     async def _generate_dynamic_question_stream(
         self,
@@ -231,7 +237,7 @@ Return ONLY the question text, nothing else."""
             청크 단위로 생성된 질문 텍스트
         """
         # ========================================
-        # Step 1: 대화 컨텍스트 구성
+        # Step 1: 시나리오 & 대화 컨텍스트 구성
         # ========================================
         scenario_context = self._build_scenario_context(session_state)
         conversation_history = self._build_conversation_history(session_state)
@@ -241,10 +247,8 @@ Return ONLY the question text, nothing else."""
         # ========================================
         prompt = f"""You are roleplaying as a {session_state.ai_role} in a professional English conversation practice session.
 
-Context:
-- Your role: {session_state.ai_role}
-- User's role: {session_state.my_role}
-- Conversation topic: Professional workplace discussion
+Scenario context:
+{scenario_context}
 
 Conversation so far:
 {conversation_history}
@@ -264,15 +268,18 @@ Return ONLY the question text, nothing else."""
 
         try:
             # ========================================
-            # Step 3: LLM 스트리밍 호출
+            # Step 3: LLM 스트리밍 호출 (의존성 주입)
             # ========================================
-            async for chunk in self.llm_service.generate_followup_question_stream(prompt):
+            async for chunk in self.question_generator.generate_followup_question_stream(prompt):
                 yield chunk
 
         except Exception as e:
             logger.error(f"LLM streaming call failed: {e}", exc_info=True)
             # Fallback: 기본 질문 반환
-            fallback = f"That's interesting. As a {session_state.ai_role}, I'd like to know more. Could you elaborate?"
+            fallback = (
+                f"That's interesting. As a {session_state.ai_role}, "
+                "I'd like to know more. Could you elaborate?"
+            )
             yield fallback
 
     def _build_scenario_context(self, session_state: SessionState) -> str:
@@ -311,11 +318,31 @@ Return ONLY the question text, nothing else."""
 
         history_lines = []
         for turn in recent_turns:
-            speaker_label = "You" if turn.speaker == "ai" else "User"
+            # turn.speaker 값에 따라 라벨 설정
+            speaker_label = "AI" if turn.speaker == "ai" else "User"
             history_lines.append(f"{speaker_label}: {turn.text}")
 
         return "\n".join(history_lines)
 
 
-# 전역 AI 튜터 서비스 인스턴스
-ai_tutor_service = AITutorService()
+# ============================================
+# 전역 인스턴스 (레거시 호환성)
+# ============================================
+
+_ai_tutor_service_instance: Optional["AITutorService"] = None
+
+
+def get_ai_tutor_service_instance() -> "AITutorService":
+    """레거시 코드 호환을 위한 전역 인스턴스 접근자"""
+    global _ai_tutor_service_instance
+    if _ai_tutor_service_instance is None:
+        from app.roleplaying.services.dependencies import get_question_generator
+
+        _ai_tutor_service_instance = AITutorService(
+            question_generator=get_question_generator()
+        )
+    return _ai_tutor_service_instance
+
+
+# FastAPI WebSocket 핸들러 등에서 사용하는 기본 인스턴스
+ai_tutor_service = get_ai_tutor_service_instance()

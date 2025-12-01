@@ -1,16 +1,16 @@
 """
-Prompt-Based Scenario Service
-============================
+Prompt-Based Scenario Service (SOLID 준수)
+===========================================
 사용자 프롬프트 기반 시나리오 생성을 담당하는 서비스.
 
 역할:
     - 사용자 입력(my_role, ai_role, situation)으로부터 시나리오 생성
     - DB에서 사용자의 과거 시나리오 조회 (컨텍스트)
-    - LLM을 통한 상황 구체화, 제목 생성, 질문 생성
+    - 상황 강화, 제목 생성, 질문 생성
     - 생성된 데이터를 DTO로 반환 (DB 저장 안 함)
 
 의존성:
-    - LLMService
+    - ScenarioEnhancer (상황 강화, 제목, 질문 생성)
     - SQLAlchemy Session
     - Pydantic schemas
 """
@@ -21,7 +21,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.roleplaying.services.llm_service import LLMService
+from app.roleplaying.services.interfaces import ScenarioEnhancer
 from app.roleplaying.schemas import ScenarioInfoDto
 from app.roleplaying.services.title_utils import compact_title
 
@@ -29,14 +29,18 @@ logger = logging.getLogger(__name__)
 
 
 class PromptBasedScenarioService:
-    """프롬프트 기반 시나리오 생성 서비스"""
+    """프롬프트 기반 시나리오 생성 서비스 (SOLID 준수)
 
-    def __init__(self, model_name: str = "llama3.2"):
+    의존성 주입:
+        enhancer: ScenarioEnhancer 구현체 (상황 강화, 제목, 질문 생성)
+    """
+
+    def __init__(self, enhancer: ScenarioEnhancer):
         """
         Args:
-            model_name: Ollama 모델 이름
+            enhancer: ScenarioEnhancer 구현체 (의존성 주입)
         """
-        self.llm_service = LLMService(model_name=model_name)
+        self.enhancer = enhancer
 
     async def generate_from_prompt(
         self,
@@ -72,8 +76,8 @@ class PromptBasedScenarioService:
         logger.debug(f"Fetched {len(context)} past scenarios for context")
 
         # Step 2: 상황 구체화
-        concrete_situation = await self.llm_service.enhance_situation_from_prompt(
-            user_input=situation,
+        concrete_situation = await self.enhancer.enhance_situation(
+            situation=situation,
             my_role=my_role,
             ai_role=ai_role,
             context=context
@@ -81,10 +85,9 @@ class PromptBasedScenarioService:
         logger.debug(f"Enhanced situation: {concrete_situation}")
 
         # Step 3: 제목 생성
-        title = await self.llm_service.generate_title_for_prompt(
+        title = await self.enhancer.generate_title(
             situation=concrete_situation,
             ai_role=ai_role,
-            topic_type="direct",
             my_role=my_role
         )
         title = compact_title(
@@ -196,7 +199,7 @@ class PromptBasedScenarioService:
             ValueError: 질문 생성 실패
         """
         try:
-            questions = await self.llm_service.generate_fixed_questions_for_prompt(
+            questions = await self.enhancer.generate_prompt_questions(
                 situation=situation,
                 my_role=my_role,
                 ai_role=ai_role
@@ -214,7 +217,7 @@ class PromptBasedScenarioService:
             # Fallback: 기본 질문
             return self._default_questions(my_role, ai_role)
 
-    def _normalize_questions(self, questions: List) -> List[str]:
+    def _normalize_questions(self, questions: List[str]) -> List[str]:
         """
         질문들을 정규화하고 정확히 3개인지 검증합니다.
 
@@ -227,20 +230,12 @@ class PromptBasedScenarioService:
         Raises:
             ValueError: 질문 개수가 3개가 아님
         """
-        normalized: List[str] = []
-
-        for question in questions:
-            if isinstance(question, dict):
-                text = question.get("text")
-                if isinstance(text, str):
-                    normalized.append(text.strip())
-            elif isinstance(question, str):
-                normalized.append(question.strip())
-
-        normalized = [q for q in normalized if q]
+        # ScenarioEnhancer는 이미 문자열 리스트를 반환하므로
+        # 단순히 검증만 수행
+        normalized = [q.strip() for q in questions if isinstance(q, str) and q.strip()]
 
         if len(normalized) != 3:
-            raise ValueError(f"LLM must return exactly 3 questions, got {len(normalized)}")
+            raise ValueError(f"Expected exactly 3 questions, got {len(normalized)}")
 
         return normalized
 

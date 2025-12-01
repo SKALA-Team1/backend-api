@@ -1,19 +1,22 @@
 """
-Slack Scenario Service
-=====================
+Slack Scenario Service (SOLID 준수)
+===================================
 Slack 대화 분석 및 시나리오 생성 비즈니스 로직을 담당하는 서비스.
 
 역할:
-    - LLM 서비스를 조율하여 대화 분석 및 시나리오 생성
+    - 대화 분석기, 시나리오 생성기, 메시지 요약기, 질문 생성기를 조율
     - 4개 시나리오 생성 (1 overview + 3 detail per AI role)
     - 최종 응답 DTO 구성
 
 중요:
-    - situation만 LLM으로 분석
+    - situation만 분석
     - FastAPI는 READ-ONLY (데이터베이스 저장 안 함)
 
 의존성:
-    - LLMService
+    - ConversationAnalyzer (대화 분석)
+    - ScenarioGenerator (시나리오 생성)
+    - MessageSummarizer (메시지 요약)
+    - FixedQuestionBuilder (질문 생성)
     - Pydantic schemas
 """
 
@@ -22,7 +25,12 @@ import asyncio
 from dataclasses import dataclass
 from typing import List, Optional
 
-from app.roleplaying.services.llm_service import LLMService
+from app.roleplaying.services.interfaces import (
+    ConversationAnalyzer,
+    ScenarioGenerator,
+    MessageSummarizer,
+    FixedQuestionBuilder
+)
 from app.roleplaying.services.title_utils import compact_title
 from app.roleplaying.schemas import (
     AnalysisRequestDto,
@@ -44,14 +52,33 @@ logger = logging.getLogger(__name__)
 
 
 class SlackScenarioService:
-    """Slack 대화 기반 시나리오 생성 서비스"""
+    """Slack 대화 기반 시나리오 생성 서비스 (SOLID 준수)
 
-    def __init__(self, model_name: str = "llama3.2"):
+    의존성 주입:
+        analyzer: ConversationAnalyzer 구현체 (대화 분석)
+        generator: ScenarioGenerator 구현체 (시나리오 생성)
+        summarizer: MessageSummarizer 구현체 (메시지 요약)
+        question_builder: FixedQuestionBuilder 구현체 (질문 생성)
+    """
+
+    def __init__(
+        self,
+        analyzer: ConversationAnalyzer,
+        generator: ScenarioGenerator,
+        summarizer: MessageSummarizer,
+        question_builder: FixedQuestionBuilder
+    ):
         """
         Args:
-            model_name: Ollama 모델 이름
+            analyzer: ConversationAnalyzer 구현체
+            generator: ScenarioGenerator 구현체
+            summarizer: MessageSummarizer 구현체
+            question_builder: FixedQuestionBuilder 구현체
         """
-        self.llm_service = LLMService(model_name=model_name)
+        self.analyzer = analyzer
+        self.generator = generator
+        self.summarizer = summarizer
+        self.question_builder = question_builder
 
     async def analyze_and_generate(
         self,
@@ -82,7 +109,7 @@ class SlackScenarioService:
 
         messages_dict = [msg.model_dump() for msg in request.messages]
 
-        situation = await self.llm_service.analyze_situation(
+        situation = await self.analyzer.analyze_situation(
             messages=messages_dict,
             my_role=request.myRole,
             conversation_date=str(request.conversationDate)
@@ -158,11 +185,10 @@ class SlackScenarioService:
         """
         logger.debug(f"Generating scenario: {ai_role} - {topic_type}")
 
-        scenario_data = await self.llm_service.generate_scenario(
+        scenario_data = await self.generator.generate_scenario_from_prompt(
             my_role=my_role,
             situation=situation,
-            ai_role=ai_role,
-            topic_type=topic_type
+            ai_role=ai_role
         )
 
         base_questions = scenario_data.get("fixedQuestions", [])
@@ -201,11 +227,11 @@ class SlackScenarioService:
         my_messages = [msg.content for msg in conversation_roles if msg.mine]
         others_messages = [msg.content for msg in conversation_roles if not msg.mine]
 
-        user_summary = await self.llm_service.summarize_messages(
+        user_summary = await self.summarizer.summarize_messages(
             messages=my_messages,
             perspective="user"
         )
-        counterpart_summary = await self.llm_service.summarize_messages(
+        counterpart_summary = await self.summarizer.summarize_messages(
             messages=others_messages,
             perspective="counterpart"
         )
@@ -250,7 +276,7 @@ class SlackScenarioService:
         fallback_questions = fallback_questions or []
 
         try:
-            generated_questions = await self.llm_service.build_fixed_questions(
+            generated_questions = await self.question_builder.build_fixed_questions(
                 user_summary=formatted_user_summary,
                 counterpart_summary=formatted_counterpart_summary
             )

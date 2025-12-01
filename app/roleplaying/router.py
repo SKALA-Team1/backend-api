@@ -52,10 +52,12 @@ from app.roleplaying.schemas import (
     PromptBasedScenarioRequestDto,
     PromptBasedScenarioResponseDto
 )
-from app.roleplaying.services.slack_scenario_service import SlackScenarioService
-from app.roleplaying.services.prompt_based_generator_service import PromptBasedScenarioService
+from app.roleplaying.services.dependencies import (
+    SlackScenarioServiceDep,
+    PromptBasedScenarioServiceDep,
+    SessionServiceDep
+)
 from app.config import settings
-from app.roleplaying.services.session_service import session_service
 from app.core.deps import get_db
 
 router = APIRouter()
@@ -76,7 +78,8 @@ async def legacy_ping():
 
 async def _process_internal_session_setup(
     request: InternalSessionSetupRequest,
-    db: Session
+    db: Session,
+    session_service: SessionServiceDep
 ) -> InternalSessionSetupResponse:
     """
     Shared session setup handler used by both the canonical and legacy routes.
@@ -117,7 +120,10 @@ async def _process_internal_session_setup(
 
 
 @router.post("/internal/scenarios/analyze-conversation", response_model=AnalysisResultDto)
-async def analyze_conversation(request: AnalysisRequestDto):
+async def analyze_conversation(
+    request: AnalysisRequestDto,
+    slack_scenario_service: SlackScenarioServiceDep
+):
     """
     Slack 대화를 분석하고 영어 연습 시나리오를 생성합니다.
 
@@ -125,6 +131,7 @@ async def analyze_conversation(request: AnalysisRequestDto):
 
     Args:
         request: Slack 메시지 및 사용자 정보
+        slack_scenario_service: 의존성 주입된 시나리오 생성 서비스
 
     Returns:
         분석된 주제 정보 + 6개의 시나리오
@@ -148,9 +155,8 @@ async def analyze_conversation(request: AnalysisRequestDto):
     ]
 
     try:
-        # 시나리오 서비스 실행
-        service = SlackScenarioService()
-        result = await service.analyze_and_generate(
+        # 의존성 주입된 서비스 사용
+        result = await slack_scenario_service.analyze_and_generate(
             request=request,
             conversation_roles=conversation_roles
         )
@@ -169,6 +175,7 @@ async def analyze_conversation(request: AnalysisRequestDto):
 @router.post("/internal/sessions/setup", response_model=InternalSessionSetupResponse)
 async def internal_setup_session(
     request: InternalSessionSetupRequest,
+    session_service: SessionServiceDep,
     db: Session = Depends(get_db)
 ):
     """
@@ -183,7 +190,7 @@ async def internal_setup_session(
         - session_id는 Spring 1이 생성합니다.
         - FastAPI는 이 session_id를 받아서 Redis에 저장하기만 합니다.
     """
-    return await _process_internal_session_setup(request, db)
+    return await _process_internal_session_setup(request, db, session_service)
 
 
 @router.post(
@@ -193,17 +200,19 @@ async def internal_setup_session(
 )
 async def legacy_internal_setup_session(
     request: InternalSessionSetupRequest,
+    session_service: SessionServiceDep,
     db: Session = Depends(get_db)
 ):
     """
     Legacy compatibility route so existing callers of /roleplaying/internal/sessions/setup continue to work.
     """
-    return await _process_internal_session_setup(request, db)
+    return await _process_internal_session_setup(request, db, session_service)
 
 
 @router.post("/internal/scenarios/generate-from-prompt", response_model=PromptBasedScenarioResponseDto)
 async def generate_scenario_from_prompt(
     request: PromptBasedScenarioRequestDto,
+    prompt_scenario_service: PromptBasedScenarioServiceDep,
     db: Session = Depends(get_db)
 ):
     """
@@ -214,6 +223,7 @@ async def generate_scenario_from_prompt(
 
     Args:
         request: 사용자 프롬프트 정보
+        prompt_scenario_service: 의존성 주입된 프롬프트 기반 시나리오 생성 서비스
         db: DB 세션 (과거 시나리오 컨텍스트 조회용)
 
     Returns:
@@ -230,9 +240,8 @@ async def generate_scenario_from_prompt(
             f"my_role={request.myRole}, ai_role={request.aiRole}"
         )
 
-        # PromptBasedScenarioService 실행
-        service = PromptBasedScenarioService()
-        scenario = await service.generate_from_prompt(
+        # 의존성 주입된 서비스 사용
+        scenario = await prompt_scenario_service.generate_from_prompt(
             user_id=request.userId,
             my_role=request.myRole,
             ai_role=request.aiRole,

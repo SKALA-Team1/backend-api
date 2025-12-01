@@ -108,6 +108,30 @@ class AzureSpeechService:
                 "error_message": str(e)
             }
 
+    async def evaluate_pronunciation(
+        self,
+        audio_data: Optional[bytes],
+        reference_text: str,
+        language: str = "en-US"
+    ) -> Dict:
+        """
+        Feedback 서비스 호환용 평가 메서드.
+
+        audio_data가 없으면 발음 평가를 생략하고 기본 응답을 반환합니다.
+        """
+        if not audio_data:
+            return {
+                "success": False,
+                "error_message": "No audio data provided",
+                "pronunciation_score": 0
+            }
+
+        return await self.assess_pronunciation(
+            audio_data=audio_data,
+            reference_text=reference_text,
+            language=language
+        )
+
     def _assess_pronunciation_sync(
         self,
         audio_data: bytes,
