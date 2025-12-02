@@ -274,16 +274,27 @@ Generate the continuation now:"""
         difficulty_config = DIFFICULTY_CONFIG[request.difficulty]
         scenario_config = SCENARIO_TYPE_CONFIG[request.scenario_type]
 
+        # 챕터 제목에서 영어 제목 추출 (예: "Chapter 01: Starting a Meeting (미팅에서의 기본 태도)" -> "Starting a Meeting")
+        chapter_title = request.chapter_filter
+        if ": " in chapter_title:
+            english_title = chapter_title.split(": ")[1].split(" (")[0]
+        else:
+            english_title = chapter_title
+
         prompt = f"""You are an English conversation scenario generator for Korean learners.
 
 ## Task
-Generate a realistic English conversation scenario based on the following textbook content and requirements.
+Generate a realistic English conversation scenario based on the following textbook content.
+⚠️ **IMPORTANT**: You MUST closely follow the dialogues, expressions, and vocabulary from the textbook content below.
 
-## Textbook Reference Content
+## Textbook Reference Content (교재 원본 내용)
 {context.combined_text}
 
+## Scenario Title (FIXED - DO NOT CHANGE)
+**Title**: "{english_title}"
+
 ## Requirements
-- **Topic**: {request.topic}
+- **Chapter**: {request.chapter_filter}
 - **Scenario Type**: {request.scenario_type.value} ({scenario_config['context']})
 - **Difficulty**: {request.difficulty.value}
 - **Number of Turns**: {request.num_turns} turns total
@@ -293,10 +304,15 @@ Generate a realistic English conversation scenario based on the following textbo
   - AI speaks: {request.num_turns // 2} times (turns 1, 3, 5, 7, 9, 11, 13, 15, 17, 19...)
   - User responds: {request.num_turns // 2} times (turns 2, 4, 6, 8, 10, 12, 14, 16, 18, 20...)
   - Alternating pattern: AI → User → AI → User → ... until turn {request.num_turns}
-  - Example for 20 turns: Turn 1=AI, Turn 2=User, Turn 3=AI, Turn 4=User, ..., Turn 19=AI, Turn 20=User
   - DO NOT STOP until you have generated ALL {request.num_turns} turns!
 
 - **Include Korean Hints**: {request.include_korean_hints}
+
+## ⚠️ CRITICAL: Use Textbook Content
+1. **MUST use the exact expressions and sentences from the textbook** when possible
+2. **MUST include the key vocabulary** mentioned in the textbook
+3. **MUST follow the situation/scenario** described in the textbook
+4. The dialogues should feel like they came directly from the textbook examples
 
 ## Difficulty Guidelines
 - Vocabulary Level: {difficulty_config['vocab_level']}
@@ -310,8 +326,8 @@ Generate a realistic English conversation scenario based on the following textbo
 
 ## Output Format (JSON)
 {{
-    "title": "Scenario title in English",
-    "description": "Brief description of the scenario",
+    "title": "{english_title}",
+    "description": "Brief description based on textbook learning objectives",
     "situation": "Detailed situation description for the learner",
     "user_role": "Description of user's role",
     "ai_role": "Description of AI's role",
@@ -341,13 +357,14 @@ Generate a realistic English conversation scenario based on the following textbo
 The learner will READ the Korean sentence and SPEAK it in English. So korean_hint must be a sentence they can directly translate.
 
 ## Other Important Notes
-1. Use expressions and vocabulary from the provided textbook content
-2. Make the conversation natural and realistic
-3. User turns should be appropriate for the learner's level
-4. Include useful business English expressions
-5. **CRITICAL**: The dialogues array MUST contain exactly {request.num_turns} turns, with AI and User alternating. Count carefully to ensure AI speaks {request.num_turns // 2} times and User speaks {request.num_turns // 2} times.
+1. **PRIORITY**: Use the EXACT expressions, sentences, and dialogues from the textbook content above
+2. Include the key vocabulary and business idioms from the textbook
+3. Follow the situation examples (Situation 01, Situation 02) from the textbook
+4. User turns should match the textbook's learning objectives
+5. **CRITICAL**: The dialogues array MUST contain exactly {request.num_turns} turns, with AI and User alternating.
+6. The scenario title MUST be exactly: "{english_title}"
 
-Generate the scenario now:"""
+Generate the scenario based on the textbook content now:"""
 
         return prompt
 
@@ -355,7 +372,7 @@ Generate the scenario now:"""
         """LLM 호출 및 JSON 파싱"""
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4.1-mini",
                 messages=[
                     {
                         "role": "system",

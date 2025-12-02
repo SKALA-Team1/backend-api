@@ -47,7 +47,7 @@ class ScenarioGenerateRequest(BaseModel):
     topic: str = Field(..., min_length=1, max_length=200, description="시나리오 주제")
     scenario_type: ScenarioType = Field(ScenarioType.GENERAL, description="시나리오 유형")
     difficulty: DifficultyLevel = Field(DifficultyLevel.INTERMEDIATE, description="난이도")
-    num_turns: int = Field(20, ge=2, le=30, description="대화 턴 수 (AI와 User가 각각 절반씩 발화)")
+    num_turns: int = Field(10, ge=2, le=30, description="대화 턴 수 (AI 5턴 + User 5턴 = 총 10턴)")
     chapter_filter: str = Field(..., description="특정 챕터 선택 (필수) - /scenario/chapters API로 챕터 목록 조회")
     include_korean_hints: bool = Field(True, description="한국어 힌트 포함 여부")
     save_to_db: bool = Field(True, description="DB에 저장 여부")

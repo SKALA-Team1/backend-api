@@ -474,15 +474,14 @@ class Spring2Client:
         situation: str,
         user_role: str,
         ai_role: str,
-        dialogues_json: str,
+        dialogues: list[dict],
         key_expressions: list[str],
-        vocabulary: list[str],
-        grammar_points: list[str],
+        vocabulary: list[dict],
+        grammar_points: list[dict],
         chapter: str,
-        source_chapters: list[str]
     ) -> dict:
         """
-        교재 기반 시나리오 저장 API 호출 (에이전트2)
+        교재 기반 시나리오 저장 API 호출 (에이전트2) - 정규화 버전
 
         FastAPI(에이전트2)에서 RAG 기반으로 생성한 시나리오를 Spring으로 전송하여 DB에 저장
 
@@ -495,12 +494,11 @@ class Spring2Client:
             situation: 상황 설명
             user_role: 사용자 역할
             ai_role: AI 역할
-            dialogues_json: 대화 내용 JSON 문자열
+            dialogues: 대화 목록 [{turnNumber, speaker, text, koreanHint, keyExpressions}]
             key_expressions: 핵심 표현 목록
-            vocabulary: 주요 어휘
-            grammar_points: 문법 포인트
+            vocabulary: 어휘 목록 [{word, meaning, exampleSentence}]
+            grammar_points: 문법 포인트 목록 [{point, explanation, exampleSentence}]
             chapter: 참조 챕터
-            source_chapters: 참조 챕터 목록
 
         Returns:
             API 응답 (저장된 시나리오 정보)
@@ -516,12 +514,11 @@ class Spring2Client:
             "situation": situation,
             "userRole": user_role,
             "aiRole": ai_role,
-            "dialoguesJson": dialogues_json,
+            "dialogues": dialogues,
             "keyExpressions": key_expressions,
             "vocabulary": vocabulary,
             "grammarPoints": grammar_points,
             "chapter": chapter,
-            "sourceChapters": source_chapters
         }
 
         try:

@@ -321,13 +321,6 @@ def extract_toc_from_content(pdf_path: str | Path) -> list[TOCEntry]:
     # 페이지 번호로 정렬
     toc_entries.sort(key=lambda x: x.page_num)
 
-    # Answer Key 추가
-    toc_entries.append(TOCEntry(
-        level=2,
-        title="Answer Key",
-        page_num=86
-    ))
-
     logger.info(f"Extracted {len(toc_entries)} chapters from content")
     return toc_entries
 

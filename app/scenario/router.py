@@ -58,23 +58,32 @@ async def generate_scenario(request: ScenarioGenerateRequest):
 
         logger.info(f"Generated scenario: {scenario.title}")
 
-        # Spring API를 통해 DB에 저장
+        # Spring API를 통해 DB에 저장 (정규화 형태)
         if request.save_to_db:
             try:
-                # 대화 내용을 JSON으로 변환
-                dialogues_json = json.dumps(
-                    [
-                        {
-                            "turn_number": d.turn_number,
-                            "speaker": d.speaker,
-                            "text": d.text,
-                            "korean_hint": d.korean_hint,
-                            "key_expressions": d.key_expressions
-                        }
-                        for d in scenario.dialogues
-                    ],
-                    ensure_ascii=False
-                )
+                # 대화 내용을 정규화된 형태로 변환
+                dialogues = [
+                    {
+                        "turnNumber": d.turn_number,
+                        "speaker": d.speaker,
+                        "text": d.text,
+                        "koreanHint": d.korean_hint,
+                        "keyExpressions": d.key_expressions
+                    }
+                    for d in scenario.dialogues
+                ]
+
+                # vocabulary를 정규화된 형태로 변환
+                vocabulary = [
+                    {"word": v, "meaning": None, "exampleSentence": None}
+                    for v in (scenario.vocabulary or [])
+                ]
+
+                # grammar_points를 정규화된 형태로 변환
+                grammar_points = [
+                    {"point": gp, "explanation": None, "exampleSentence": None}
+                    for gp in (scenario.grammar_points or [])
+                ]
 
                 spring_response = await spring2_client.save_textbook_scenario(
                     user_id=request.user_id,
@@ -85,12 +94,11 @@ async def generate_scenario(request: ScenarioGenerateRequest):
                     situation=scenario.situation,
                     user_role=scenario.user_role,
                     ai_role=scenario.ai_role,
-                    dialogues_json=dialogues_json,
-                    key_expressions=scenario.key_expressions,
-                    vocabulary=scenario.vocabulary,
-                    grammar_points=scenario.grammar_points,
+                    dialogues=dialogues,
+                    key_expressions=scenario.key_expressions or [],
+                    vocabulary=vocabulary,
+                    grammar_points=grammar_points,
                     chapter=request.chapter_filter or "",
-                    source_chapters=scenario.source_chapters
                 )
 
                 scenario.db_scenario_id = spring_response.get("scenarioId")
@@ -209,6 +217,35 @@ async def get_difficulty_levels():
             for d in DifficultyLevel
         ]
     }
+
+
+@router.get("/user/{user_id}")
+async def get_user_scenarios(user_id: int):
+    """
+    사용자 시나리오 목록 조회
+
+    Spring2를 통해 해당 사용자의 모든 시나리오를 조회합니다.
+
+    흐름: Gateway → FastAPI → Spring2 → MySQL (조회) → 응답
+
+    Args:
+        user_id: 사용자 ID
+
+    Returns:
+        시나리오 목록
+    """
+    try:
+        logger.info(f"Retrieving scenarios for user_id={user_id}")
+        scenarios = await spring2_client.get_user_scenarios(user_id)
+        logger.info(f"Retrieved {len(scenarios)} scenarios for user_id={user_id}")
+        return scenarios
+
+    except Exception as e:
+        logger.error(f"Failed to get user scenarios: user_id={user_id}, error={e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve user scenarios: {str(e)}"
+        )
 
 
 @router.get("/status")
