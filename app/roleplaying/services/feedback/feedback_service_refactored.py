@@ -467,31 +467,31 @@ class FeedbackOrchestratorImpl:
     async def _generate_feedback_text(
         self,
         user_text: str,
-        pronunciation: Dict,
-        grammar: Dict,
-        relevance: Dict,
+        pronunciation: Optional[Dict],
+        grammar: Optional[Dict],
+        relevance: Optional[Dict],
         needs_correction: bool
     ) -> str:
-        """피드백 텍스트 생성"""
+        """피드백 텍스트 생성 (None 평가 결과 안전 처리)"""
         try:
             feedback_parts = []
 
-            # 발음 피드백
-            if pronunciation.get("feedback"):
+            # 발음 피드백 (None 체크)
+            if pronunciation and pronunciation.get("feedback"):
                 feedback_parts.append(f"발음: {pronunciation['feedback']}")
 
-            # 문법 피드백
-            if grammar.get("feedback"):
+            # 문법 피드백 (None 체크)
+            if grammar and grammar.get("feedback"):
                 feedback_parts.append(f"문법: {grammar['feedback']}")
 
-            # 맥락 피드백
-            if relevance.get("feedback"):
+            # 맥락 피드백 (None 체크)
+            if relevance and relevance.get("feedback"):
                 feedback_parts.append(f"맥락: {relevance['feedback']}")
 
             # 최종 메시지
             if needs_correction:
                 feedback_text = " | ".join(feedback_parts)
-                feedback_text += "\n다시 한 번 시도해주세요."
+                feedback_text += f"\n다시 한 번 시도해주세요."
             else:
                 feedback_text = "좋습니다! 계속 진행하겠습니다."
 
