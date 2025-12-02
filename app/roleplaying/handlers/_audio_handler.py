@@ -6,7 +6,7 @@ UTTERANCE_END 메시지 처리 (오디오 기반)
 
 흐름:
 1. STT 처리 (오디오 → 텍스트)
-2. 피드백 평가 (Option 1: 실패 시 None)
+2. 피드백 평가 (실패 시 None 반환)
 3. Spring 2에 발화 저장 (feedback 조건부)
 4. AI 응답 생성
 5. 턴 제한 확인
@@ -36,6 +36,7 @@ from app.roleplaying.handlers.ws_message_models import (
     SttFinalMessage,
     UtteranceSavedMessage,
 )
+from app.roleplaying.processing.user_utterance_processor import UtteranceProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -62,31 +63,20 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
 
         logger.info(f"Processing utterance: session={session_id}, audio_size={len(audio_data)} bytes")
 
-        # Step 1: STT 처리
-        from app.roleplaying.services.stt.speech_to_text_service import stt_service
+        # Step 1: STT 처리 (user_utterance_processor 사용)
+        stt_text = await UtteranceProcessor.process_stt(audio_data)
 
-        async def process_stt_and_history(audio_data: bytes) -> Optional[str]:
-            """STT 처리 및 히스토리 추가"""
+        # 히스토리에 추가
+        if stt_text:
             try:
-                stt_text = await stt_service.transcribe(audio_data)
-                if not stt_text or stt_text.strip() == "":
-                    logger.warning(f"Silence detected: {len(audio_data)} bytes of audio but no speech")
-                    return None
-
                 await session_manager.append_message_async(
                     session_id=session_id,
                     speaker="user",
                     text=stt_text,
                     audio_s3_url=None,
                 )
-                logger.info(f"STT completed: {stt_text}")
-                return stt_text
             except Exception as e:
-                logger.error(f"STT processing error: {e}", exc_info=True)
-                return None
-
-        stt_task = asyncio.create_task(process_stt_and_history(audio_data))
-        stt_text = await stt_task
+                logger.error(f"Failed to save to history: {e}", exc_info=True)
 
         if not stt_text:
             await websocket.send_json(SttFinalMessage(text="").model_dump())
