@@ -12,9 +12,7 @@ Prompt Registry
 from typing import Dict, Any
 from app.roleplaying.prompts.constants import (
     FOLLOWUP_QUESTION_PROMPT,
-    NEXT_QUESTION_PROMPT,
     FIXED_QUESTIONS_PROMPT,
-    PROMPT_QUESTIONS_PROMPT,
     GRAMMAR_EVALUATION_PROMPT,
     RELEVANCE_EVALUATION_PROMPT,
     CONVERSATION_ANALYSIS_PROMPT,
@@ -29,9 +27,7 @@ from app.roleplaying.prompts.constants import (
 # 프롬프트 레지스트리
 _PROMPT_REGISTRY: Dict[str, str] = {
     "followup_question": FOLLOWUP_QUESTION_PROMPT,
-    "next_question": NEXT_QUESTION_PROMPT,
     "fixed_questions": FIXED_QUESTIONS_PROMPT,
-    "prompt_questions": PROMPT_QUESTIONS_PROMPT,
     "grammar_evaluation": GRAMMAR_EVALUATION_PROMPT,
     "relevance_evaluation": RELEVANCE_EVALUATION_PROMPT,
     "conversation_analysis": CONVERSATION_ANALYSIS_PROMPT,

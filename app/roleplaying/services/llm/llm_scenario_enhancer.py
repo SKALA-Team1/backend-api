@@ -33,7 +33,7 @@ from app.roleplaying.services.llm.llm_base import LLMServiceBase
 from app.roleplaying.prompts.constants import (
     SITUATION_ENHANCEMENT_PROMPT,
     TITLE_GENERATION_PROMPT,
-    PROMPT_QUESTIONS_PROMPT,
+    SCENARIO_GENERATION_PROMPT,
 )
 from app.roleplaying.services.utils.service_utils import (
     extract_json_from_response,
@@ -59,7 +59,7 @@ class ScenarioEnhancerImpl(LLMServiceBase):
         - LLMServiceBase (LLM 프로바이더)
         - SITUATION_ENHANCEMENT_PROMPT (상황 구체화 프롬프트)
         - TITLE_GENERATION_PROMPT (제목 생성 프롬프트)
-        - PROMPT_QUESTIONS_PROMPT (프롬프트 기반 질문 프롬프트)
+        - SCENARIO_GENERATION_PROMPT (시나리오/질문 생성 프롬프트)
         - extract_json_from_response (JSON 추출 유틸)
         - normalize_questions (질문 정규화 유틸)
     """
@@ -238,9 +238,9 @@ class ScenarioEnhancerImpl(LLMServiceBase):
         """
         try:
             # ====================================
-            # Step 1: 프롬프트 구성 (상수에서 가져옴)
+            # Step 1: 프롬프트 구성 (SCENARIO_GENERATION_PROMPT 사용)
             # ====================================
-            prompt = PROMPT_QUESTIONS_PROMPT.format(
+            prompt = SCENARIO_GENERATION_PROMPT.format(
                 situation=situation,
                 my_role=my_role,
                 ai_role=ai_role

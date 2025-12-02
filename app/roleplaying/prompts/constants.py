@@ -118,77 +118,48 @@ Output Format (strict):
 Return valid JSON only.
 """
 
-PROMPT_QUESTIONS_PROMPT = """
-You are an assistant creating foundational English practice questions for an IT collaboration scenario.
-
-[Context]
-This prompt is used during scenario generation *before analyzing actual Slack messages*. 
-Your job is to create three general-purpose questions based solely on the situation and the roles provided below. 
-Do NOT attempt to infer any details beyond what is explicitly stated.
-
-[Situation]
-{situation}
-
-[Roles]
-- User role: {my_role}
-- AI role: {ai_role}
-
-Task:
-Generate exactly three questions in English that fit the following required structure:
-
-1. Opening Question  
-   - Helps initiate the conversation naturally.  
-   - Encourages the user to describe goals, status, or high-level context of the situation.
-
-2. Deep-Dive Question  
-   - Encourages the user to provide more technical or detailed insights related to the situation.  
-   - Should reflect typical IT work themes (requirements, challenges, blockers, architecture, priorities, decisions, etc.).
-
-3. Closing / Next-Step Question  
-   - Encourages the user to discuss plans, action items, or follow-up steps.
-
-Additional Requirements:
-- All questions must require descriptive answers (NOT yes/no).
-- The tone must match a realistic IT collaboration.
-- Use only the situation and roles. Do NOT assume anything from Slack messages.
-- Produce only the JSON output below.
-
-Output Format (strict):
-{"questions": ["question1", "question2", "question3"]}
-
-Return valid JSON only.
-"""
 
 # ============================================
 # 평가/피드백 프롬프트
 # ============================================
 
-GRAMMAR_EVALUATION_PROMPT = """문법 평가: "{user_text}"
+GRAMMAR_EVALUATION_PROMPT = """
+Grammar Evaluation Target: "{user_text}"
 
-평가 기준 (실제 발견 사항만 명시):
-- 시제 일관성 (과거/현재/미래 올바른 사용)
-- 주어-동사 일치 (단수/복수 일치)
-- 관사 사용 (a/an/the 올바른 사용)
-- 전치사 정확성 (in/on/at 등)
-- 문장 구조 (주어-동사-목적어 명확성)
-- 발견된 오류만 구체적 예시와 함께 언급
+Evaluation Guidelines (mention only actual issues found):
+- Verb tense consistency
+- Subject-verb agreement
+- Article usage
+- Preposition accuracy
+- Sentence structure or phrasing
+- Mention only real errors, with short concrete examples
 
-JSON 응답:
-{{"score": int (0-100), "feedback": "구체적 오류 지적 또는 'No grammatical errors detected'"}}"""
+If no grammatical errors exist, explicitly return:
+"No grammatical errors detected"
 
-RELEVANCE_EVALUATION_PROMPT = """맥락 평가:
-질문: "{context}"
-응답: "{user_text}"
+JSON response format (strict):
+{"score": int (0-100), "feedback": "specific issues OR 'No grammatical errors detected'"}
+"""
 
-평가 기준 (실제 발견 사항만 명시):
-- 문맥 이해: 질문의 의도를 파악했는가?
-- 직접성: 질문에 정확히 답변했는가? (주제 이탈 없음)
-- 구체성: 구체적 예시나 상세 설명을 포함했는가?
-- 완전성: 질문의 모든 부분을 다루었는가? (누락된 부분 없음)
-- 부족한 점만 구체적 근거와 함께 언급
+RELEVANCE_EVALUATION_PROMPT = """
+Context Relevance Evaluation
 
-JSON 응답:
-{{"score": int (0-100), "feedback": "부족한 측면 지적 또는 'Response adequately and specifically addresses the question'"}}"""
+Question: "{context}"
+User Response: "{user_text}"
+
+Evaluation Criteria (mention only actual issues):
+- Understanding: Did the user grasp the intent of the question?
+- Directness: Did the response directly address the question? (no topic drift)
+- Specificity: Did the response include details or examples?
+- Completeness: Did the response cover all parts of the question without omission?
+- Mention only real shortcomings, with concrete justification
+
+If the response sufficiently and specifically answers the question, use:
+"Response adequately and specifically addresses the question"
+
+JSON response format (strict):
+{"score": int (0-100), "feedback": "specific shortcomings OR 'Response adequately and specifically addresses the question'"}
+"""
 
 # ============================================
 # 시나리오/상황 생성 프롬프트
