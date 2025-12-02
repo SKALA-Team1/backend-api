@@ -171,86 +171,6 @@ async def legacy_ping():
     return await ping()
 
 
-# ============================================
-# Session Management Helpers
-# ============================================
-
-async def _process_internal_session_setup(
-    request: InternalSessionSetupRequest,
-    db: Session,
-    session_service: SessionServiceDep
-) -> InternalSessionSetupResponse:
-    """
-    세션 설정 공통 처리 함수
-
-    정규 경로 (/internal/sessions/setup)와 레거시 경로 (/roleplaying/internal/sessions/setup)
-    모두에서 호출되는 공통 함수. 코드 중복을 제거하고 유지보수성을 높임.
-
-    주요 처리 흐름:
-        1. SessionService를 통해 세션 설정 (Redis 저장, 만료 시간 설정)
-        2. 시나리오 정보 조회 및 검증
-        3. WebSocket URL 생성 (WS_BASE_URL 설정값 활용)
-        4. 응답 패킹 (sessionID, wsURL, scenario정보, 만료시각)
-
-    Args:
-        request: 세션 설정 요청 (sessionID, userID, scenarioID)
-        db: SQLAlchemy 세션 (시나리오 조회용)
-        session_service: 의존성 주입된 세션 서비스 인스턴스
-
-    Returns:
-        InternalSessionSetupResponse: 클라이언트 연결에 필요한 모든 정보
-
-    Raises:
-        HTTPException(404): 요청한 시나리오 ID가 DB에 없을 때 (ValueError)
-        HTTPException(500): Redis, DB 접근 오류, 세션 생성 실패 등
-
-    주의:
-        - WebSocket URL은 환경설정(WS_BASE_URL)에서 가져옴
-        - 세션은 Redis에 TTL과 함께 저장되므로 자동 만료됨
-        - 클라이언트는 반환된 wsUrl로 WebSocket 연결 수립
-    """
-    try:
-        # SessionService가 처리하는 작업:
-        # 1. scenarioId를 DB에서 조회하여 검증
-        # 2. 시나리오 정보와 사용자 정보를 Redis에 저장
-        # 3. TTL(Time To Live)을 설정하여 자동 만료 구성
-        session_id, scenario, expires_at = await session_service.setup_session(
-            session_id=request.sessionId,  # Spring 1에서 생성한 고유 ID
-            user_id=request.userId,         # 사용자 DB PK
-            scenario_id=request.scenarioId,  # 선택된 시나리오 DB PK
-            db=db                          # 시나리오 정보 조회용
-        )
-
-        # WebSocket 연결 URL 생성
-        # 예: wss://api.example.com/ws/roleplaying/session-uuid-12345
-        base_ws_url = settings.WS_BASE_URL.rstrip("/")  # 마지막 슬래시 제거
-        ws_url = f"{base_ws_url}/ws/roleplaying/{session_id}"
-
-        logger.info(
-            f"Session setup successfully: session_id={session_id}, "
-            f"user_id={request.userId}, scenario_id={request.scenarioId}"
-        )
-
-        # 클라이언트에 반환할 응답 생성
-        return InternalSessionSetupResponse(
-            sessionId=session_id,        # Spring 1이 생성한 세션 ID (확인용)
-            wsUrl=ws_url,                # 클라이언트가 연결할 WebSocket URL
-            scenario=scenario,           # 선택된 시나리오 상세 정보
-            expiresAt=expires_at        # 세션 유효 만료 시각
-        )
-
-    except ValueError as e:
-        # 시나리오 ID가 DB에 없는 경우
-        logger.warning(f"Scenario not found: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
-
-    except Exception as e:
-        # 기타 예상 외 오류 (Redis 연결 실패, DB 오류 등)
-        logger.error(f"Failed to setup session: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to setup session: {str(e)}"
-        )
 
 
 # ============================================
@@ -370,7 +290,7 @@ async def internal_setup_session(
     db: Session = Depends(get_db)
 ):
     """
-    Spring 1 Gateway에서 호출하는 세션 설정 엔드포인트 (정규 경로)
+    Spring 1 Gateway에서 호출하는 세션 설정 엔드포인트
 
     Spring 1이 사용자 세션을 생성하고, FastAPI에게 실시간 세션 정보를 등록하도록 요청.
     반환되는 WebSocket URL을 클라이언트에 제공하면 클라이언트가 연결.
@@ -408,33 +328,50 @@ async def internal_setup_session(
         - sessionId는 Spring 1이 생성 (FastAPI는 그대로 사용)
         - Redis에 저장되는 정보로 세션 추적
         - TTL 설정으로 자동 만료 (expiresAt)
-        - WebSocket 연결은 별도 ws_realtime.py에서 처리
+        - WebSocket 연결은 별도 ws_realtime_handler.py에서 처리
     """
-    return await _process_internal_session_setup(request, db, session_service)
+    try:
+        # SessionService가 처리하는 작업:
+        # 1. scenarioId를 DB에서 조회하여 검증
+        # 2. 시나리오 정보와 사용자 정보를 Redis에 저장
+        # 3. TTL(Time To Live)을 설정하여 자동 만료 구성
+        session_id, scenario, expires_at = await session_service.setup_session(
+            session_id=request.sessionId,  # Spring 1에서 생성한 고유 ID
+            user_id=request.userId,         # 사용자 DB PK
+            scenario_id=request.scenarioId,  # 선택된 시나리오 DB PK
+            db=db                          # 시나리오 정보 조회용
+        )
 
+        # WebSocket 연결 URL 생성
+        # 예: wss://api.example.com/ws/roleplaying/session-uuid-12345
+        base_ws_url = settings.WS_BASE_URL.rstrip("/")  # 마지막 슬래시 제거
+        ws_url = f"{base_ws_url}/ws/roleplaying/{session_id}"
 
-@router.post(
-    "/roleplaying/internal/sessions/setup",
-    response_model=InternalSessionSetupResponse,
-    include_in_schema=False  # OpenAPI 스키마에서 숨김 (정규 경로 존재하므로)
-)
-async def legacy_internal_setup_session(
-    request: InternalSessionSetupRequest,
-    session_service: SessionServiceDep,
-    db: Session = Depends(get_db)
-):
-    """
-    레거시 호환성 엔드포인트 (세션 설정)
+        logger.info(
+            f"Session setup successfully: session_id={session_id}, "
+            f"user_id={request.userId}, scenario_id={request.scenarioId}"
+        )
 
-    이전에 /roleplaying/internal/sessions/setup으로 호출하던 클라이언트를 위한 호환성 경로.
-    내부적으로는 정규 경로(/internal/sessions/setup)와 동일한 로직 사용.
+        # 클라이언트에 반환할 응답 생성
+        return InternalSessionSetupResponse(
+            sessionId=session_id,        # Spring 1이 생성한 세션 ID (확인용)
+            wsUrl=ws_url,                # 클라이언트가 연결할 WebSocket URL
+            scenario=scenario,           # 선택된 시나리오 상세 정보
+            expiresAt=expires_at        # 세션 유효 만료 시각
+        )
 
-    주의:
-        - OpenAPI 스키마에서는 숨김 (정규 경로만 노출)
-        - 새로운 클라이언트는 /internal/sessions/setup 사용 권장
-        - 이전 클라이언트는 자동으로 호환됨
-    """
-    return await _process_internal_session_setup(request, db, session_service)
+    except ValueError as e:
+        # 시나리오 ID가 DB에 없는 경우
+        logger.warning(f"Scenario not found: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+
+    except Exception as e:
+        # 기타 예상 외 오류 (Redis 연결 실패, DB 오류 등)
+        logger.error(f"Failed to setup session: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to setup session: {str(e)}"
+        )
 
 
 # ============================================
