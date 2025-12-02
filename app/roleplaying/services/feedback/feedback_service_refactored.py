@@ -1,17 +1,5 @@
 """
-Feedback Service Refactored (SOLID 준수)
-==========================================
-기존 FeedbackAgentService를 4개의 단일 책임 클래스로 분리했습니다.
-
-변경 이유:
-- SRP 위반: 기존 FeedbackAgentService는 300+ 라인, 평가와 판단 혼재
-- 3가지 책임 혼재: 문법 평가, 맥락 평가, 피드백 판단, 조율
-- 변경 영향도 증가, 테스트 어려움
-
-솔루션:
-- 각 책임을 별도 클래스로 분리
-- 같은 인터페이스로 통합 (GrammarEvaluator, RelevanceEvaluator 등)
-- 테스트 가능, 재사용 가능한 구조
+Feedback Service Refactored
 
 구조:
     GrammarEvaluatorImpl         → 문법 평가만 담당
@@ -90,7 +78,7 @@ class GrammarEvaluatorImpl:
 
         logger.info(f"GrammarEvaluatorImpl initialized with {self.provider} provider")
 
-    async def evaluate_grammar(self, user_text: str) -> Dict[str, Any]:
+    async def evaluate_grammar(self, user_text: str) -> Optional[Dict[str, Any]]:
         """
         문법 평가
 
@@ -102,6 +90,7 @@ class GrammarEvaluatorImpl:
                 "score": int (0-100),
                 "feedback": str
             }
+            또는 None
         """
         prompt = GRAMMAR_EVALUATION_PROMPT.format(user_text=user_text)
 
@@ -114,21 +103,27 @@ class GrammarEvaluatorImpl:
             # JSON 객체 추출 시도
             result = extract_json_from_response(response_text)
             if result:
-                score = normalize_score(result.get("score", 70))
+                score = normalize_score(result.get("score"))
+                if score is None:
+                    logger.warning("Grammar evaluation returned no score")
+                    return None
                 logger.info(f"✅ [문법 평가 완료] {score}점")
                 return {
                     "score": score,
                     "feedback": result.get("feedback", "")
                 }
             else:
-                # 점수만 추출
+                # 점수만 추출 시도
                 score = normalize_score_from_string(response_text)
+                if score is None:
+                    logger.warning(f"Failed to parse grammar score from: {response_text}")
+                    return None
                 logger.info(f"✅ [문법 평가 완료 (파싱)] {score}점")
                 return {"score": score, "feedback": response_text[:100]}
 
         except Exception as e:
             logger.error(f"Grammar evaluation failed: {e}")
-            return {"score": 70, "feedback": "문법 검사 중 오류 발생"}
+            return None
 
 
 # ============================================
@@ -178,7 +173,7 @@ class RelevanceEvaluatorImpl:
         user_text: str,
         conversation_history: list,
         scenario_context: dict
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """
         맥락 평가
 
@@ -192,6 +187,7 @@ class RelevanceEvaluatorImpl:
                 "score": int (0-100),
                 "feedback": str
             }
+            또는 None
         """
         context = self._build_conversation_context(conversation_history, scenario_context)
 
@@ -209,21 +205,27 @@ class RelevanceEvaluatorImpl:
             # JSON 객체 추출 시도
             result = extract_json_from_response(response_text)
             if result:
-                score = normalize_score(result.get("score", 70))
+                score = normalize_score(result.get("score"))
+                if score is None:
+                    logger.warning("Relevance evaluation returned no score")
+                    return None
                 logger.info(f"✅ [맥락 평가 완료] {score}점")
                 return {
                     "score": score,
                     "feedback": result.get("feedback", "")
                 }
             else:
-                # 점수만 추출
+                # 점수만 추출 시도
                 score = normalize_score_from_string(response_text)
+                if score is None:
+                    logger.warning(f"Failed to parse relevance score from: {response_text}")
+                    return None
                 logger.info(f"✅ [맥락 평가 완료 (파싱)] {score}점")
                 return {"score": score, "feedback": response_text[:100]}
 
         except Exception as e:
             logger.error(f"Relevance evaluation failed: {e}")
-            return {"score": 70, "feedback": "맥락 평가 중 오류 발생"}
+            return None
 
     def _build_conversation_context(self, history: list, scenario: dict) -> str:
         """대화 컨텍스트 구성"""
@@ -262,24 +264,29 @@ class FeedbackJudgeImpl:
 
     def judge_correction_needed(
         self,
-        pronunciation_score: float,
-        grammar_score: float,
-        relevance_score: float,
+        pronunciation_score: Optional[float],
+        grammar_score: Optional[float],
+        relevance_score: Optional[float],
         retry_count: int
     ) -> tuple[bool, str]:
         """
         교정 필요 여부 판단
 
         Args:
-            pronunciation_score: 발음 점수 (0-100)
-            grammar_score: 문법 점수 (0-100)
-            relevance_score: 맥락 점수 (0-100)
+            pronunciation_score: 발음 점수 (0-100 또는 None - 평가 실패)
+            grammar_score: 문법 점수 (0-100 또는 None - 평가 실패)
+            relevance_score: 맥락 점수 (0-100 또는 None - 평가 실패)
             retry_count: 현재 재시도 횟수
 
         Returns:
             (needs_correction: bool, primary_issue: str)
-            primary_issue: "pronunciation", "grammar", "relevance", "max_retries_exceeded", "none"
+            primary_issue: "pronunciation", "grammar", "relevance", "max_retries_exceeded", "evaluation_failed", "none"
         """
+        # 평가 실패 시: 모든 점수가 None이면 교정 불필요 (feedback 없이 진행)
+        if pronunciation_score is None and grammar_score is None and relevance_score is None:
+            logger.warning("All evaluations failed, proceeding without correction")
+            return False, "evaluation_failed"
+
         # 재시도 초과 시 강제 통과
         if retry_count >= settings.FEEDBACK_MAX_RETRY_PER_QUESTION:
             logger.info(f"Max retries exceeded ({retry_count}), forcing pass")
@@ -290,14 +297,14 @@ class FeedbackJudgeImpl:
         gram_threshold = settings.FEEDBACK_GRAMMAR_THRESHOLD
         relev_threshold = settings.FEEDBACK_RELEVANCE_THRESHOLD
 
-        # 교정 필요 조건 판단
+        # 교정 필요 조건 판단 (None은 스킵)
         primary_issue = None
 
-        if pronunciation_score < pron_threshold and pronunciation_score > 0:
+        if pronunciation_score is not None and pronunciation_score < pron_threshold and pronunciation_score > 0:
             primary_issue = "pronunciation"
-        elif grammar_score < gram_threshold:
+        elif grammar_score is not None and grammar_score < gram_threshold:
             primary_issue = "grammar"
-        elif relevance_score < relev_threshold:
+        elif relevance_score is not None and relevance_score < relev_threshold:
             primary_issue = "relevance"
 
         needs_correction = primary_issue is not None
@@ -352,7 +359,7 @@ class FeedbackOrchestratorImpl:
         conversation_history: list,
         scenario_context: dict,
         retry_count: int
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """
         빠른 응답 평가 (병렬 처리)
 
@@ -368,14 +375,15 @@ class FeedbackOrchestratorImpl:
                 "needs_correction": bool,
                 "primary_issue": str,
                 "scores": {
-                    "pronunciation_score": int,
-                    "grammar_score": int,
-                    "relevance_score": int,
-                    "overall_score": int
+                    "pronunciation_score": int | None,
+                    "grammar_score": int | None,
+                    "relevance_score": int | None,
+                    "overall_score": int | None
                 },
                 "feedback_text": str,
                 "retry_count": int
             }
+            또는 None
         """
         import time
         start_time = time.time()
@@ -397,19 +405,24 @@ class FeedbackOrchestratorImpl:
 
             eval_time = time.time() - eval_start
             logger.info(f"✅ [병렬 평가 완료] 소요 시간: {eval_time:.2f}초")
-            logger.info(f"  - 발음: {pronunciation.get('score', '?')}점")
-            logger.info(f"  - 문법: {grammar.get('score', '?')}점")
-            logger.info(f"  - 맥락: {relevance.get('score', '?')}점")
 
-            # 평가 점수 정규화 (0-100)
-            pronunciation_score = normalize_score(pronunciation.get("score", 70))
-            grammar_score = normalize_score(grammar.get("score", 70))
-            relevance_score = normalize_score(relevance.get("score", 70))
+            # 평가 결과 안전 처리
+            pronunciation_score = normalize_score(pronunciation.get("score") if pronunciation else None)
+            grammar_score = normalize_score(grammar.get("score") if grammar else None)
+            relevance_score = normalize_score(relevance.get("score") if relevance else None)
 
-            # 종합 점수 (평균)
-            overall_score = int((pronunciation_score + grammar_score + relevance_score) / 3)
+            logger.info(f"  - 발음: {pronunciation_score or '?'}점")
+            logger.info(f"  - 문법: {grammar_score or '?'}점")
+            logger.info(f"  - 맥락: {relevance_score or '?'}점")
 
-            # 교정 필요 여부 판단
+            # 종합 점수 (성공한 항목만으로 평균 계산)
+            scores_list = [s for s in [pronunciation_score, grammar_score, relevance_score] if s is not None]
+            if scores_list:
+                overall_score = int(sum(scores_list) / len(scores_list))
+            else:
+                overall_score = None  # 모든 평가 실패
+
+            # 교정 필요 여부 판단 (None 점수는 명시적으로 전달)
             needs_correction, primary_issue = self.feedback_judge.judge_correction_needed(
                 pronunciation_score,
                 grammar_score,
@@ -437,10 +450,10 @@ class FeedbackOrchestratorImpl:
                 "needs_correction": needs_correction,
                 "primary_issue": primary_issue,
                 "scores": {
-                    "pronunciation_score": int(pronunciation_score),
-                    "grammar_score": int(grammar_score),
-                    "relevance_score": int(relevance_score),
-                    "overall_score": overall_score
+                    "pronunciation_score": int(pronunciation_score) if pronunciation_score is not None else None,
+                    "grammar_score": int(grammar_score) if grammar_score is not None else None,
+                    "relevance_score": int(relevance_score) if relevance_score is not None else None,
+                    "overall_score": int(overall_score) if overall_score is not None else None
                 },
                 "feedback_text": feedback_text,
                 "retry_count": retry_count
@@ -448,19 +461,8 @@ class FeedbackOrchestratorImpl:
 
         except Exception as e:
             logger.error(f"Response evaluation failed: {e}", exc_info=True)
-            # Fallback: 교정 없이 진행
-            return {
-                "needs_correction": False,
-                "primary_issue": "error",
-                "scores": {
-                    "pronunciation_score": 70,
-                    "grammar_score": 70,
-                    "relevance_score": 70,
-                    "overall_score": 70
-                },
-                "feedback_text": "평가 중 오류가 발생했습니다. 다음 질문으로 진행합니다.",
-                "retry_count": retry_count
-            }
+            # 호출자가 None을 받아 처리 (feedback 없이 진행)
+            return None
 
     async def _generate_feedback_text(
         self,
