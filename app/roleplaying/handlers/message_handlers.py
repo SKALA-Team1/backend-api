@@ -256,11 +256,12 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             audio_s3_url=None,
         )
 
-        # Step 2: 피드백 평가
+        # Step 2: 피드백 평가 (Optional - 실패해도 세션 계속)
         from app.roleplaying.services.dependencies import get_feedback_orchestrator
 
         feedback_orchestrator = get_feedback_orchestrator()
-        feedback_result = None
+        feedback_result = None  # ✅ 명시적으로 None으로 시작
+
         try:
             feedback_start = time.time()
             logger.info(f"⏱️  [피드백 평가 시작] session={session_id}, 텍스트 길이: {len(user_text)} 글자")
@@ -282,6 +283,28 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             feedback_elapsed = time.time() - feedback_start
             logger.info(f"✅ [피드백 평가 완료] 총 소요 시간: {feedback_elapsed:.2f}초")
 
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️  [피드백 평가 타임아웃] session={session_id}")
+            await websocket.send_json(
+                ErrorMessage(
+                    code="FEEDBACK_TIMEOUT",
+                    message="Feedback evaluation timeout. Continuing without feedback.",
+                ).model_dump()
+            )
+            feedback_result = None  # ✅ mock 대신 None
+
+        except Exception as e:
+            logger.error(f"❌ [피드백 평가 실패] {e}", exc_info=True)
+            await websocket.send_json(
+                ErrorMessage(
+                    code="FEEDBACK_ERROR",
+                    message="Feedback evaluation failed. Continuing without feedback.",
+                ).model_dump()
+            )
+            feedback_result = None  # ✅ mock 대신 None
+
+        # ✅ 피드백이 있을 때만 처리
+        if feedback_result:
             # 점수 전송
             feedback_msg = FeedbackMessage(
                 pronunciation_score=0,
@@ -290,6 +313,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
                 overall_score=feedback_result["scores"]["overall_score"]
             )
             await websocket.send_json(feedback_msg.model_dump())
+            logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
             # 피드백 텍스트 스트리밍
             async def _generate_and_send_feedback():
@@ -308,10 +332,6 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
                                 )
                                 await asyncio.sleep(0.1)
                         logger.info(f"Feedback text streamed: {feedback_text[:60]}...")
-                    else:
-                        await websocket.send_json(
-                            FeedbackStreamingMessage(chunk="평가 완료").model_dump()
-                        )
                 except Exception as e:
                     logger.error(f"Failed to send feedback text: {e}")
 
@@ -340,56 +360,51 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             else:
                 if session_state:
                     session_state.reset_retry_count()
-
-        except asyncio.TimeoutError:
-            logger.warning(f"Feedback evaluation timeout (60s): session={session_id}")
-            # 타임아웃 시에도 기본 점수로 계속 진행
-            await websocket.send_json(
-                ErrorMessage(
-                    code="FEEDBACK_TIMEOUT",
-                    message="Feedback evaluation timeout. Continuing with default scores.",
-                ).model_dump()
-            )
-            feedback_result = {
-                "needs_correction": False,
-                "primary_issue": "timeout",
-                "feedback_text": "",
-                "scores": {
-                    "grammar_score": 50,
-                    "relevance_score": 50,
-                    "overall_score": 50
-                },
-            }
-        except Exception as e:
-            logger.error(f"Feedback evaluation failed: {e}", exc_info=True)
-            # 에러 발생 시에도 기본 점수로 계속 진행
-            feedback_result = {
-                "needs_correction": False,
-                "primary_issue": "evaluation_error",
-                "feedback_text": "",
-                "scores": {
-                    "grammar_score": 50,
-                    "relevance_score": 50,
-                    "overall_score": 50
-                },
-            }
+        else:
+            logger.info(f"Skipping feedback processing: feedback_result is None")
 
         # Step 3: Spring 2에 텍스트 저장
         utterance_index = session_manager.increment_utterance_index(session_id)
 
         async def _save_user_text_with_feedback():
             try:
-                await spring2_client.save_utterance(
-                    session_id=session_id,
-                    stt_text=user_text,
-                    utterance_index=utterance_index,
-                    speaker="user",
-                    text=user_text,
-                    audio_data=None,
-                    played_turns=session_state.ai_turn_count if session_state else None,
-                    completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
-                    status="IN_PROGRESS",
-                )
+                # ✅ Conditionally include feedback fields only if feedback_result exists
+                save_kwargs = {
+                    "session_id": session_id,
+                    "stt_text": user_text,
+                    "utterance_index": utterance_index,
+                    "speaker": "user",
+                    "text": user_text,
+                    "audio_data": None,
+                    "played_turns": session_state.ai_turn_count if session_state else None,
+                    "completed_all_turns": session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
+                    "status": "IN_PROGRESS",
+                }
+
+                # Add feedback fields only if feedback was successfully evaluated
+                if feedback_result:
+                    save_kwargs.update({
+                        "pronunciation_score": 0,  # Text mode has no pronunciation
+                        "grammar_score": feedback_result["scores"]["grammar_score"],
+                        "relevance_score": feedback_result["scores"]["relevance_score"],
+                        "overall_score": feedback_result["scores"]["overall_score"],
+                        "feedback_text": feedback_result.get("feedback_text", ""),
+                        "needs_correction": feedback_result.get("needs_correction", False),
+                        "retry_count": session_state.current_question_retry_count if session_state else 0,
+                    })
+                else:
+                    # No feedback data - Spring 2 should handle None values
+                    save_kwargs.update({
+                        "pronunciation_score": None,
+                        "grammar_score": None,
+                        "relevance_score": None,
+                        "overall_score": None,
+                        "feedback_text": None,
+                        "needs_correction": None,
+                        "retry_count": None,
+                    })
+
+                await spring2_client.save_utterance(**save_kwargs)
             except Exception as e:
                 logger.error(f"Failed to save user text: session={session_id}, error={e}", exc_info=True)
 
@@ -526,6 +541,8 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
         from app.roleplaying.services.utils.azure_usage_tracker import usage_tracker
 
         feedback_orchestrator = get_feedback_orchestrator()
+        feedback_result = None  # ✅ 명시적으로 None으로 시작
+
         try:
             can_use_azure = await usage_tracker.can_use_azure()
             logger.info(f"⏱️  [피드백 평가 시작] session={session_id}, STT: '{stt_text[:50]}...', Azure={can_use_azure}")
@@ -548,6 +565,30 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             if can_use_azure:
                 await usage_tracker.increment_usage()
 
+            logger.info(f"✅ [피드백 평가 완료] session={session_id}")
+
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️  [피드백 평가 타임아웃] session={session_id}")
+            await websocket.send_json(
+                ErrorMessage(
+                    code="FEEDBACK_TIMEOUT",
+                    message="Feedback evaluation timeout. Continuing without feedback.",
+                ).model_dump()
+            )
+            feedback_result = None  # ✅ mock 대신 None
+
+        except Exception as e:
+            logger.error(f"❌ [피드백 평가 실패] {e}", exc_info=True)
+            await websocket.send_json(
+                ErrorMessage(
+                    code="FEEDBACK_ERROR",
+                    message="Feedback evaluation failed. Continuing without feedback.",
+                ).model_dump()
+            )
+            feedback_result = None  # ✅ mock 대신 None
+
+        # ✅ 피드백이 있을 때만 처리
+        if feedback_result:
             feedback_msg = FeedbackMessage(
                 pronunciation_score=feedback_result["scores"]["pronunciation_score"],
                 grammar_score=feedback_result["scores"]["grammar_score"],
@@ -555,6 +596,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
                 overall_score=feedback_result["scores"]["overall_score"]
             )
             await websocket.send_json(feedback_msg.model_dump())
+            logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
             # 피드백 텍스트 스트리밍
             async def _generate_and_send_feedback():
@@ -572,12 +614,14 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
                                     FeedbackStreamingMessage(chunk=chunk).model_dump()
                                 )
                                 await asyncio.sleep(0.1)
+                        logger.info(f"Feedback text streamed: {feedback_text[:60]}...")
                 except Exception as e:
                     logger.error(f"Failed to send feedback text: {e}")
 
             feedback_task = asyncio.create_task(_generate_and_send_feedback())
             feedback_task.add_done_callback(lambda t: _handle_task_error(t, f"feedback_text(session={session_id})"))
 
+            # 재시도 처리
             needs_correction = feedback_result.get("needs_correction", False)
             if needs_correction and session_state and session_state.can_retry():
                 session_state.increment_retry_count()
@@ -599,42 +643,51 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             else:
                 if session_state:
                     session_state.reset_retry_count()
-
-        except asyncio.TimeoutError:
-            logger.warning(f"Feedback evaluation timeout (60s): session={session_id}")
-            # 타임아웃 시에도 기본 점수로 계속 진행
-            await websocket.send_json(
-                ErrorMessage(
-                    code="FEEDBACK_TIMEOUT",
-                    message="Feedback evaluation timeout. Continuing with default scores.",
-                ).model_dump()
-            )
-        except Exception as e:
-            logger.error(f"Feedback evaluation failed: {e}", exc_info=True)
-            # 에러 발생 시에도 기본 점수로 계속 진행
-            await websocket.send_json(
-                ErrorMessage(
-                    code="FEEDBACK_ERROR",
-                    message="Feedback evaluation failed. Continuing without feedback.",
-                ).model_dump()
-            )
+        else:
+            logger.info(f"Skipping feedback processing: feedback_result is None")
 
         # Step 3: Spring 2에 사용자 발화 저장
         utterance_index = session_manager.increment_utterance_index(session_id)
 
         async def _save_user_utterance():
             try:
-                await spring2_client.save_utterance(
-                    session_id=session_id,
-                    audio_data=audio_data,
-                    stt_text=stt_text,
-                    utterance_index=utterance_index,
-                    speaker="user",
-                    text=stt_text,
-                    played_turns=session_state.ai_turn_count if session_state else None,
-                    completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
-                    status="IN_PROGRESS",
-                )
+                # ✅ Conditionally include feedback fields only if feedback_result exists
+                save_kwargs = {
+                    "session_id": session_id,
+                    "audio_data": audio_data,
+                    "stt_text": stt_text,
+                    "utterance_index": utterance_index,
+                    "speaker": "user",
+                    "text": stt_text,
+                    "played_turns": session_state.ai_turn_count if session_state else None,
+                    "completed_all_turns": session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
+                    "status": "IN_PROGRESS",
+                }
+
+                # Add feedback fields only if feedback was successfully evaluated
+                if feedback_result:
+                    save_kwargs.update({
+                        "pronunciation_score": feedback_result["scores"]["pronunciation_score"],
+                        "grammar_score": feedback_result["scores"]["grammar_score"],
+                        "relevance_score": feedback_result["scores"]["relevance_score"],
+                        "overall_score": feedback_result["scores"]["overall_score"],
+                        "feedback_text": feedback_result.get("feedback_text", ""),
+                        "needs_correction": feedback_result.get("needs_correction", False),
+                        "retry_count": session_state.current_question_retry_count if session_state else 0,
+                    })
+                else:
+                    # No feedback data - Spring 2 should handle None values
+                    save_kwargs.update({
+                        "pronunciation_score": None,
+                        "grammar_score": None,
+                        "relevance_score": None,
+                        "overall_score": None,
+                        "feedback_text": None,
+                        "needs_correction": None,
+                        "retry_count": None,
+                    })
+
+                await spring2_client.save_utterance(**save_kwargs)
             except Exception as e:
                 logger.error(f"Failed to save user utterance: session={session_id}, error={e}", exc_info=True)
 
