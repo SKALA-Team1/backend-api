@@ -2,13 +2,13 @@
 Roleplaying Router
 ==================
 
-🎯 목적: FastAPI 롤플레잉 기능의 모든 API 엔드포인트 정의
+목적: FastAPI 롤플레잉 기능의 모든 API 엔드포인트 정의
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 이 모듈은 실시간 영어 회화 롤플레잉을 위한 모든 HTTP/WebSocket 엔드포인트를
 정의합니다. FastAPI와 Spring 마이크로서비스 간의 통신을 조정하는 게이트웨이 역할.
 
-📡 마이크로서비스 통신 구조:
+마이크로서비스 통신 구조:
 
     Spring 1 (메인 게이트웨이)
     ├─ 사용자 인증/세션 관리
@@ -19,10 +19,6 @@ Roleplaying Router
     ├─ 세션 정보 Redis 저장
     ├─ WebSocket URL 생성 및 반환
     └─ WebSocket 연결 대기
-                    ↓
-    Spring 2 (데이터/분석 서버)
-    ├─ Slack 대화 분석 요청
-    └─ POST /internal/scenarios/analyze-conversation (FastAPI)
 
 🔌 구현 엔드포인트:
 
@@ -67,19 +63,35 @@ Roleplaying Router
 
     [실시간 롤플레잉] (WebSocket)
     WS /ws/roleplaying/{session_id}
-        구현: ws_realtime.py의 websocket_endpoint() 함수
-        메시지 타입:
-            - INIT: 초기화 메시지 (시나리오 로드, 첫 질문 전송)
-            - AUDIO_CHUNK: 오디오 바이너리 청크 (STT 처리)
-            - UTTERANCE_END: 발화 완료 신호 (STT 최종화, AI 응답 생성)
-            - USER_TEXT: 텍스트 입력 (테스트/접근성용)
+        구현: handlers/ws_realtime_handler.py의 roleplaying_websocket() 함수
+
+        인바운드 메시지 (Client → FastAPI):
+            - INIT: 세션 초기화 (시나리오/역할 로드, 첫 질문 전송)
+            - AUDIO_CHUNK: 오디오 바이너리 청크 (WAV, 16kHz, 16-bit, mono)
+            - UTTERANCE_END: 발화 종료 신호 (STT 최종화, AI 응답 생성)
+            - USER_TEXT: 텍스트 입력 (테스트/STT 없이 진행)
             - END_SESSION: 세션 종료 요청
-            - FEEDBACK_STREAMING: 실시간 피드백 문장 스트리밍
+
+        아웃바운드 메시지 (FastAPI → Client):
+            - ACK: 메시지 수신 확인
+            - AI_TEXT: AI 응답 텍스트 (고정 질문 또는 동적 생성)
+            - AI_TEXT_STREAMING: AI 응답 스트리밍 (청크 단위 실시간 전송)
+            - STT_PARTIAL: STT 부분 결과 (음성 인식 중 임시 결과)
+            - STT_FINAL: STT 최종 결과 (오디오 처리 완료)
+            - UTTERANCE_SAVED: 발화 저장 완료 (Spring 2 DB 저장 확인)
+            - AI_TYPING: AI 응답 생성 중 (로딩 표시)
+            - FEEDBACK: 피드백 점수 (발음, 문법, 맥락 적절성 점수 0-100)
+            - FEEDBACK_STREAMING: 피드백 텍스트 스트리밍 (교정 제안 청크 전송)
+            - RETRY_REQUIRED: 재시도 요청 (교정 필요시 같은 질문 반복)
+            - SESSION_ENDED: 세션 종료 완료
+            - ERROR: 오류 메시지
+
         상태관리:
-            - 세션: Redis에 저장된 사용자/시나리오 정보
-            - 턴 추적: 현재 질문 인덱스, 이전 응답들
-            - AI 응답: LLM이 생성한 대화 내용
-            - 피드백: 문법, 발음, 맥락 평가
+            - 세션: Redis에 저장된 사용자/시나리오 정보 (TTL 자동 만료)
+            - 턴 추적: AI 턴 카운트, 고정 질문 여부 (턴 1, 4, 7)
+            - 대화: 사용자/AI 발화 히스토리 (컨텍스트용)
+            - 피드백: 발음, 문법, 맥락 적절성 평가 점수
+            - 재시도: 현재 질문 재시도 횟수 (최대 3회)
 
 🏗️ 설계 원칙:
 

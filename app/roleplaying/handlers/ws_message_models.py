@@ -1,20 +1,63 @@
 """
-WebSocket 메시지 모델
-==================
-실시간 롤플레잉 WebSocket 통신을 위한 Pydantic 모델 정의.
+WebSocket 메시지 모델 (Pydantic 정의)
+=====================================
+실시간 롤플레잉 WebSocket 통신을 위한 메시지 스키마 정의
 
 메시지 타입:
-- 인바운드 (Client → FastAPI): INIT, AUDIO_CHUNK, UTTERANCE_END, USER_TEXT, END_SESSION
-- 아웃바운드 (FastAPI → Client): ACK, AI_TEXT, STT_PARTIAL, STT_FINAL, UTTERANCE_SAVED, AI_TYPING, SESSION_ENDED, ERROR
 
-중요:
-- 대화는 음성 또는 텍스트로 진행됨
-  - 음성 모드: AUDIO_CHUNK → UTTERANCE_END → STT 처리
-  - 텍스트 모드: USER_TEXT (테스트용, STT 없이 진행)
-- 고정 질문은 정확히 3개 (턴 1, 5, 10에 사용)
-  - fixedQuestions[0]: 턴 1 - 대화 시작
-  - fixedQuestions[1]: 턴 5 - 대화 흐름 전환
-  - fixedQuestions[2]: 턴 10 - 대화 마무리
+📥 인바운드 (Client → FastAPI):
+    - INIT: 세션 초기화 (시나리오/역할 설정)
+    - AUDIO_CHUNK: 오디오 바이너리 청크 (WAV, 16kHz, 16-bit, mono)
+    - UTTERANCE_END: 발화 완료 신호
+    - USER_TEXT: 텍스트 입력 (테스트용)
+    - END_SESSION: 세션 종료 요청
+
+📤 아웃바운드 (FastAPI → Client):
+    - ACK: 메시지 수신 확인
+    - AI_TEXT: AI 응답 텍스트
+    - AI_TEXT_STREAMING: AI 응답 스트리밍 (청크 단위)
+    - STT_PARTIAL: STT 부분 결과
+    - STT_FINAL: STT 최종 결과
+    - UTTERANCE_SAVED: 발화 저장 완료
+    - AI_TYPING: AI 응답 생성 중 (로딩)
+    - FEEDBACK: 피드백 점수 (발음, 문법, 맥락 0-100)
+    - FEEDBACK_STREAMING: 피드백 텍스트 스트리밍
+    - RETRY_REQUIRED: 재시도 요청
+    - SESSION_ENDED: 세션 종료 완료
+    - ERROR: 오류 메시지
+
+🔄 대화 흐름:
+
+    음성 모드:
+        1. INIT → 세션 초기화, 첫 질문 전송 (AI_TEXT)
+        2. AUDIO_CHUNK (반복) → 오디오 스트리밍
+        3. UTTERANCE_END → STT 처리
+        4. STT_PARTIAL (0회 이상) → 중간 결과
+        5. STT_FINAL → 최종 STT 결과
+        6. UTTERANCE_SAVED → DB 저장 완료
+        7. AI_TYPING → 응답 생성 중
+        8. AI_TEXT 또는 AI_TEXT_STREAMING → AI 응답
+        9. FEEDBACK + FEEDBACK_STREAMING → 피드백
+        10. RETRY_REQUIRED (옵션) 또는 다음 턴으로...
+
+    텍스트 모드:
+        1. INIT → 세션 초기화
+        2. USER_TEXT → 텍스트 입력
+        3. (STT 생략)
+        4. AI_TYPING → 응답 생성 중
+        5. AI_TEXT 또는 AI_TEXT_STREAMING → AI 응답
+        6. FEEDBACK (발음 점수 0) + FEEDBACK_STREAMING
+
+🔐 고정 질문 (정확히 3개):
+    - 턴 1 (AI 턴 1): 대화 시작 (fixedQuestions[0])
+    - 턴 4 (AI 턴 4): 대화 흐름 전환 (fixedQuestions[1])
+    - 턴 7 (AI 턴 7): 대화 마무리 (fixedQuestions[2])
+    - 그 외: LLM이 동적으로 생성
+
+⚙️ 재시도 메커니즘:
+    - 교정 필요시 RETRY_REQUIRED 전송
+    - 최대 3회까지 같은 질문 반복 가능
+    - 3회 초과시 다음 질문으로 진행
 """
 
 from typing import List, Literal, Optional

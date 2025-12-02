@@ -135,7 +135,6 @@ class SubjectInfoDto(BaseModel):
     # LLM이 대화 내용으로부터 추론한 사용자의 역할 (AnalysisRequestDto의 myRole과 비교용)
     myRole: str = Field(..., description="대화에서 유추한 사용자 역할")
     # 대화의 핵심 주제 및 상황을 1-2문장으로 요약한 텍스트
-    # 예: "버그 트리아지 회의에서 새로운 버그 리포트에 대해 토론"
     situation: str = Field(..., description="대화 주제 및 상황 (1-2문장)")
     # 원본 메시지 추출 날짜
     conversationDate: date = Field(..., description="대화 날짜")
@@ -159,13 +158,12 @@ class ScenarioInfoDto(BaseModel):
     aiRole: str = Field(..., description="AI 역할 (Project Manager, Tech Lead, QA Engineer)")
     # 시나리오의 깊이 또는 범위 (overview = 전체 상황 개요, detail = 특정 역할별 상세 시나리오)
     topicType: str = Field(..., description="토픽 타입 (overview, detail)")
-    # 사용자가 시나리오 선택 시 보게 될 제목 (최대 200자, 역할과 상황을 함축적으로 표현)
-    # 예: "버그 트리아지: QA 엔지니어와의 기술적 이슈 분석"
-    title: str = Field(..., max_length=200, description="시나리오 제목")
+    # 사용자가 시나리오 선택 시 보게 될 제목 (최대 50자, 역할과 상황을 함축적으로 표현)
+    title: str = Field(..., max_length=50, description="시나리오 제목")
     # 롤플레이 중에 고정으로 나올 3개의 질문
     # - 질문 1 (Turn 1): 대화 시작 (Conversation Starter)
-    # - 질문 2 (Turn 5): 심화 및 전환 (Deepening & Transition)
-    # - 질문 3 (Turn 10): 마무리 (Wrap-up & Closure)
+    # - 질문 2 (Turn 4): 심화 및 전환 (Deepening & Transition)
+    # - 질문 3 (Turn 7): 마무리 (Wrap-up & Closure)
     fixedQuestions: List[str] = Field(..., min_items=3, max_items=3, description="고정 질문 목록 (3개)")
     # 시나리오 생성 출처 (prompt = 사용자 직접 입력, slack = Slack 대화 분석)
     creationType: str = Field(..., description="시나리오 생성 방식 (prompt, slack)")
@@ -268,7 +266,6 @@ class PromptBasedScenarioRequestDto(BaseModel):
     # 1-100자 범위
     aiRole: str = Field(..., description="AI의 역할", min_length=1, max_length=100)
     # 롤플레이의 상황과 주제를 자유롭게 입력
-    # 예: "회사 평가 면담", "새로운 프로젝트 제안하기", "버그 리포트 설명하기"
     # 1-500자 범위
     situation: str = Field(..., description="롤플레잉 상황 및 주제", min_length=1, max_length=500)
 
