@@ -159,18 +159,6 @@ async def ping():
     return {"status": "ok"}
 
 
-@router.get("/roleplaying/health/ping", include_in_schema=False)
-async def legacy_ping():
-    """
-    레거시 호환성 엔드포인트
-
-    이전 클라이언트들이 /roleplaying/health/ping으로 호출하던 것을
-    새로운 /health/ping으로 리다이렉트하기 위한 호환성 엔드포인트.
-    OpenAPI 스키마에는 포함하지 않음 (중복 제거).
-    """
-    return await ping()
-
-
 
 
 # ============================================
