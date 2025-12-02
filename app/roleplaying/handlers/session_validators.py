@@ -39,36 +39,6 @@ Validation Module for WebSocket Sessions & Messages
     ↓ (실패)
     ErrorHandler.handle_service_error() ← 서비스 에러 처리
 
-⚠️ 설계 원칙:
-
-    1. 빠른 실패 (Fast Fail): 검증 실패 시 즉시 에러 반환
-    2. 명확한 에러 코드: 클라이언트가 에러 원인 파악 용이
-    3. 컨텍스트 보존: 로깅에 session_id, operation 등 포함
-    4. 심각도 구분: 치명적 오류와 경고 구분
-    5. 서비스 회복력: 일부 에러는 폴백으로 처리
-
-예시:
-
-    # 세션 검증
-    session_state = await SessionValidator.validate_active(websocket, session_id)
-    if not session_state:
-        return  # 에러 이미 클라이언트로 전송됨
-
-    # 메시지 초기화 상태 검증
-    if not await InitStateValidator.validate_for_message(
-        websocket, message_type, session_initialized
-    ):
-        return
-
-    # 서비스 에러 처리
-    try:
-        result = await some_service.process()
-    except Exception as e:
-        await ErrorHandler.handle_service_error(
-            websocket, "SomeService", e, critical=True
-        )
-        return
-
 의존성:
     - session_manager: SessionState, SessionStatus, session_manager 인스턴스
     - ws_models: ErrorMessage DTO

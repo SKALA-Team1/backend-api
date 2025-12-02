@@ -5,10 +5,13 @@ Pytest Configuration and Shared Fixtures
 """
 
 import pytest
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from app.roleplaying.schemas import ScenarioDetail
+from app.roleplaying.api.api_schemas import ScenarioDetail
+from app.roleplaying.core.session_models import SessionState, SessionStatus, Turn
+from app.roleplaying.handlers.ws_message_models import InitMessage, AiTextMessage
 
 
 # ============================================
@@ -141,22 +144,27 @@ def mock_redis_client():
 
 @pytest.fixture
 def sample_conversation_messages():
-    """Sample conversation messages"""
+    """Sample conversation messages with timestamps"""
+    from datetime import datetime
+    now = datetime.now(timezone.utc)
     return [
         {
             "senderName": "User",
             "text": "How do I optimize API performance?",
-            "myMessage": True
+            "myMessage": True,
+            "timestamp": now.isoformat()
         },
         {
             "senderName": "Tech Lead",
             "text": "We should look at caching strategies.",
-            "myMessage": False
+            "myMessage": False,
+            "timestamp": now.isoformat()
         },
         {
             "senderName": "User",
             "text": "What about Redis?",
-            "myMessage": True
+            "myMessage": True,
+            "timestamp": now.isoformat()
         }
     ]
 
@@ -238,3 +246,180 @@ def mock_settings(monkeypatch):
     mock_settings.FEEDBACK_MAX_RETRY_PER_QUESTION = 3
 
     return mock_settings
+
+
+# ============================================
+# Session Models Fixtures
+# ============================================
+
+@pytest.fixture
+def sample_session_state():
+    """Sample SessionState"""
+    return SessionState(
+        session_id="session-123",
+        user_id=1,
+        subject_id=1,
+        my_role="Software Engineer",
+        ai_role="Tech Lead",
+        fixed_questions=[
+            "What is your approach?",
+            "What tools would you use?",
+            "What's your timeline?"
+        ],
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+
+
+@pytest.fixture
+def sample_turn_user():
+    """Sample User Turn"""
+    return Turn(
+        speaker="user",
+        text="I need help with API design",
+        timestamp=datetime.now(timezone.utc),
+        audio_s3_url="s3://bucket/audio-123.wav"
+    )
+
+
+@pytest.fixture
+def sample_turn_ai():
+    """Sample AI Turn"""
+    return Turn(
+        speaker="ai",
+        text="What specific aspects concern you?",
+        timestamp=datetime.now(timezone.utc),
+        is_fixed_question=True
+    )
+
+
+# ============================================
+# WebSocket Message Fixtures
+# ============================================
+
+@pytest.fixture
+def sample_init_message():
+    """Sample INIT message"""
+    return InitMessage(
+        type="INIT",
+        userId=1,
+        subjectId=1,
+        myRole="Software Engineer",
+        aiRole="Tech Lead",
+        fixedQuestions=[
+            "Question 1?",
+            "Question 2?",
+            "Question 3?"
+        ]
+    )
+
+
+@pytest.fixture
+def sample_ai_text_message():
+    """Sample AI_TEXT message"""
+    return AiTextMessage(
+        type="AI_TEXT",
+        text="This is an AI response",
+        is_fixed_question=False
+    )
+
+
+# ============================================
+# API Schema Fixtures
+# ============================================
+
+@pytest.fixture
+def sample_scenario_detail_extended():
+    """Extended ScenarioDetail with all fields"""
+    return ScenarioDetail(
+        scenarioId=1,
+        subjectId=1,
+        myRole="Senior Backend Engineer",
+        aiRole="CTO",
+        title="System Architecture Design",
+        topicType="detail",
+        fixedQuestions=[
+            "How would you design this system?",
+            "What are the scalability concerns?",
+            "How would you handle failures?"
+        ]
+    )
+
+
+# ============================================
+# Session Manager Fixtures
+# ============================================
+
+@pytest.fixture
+def session_manager_instance():
+    """Fresh SessionManager instance for testing"""
+    from app.roleplaying.core.session_manager_base import SessionManager
+    return SessionManager()
+
+
+@pytest.fixture
+def fresh_manager(monkeypatch):
+    """
+    Fresh SessionManager with module-level patching for test isolation.
+
+    This fixture creates a new SessionManager and patches it at the module
+    level where it's imported, ensuring all handler functions use the fresh
+    instance.
+    """
+    import sys
+    from importlib import reload
+    from app.roleplaying.core.session_manager_base import SessionManager
+
+    # Create fresh manager
+    manager = SessionManager()
+
+    # Patch the session_manager_base module first
+    import app.roleplaying.core.session_manager_base as smb_module
+    monkeypatch.setattr(smb_module, 'session_manager', manager)
+
+    # Then reload the handler modules so they re-import the patched session_manager
+    import app.roleplaying.core.session_message_handler as msg_module
+    import app.roleplaying.core.session_audio_handler as audio_module
+
+    reload(msg_module)
+    reload(audio_module)
+
+    # Update sys.modules references
+    sys.modules['app.roleplaying.core.session_message_handler'] = msg_module
+    sys.modules['app.roleplaying.core.session_audio_handler'] = audio_module
+
+    return manager
+
+
+# ============================================
+# Audio Fixtures
+# ============================================
+
+@pytest.fixture
+def sample_audio_chunk():
+    """Sample audio chunk (WAV format, 16kHz, 16-bit, mono)"""
+    # Simulate 64ms of audio (1024 bytes)
+    return b'\x00' * 1024
+
+
+@pytest.fixture
+def sample_audio_full():
+    """Sample full audio buffer (10 chunks)"""
+    return b'\x00' * 10240
+
+
+# ============================================
+# Async Test Support
+# ============================================
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create event loop for async tests"""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.mark.asyncio
+async def async_test_helper():
+    """Helper for async tests"""
+    pass
