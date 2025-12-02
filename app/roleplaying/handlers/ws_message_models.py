@@ -182,14 +182,14 @@ class AiTextMessage(BaseModel):
     클라이언트는 이를 TTS로 변환하여 재생.
 
     질문 타입:
-    - 턴 1, 5, 10: 고정 질문 사용
+    - 턴 1, 4, 7: 고정 질문 사용
     - 나머지 턴: LLM이 동적으로 생성
     """
 
     type: Literal["AI_TEXT"] = "AI_TEXT"
     text: str = Field(..., description="AI 응답 텍스트", min_length=1)
     is_fixed_question: bool = Field(
-        default=False, description="고정 질문 여부 (턴 1, 5, 10)"
+        default=False, description="고정 질문 여부 (턴 1, 4, 7)"
     )
 
 
@@ -198,7 +198,7 @@ class AiTextStreamingMessage(BaseModel):
     AI 응답 텍스트 스트리밍 메시지
 
     AI 응답을 청크 단위로 실시간 전송.
-    ChatGPT처럼 답변이 한 글자씩 또는 한 단어씩 나타남.
+    답변이 한 글자씩 또는 한 단어씩 나타남.
 
     사용:
     - 동적 질문 생성 중 청크 전송
@@ -208,7 +208,7 @@ class AiTextStreamingMessage(BaseModel):
     type: Literal["AI_TEXT_STREAMING"] = "AI_TEXT_STREAMING"
     chunk: str = Field(..., description="스트리밍 청크 (한 단어 또는 여러 단어)")
     is_fixed_question: bool = Field(
-        default=False, description="고정 질문 여부 (턴 1, 5, 10)"
+        default=False, description="고정 질문 여부 (턴 1, 4, 7)"
     )
 
 

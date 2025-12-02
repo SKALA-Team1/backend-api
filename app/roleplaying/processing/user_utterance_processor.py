@@ -16,6 +16,7 @@ from typing import Optional
 from app.config import settings
 from app.integrations.clients.spring2_client import spring2_client
 from app.roleplaying.core.session_state_manager import session_manager
+from app.roleplaying.core.session_message_handler import SessionMessageHandler
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class UtteranceProcessor:
     ) -> None:
         """히스토리에 저장"""
         try:
-            await session_manager.append_message_async(
+            await SessionMessageHandler.append_message_async(
                 session_id=session_id,
                 speaker=speaker,
                 text=text,
