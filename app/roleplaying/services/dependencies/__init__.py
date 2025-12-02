@@ -64,14 +64,12 @@ from app.roleplaying.services.dependencies.feedback import (
     get_relevance_evaluator,
     get_feedback_judge,
     get_feedback_orchestrator,
-    get_feedback_agent_service,
     get_azure_usage_tracker,
     PronunciationEvaluatorDep,
     GrammarEvaluatorDep,
     RelevanceEvaluatorDep,
     FeedbackJudgeDep,
     FeedbackOrchestratorDep,
-    FeedbackAgentServiceDep,
 )
 
 # ============================================
@@ -120,14 +118,12 @@ __all__ = [
     "get_relevance_evaluator",
     "get_feedback_judge",
     "get_feedback_orchestrator",
-    "get_feedback_agent_service",
     "get_azure_usage_tracker",
     "PronunciationEvaluatorDep",
     "GrammarEvaluatorDep",
     "RelevanceEvaluatorDep",
     "FeedbackJudgeDep",
     "FeedbackOrchestratorDep",
-    "FeedbackAgentServiceDep",
     # Repositories
     "get_session_repository",
     "get_scenario_repository",

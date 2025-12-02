@@ -18,16 +18,6 @@ Feedback Service Dependencies
     - FeedbackOrchestrator가 모든 평가기 조합
     - Azure 서비스는 별도 추적 (비용 최적화)
     - LLM 평가는 설정값으로 공급자 선택 가능
-
-사용 예:
-    from app.roleplaying.services.dependencies.feedback import FeedbackOrchestratorDep
-
-    @router.post("/feedback")
-    async def evaluate(orchestrator: FeedbackOrchestratorDep):
-        feedback = await orchestrator.evaluate_response_fast(
-            user_text=response,
-            conversation_history=history
-        )
 """
 
 from functools import lru_cache
@@ -54,7 +44,7 @@ if TYPE_CHECKING:
 def get_pronunciation_evaluator() -> "PronunciationEvaluator":
     """발음 평가기 의존성 주입
 
-    🎙️ 역할:
+    역할:
         - Azure Speech Services API 사용
         - 사용자 발음 품질 평가
         - 발음 오류 상세 피드백
@@ -74,7 +64,7 @@ def get_pronunciation_evaluator() -> "PronunciationEvaluator":
 def get_grammar_evaluator() -> "GrammarEvaluator":
     """문법 평가기 의존성 주입
 
-    📚 역할:
+    역할:
         - 사용자 발언의 문법 검토
         - 문법 오류 식별 및 설명
 
@@ -91,7 +81,7 @@ def get_grammar_evaluator() -> "GrammarEvaluator":
         provider=settings.FEEDBACK_LLM_PROVIDER,
         api_key=settings.openai_api_key if settings.FEEDBACK_LLM_PROVIDER == "openai" else None,
         model_name=settings.OPENAI_MODEL_FEEDBACK,
-        temperature=0.3  # ❄️ 낮은 창의성 (일관된 평가)
+        temperature=0.3
     )
 
 
@@ -99,7 +89,7 @@ def get_grammar_evaluator() -> "GrammarEvaluator":
 def get_relevance_evaluator() -> "RelevanceEvaluator":
     """맥락 평가기 의존성 주입
 
-    🎯 역할:
+    역할:
         - 사용자 답변의 맥락 관련성 평가
         - 역할극 상황에 얼마나 적절한지 판단
 
@@ -115,7 +105,7 @@ def get_relevance_evaluator() -> "RelevanceEvaluator":
         provider=settings.FEEDBACK_LLM_PROVIDER,
         api_key=settings.openai_api_key if settings.FEEDBACK_LLM_PROVIDER == "openai" else None,
         model_name=settings.OPENAI_MODEL_FEEDBACK,
-        temperature=0.3  # ❄️ 낮은 창의성 (일관된 평가)
+        temperature=0.3
     )
 
 
@@ -123,7 +113,7 @@ def get_relevance_evaluator() -> "RelevanceEvaluator":
 def get_feedback_judge() -> "FeedbackJudge":
     """피드백 판단기 의존성 주입
 
-    ⚖️ 역할:
+    역할:
         - 평가 결과 종합
         - 피드백 생성 필요 여부 판단
         - 우선순위 결정 (발음 > 문법 > 맥락)
@@ -140,7 +130,7 @@ def get_feedback_judge() -> "FeedbackJudge":
 def get_feedback_orchestrator() -> "FeedbackOrchestrator":
     """피드백 조율기 의존성 주입
 
-    🎼 역할:
+    역할:
         - 모든 평가 서비스를 조합하여 실행
         - 평가 결과 통합 및 우선순위 결정
         - 최종 피드백 생성
@@ -167,28 +157,11 @@ def get_feedback_orchestrator() -> "FeedbackOrchestrator":
     )
 
 
-def get_feedback_agent_service(
-    orchestrator: "FeedbackOrchestrator" = Depends(get_feedback_orchestrator)
-):
-    """피드백 에이전트 서비스 의존성 주입
-
-    ⚠️ 레거시 호환성:
-        새 코드는 get_feedback_orchestrator()를 직접 사용하세요.
-        이 함수는 기존 코드 호환성을 위해 유지됩니다.
-
-    Returns:
-        FeedbackAgentService 인스턴스
-    """
-    from app.roleplaying.services.feedback_agent_service import FeedbackAgentService
-
-    return FeedbackAgentService(feedback_orchestrator=orchestrator)
-
-
 @lru_cache(maxsize=1)
 def get_azure_usage_tracker():
     """Azure 사용량 추적기 의존성 주입
 
-    💾 역할:
+    역할:
         - Azure Speech Services API 호출 추적
         - 비용 계산 및 모니터링
         - 사용량 제한 관리
@@ -235,24 +208,16 @@ FeedbackOrchestratorDep = Annotated[
 ]
 """피드백 조율기 의존성 타입 - 모든 평가 통합"""
 
-FeedbackAgentServiceDep = Annotated[
-    "FeedbackAgentService",
-    Depends(get_feedback_agent_service)
-]
-"""피드백 에이전트 서비스 의존성 타입 (레거시)"""
-
 __all__ = [
     "get_pronunciation_evaluator",
     "get_grammar_evaluator",
     "get_relevance_evaluator",
     "get_feedback_judge",
     "get_feedback_orchestrator",
-    "get_feedback_agent_service",
     "get_azure_usage_tracker",
     "PronunciationEvaluatorDep",
     "GrammarEvaluatorDep",
     "RelevanceEvaluatorDep",
     "FeedbackJudgeDep",
     "FeedbackOrchestratorDep",
-    "FeedbackAgentServiceDep",
 ]
