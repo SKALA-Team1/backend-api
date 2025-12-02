@@ -342,23 +342,35 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
                     session_state.reset_retry_count()
 
         except asyncio.TimeoutError:
-            logger.error(f"Feedback evaluation timeout: session={session_id}")
+            logger.warning(f"Feedback evaluation timeout (60s): session={session_id}")
+            # 타임아웃 시에도 기본 점수로 계속 진행
+            await websocket.send_json(
+                ErrorMessage(
+                    code="FEEDBACK_TIMEOUT",
+                    message="Feedback evaluation timeout. Continuing with default scores.",
+                ).model_dump()
+            )
             feedback_result = {
                 "needs_correction": False,
+                "primary_issue": "timeout",
+                "feedback_text": "",
                 "scores": {
-                    "grammar_score": 70,
-                    "relevance_score": 70,
-                    "overall_score": 46
+                    "grammar_score": 50,
+                    "relevance_score": 50,
+                    "overall_score": 50
                 },
             }
         except Exception as e:
             logger.error(f"Feedback evaluation failed: {e}", exc_info=True)
+            # 에러 발생 시에도 기본 점수로 계속 진행
             feedback_result = {
                 "needs_correction": False,
+                "primary_issue": "evaluation_error",
+                "feedback_text": "",
                 "scores": {
-                    "grammar_score": 70,
-                    "relevance_score": 70,
-                    "overall_score": 46
+                    "grammar_score": 50,
+                    "relevance_score": 50,
+                    "overall_score": 50
                 },
             }
 
@@ -589,9 +601,23 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
                     session_state.reset_retry_count()
 
         except asyncio.TimeoutError:
-            logger.error(f"Feedback evaluation timeout: session={session_id}")
+            logger.warning(f"Feedback evaluation timeout (60s): session={session_id}")
+            # 타임아웃 시에도 기본 점수로 계속 진행
+            await websocket.send_json(
+                ErrorMessage(
+                    code="FEEDBACK_TIMEOUT",
+                    message="Feedback evaluation timeout. Continuing with default scores.",
+                ).model_dump()
+            )
         except Exception as e:
             logger.error(f"Feedback evaluation failed: {e}", exc_info=True)
+            # 에러 발생 시에도 기본 점수로 계속 진행
+            await websocket.send_json(
+                ErrorMessage(
+                    code="FEEDBACK_ERROR",
+                    message="Feedback evaluation failed. Continuing without feedback.",
+                ).model_dump()
+            )
 
         # Step 3: Spring 2에 사용자 발화 저장
         utterance_index = session_manager.increment_utterance_index(session_id)
