@@ -1,37 +1,32 @@
 """
 Feedback Service Dependencies
-=============================
+(PronunciationEvaluator, GrammarEvaluator, RelevanceEvaluator, FeedbackJudge, FeedbackOrchestrator, AzureUsageTracker)
+==================================================================================================================
 
-🔧 역할: 피드백 평가 및 생성 서비스 의존성 관리
+사용자 발언 평가 및 피드백 생성 서비스 의존성 주입 (Dependency Injection)
 
-서비스 목록:
+주요 서비스:
     - PronunciationEvaluator: Azure Speech Services 기반 발음 평가
     - GrammarEvaluator: LLM 기반 문법 평가
     - RelevanceEvaluator: LLM 기반 맥락 관련성 평가
-    - FeedbackJudge: 평가 결과 판단 (피드백 필요 여부)
-    - FeedbackOrchestrator: 모든 평가 조율 및 통합
-    - FeedbackAgentService: 레거시 호환성 (Orchestrator 래퍼)
-    - AzureUsageTracker: Azure API 사용량 추적
+    - FeedbackJudge: 평가 결과 판단 (우선순위 결정)
+    - FeedbackOrchestrator: 모든 평가 조율 및 통합 (최종 피드백 생성)
+    - AzureUsageTracker: Azure API 사용량 추적 (비용 관리)
 
-📋 설계:
+설계:
     - 평가 서비스들은 싱글톤 (@lru_cache)
-    - Orchestrator가 모든 평가기를 조합
+    - FeedbackOrchestrator가 모든 평가기 조합
     - Azure 서비스는 별도 추적 (비용 최적화)
     - LLM 평가는 설정값으로 공급자 선택 가능
 
-💡 사용 방법:
-
-    from app.roleplaying.services.dependencies.feedback import (
-        FeedbackOrchestratorDep
-    )
+사용 예:
+    from app.roleplaying.services.dependencies.feedback import FeedbackOrchestratorDep
 
     @router.post("/feedback")
-    async def evaluate_response(
-        orchestrator: FeedbackOrchestratorDep
-    ):
-        feedback = await orchestrator.evaluate_response(
-            user_text=user_response,
-            history=session.history
+    async def evaluate(orchestrator: FeedbackOrchestratorDep):
+        feedback = await orchestrator.evaluate_response_fast(
+            user_text=response,
+            conversation_history=history
         )
 """
 

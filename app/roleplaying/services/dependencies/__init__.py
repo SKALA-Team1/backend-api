@@ -1,44 +1,38 @@
 """
-Dependency Injection Facade
-===========================
+Dependency Injection Facade (Central Re-export)
+(LLM, Feedback, Repositories, Services)
+==============================================
 
-🔧 목적: 분산된 의존성 정의를 중앙에서 재 export
+분산된 의존성 정의를 중앙에서 재 export하는 Facade
 
 이 패키지는 FastAPI 의존성 주입(DI) 컨테이너입니다.
 SOLID 원칙 중 Dependency Inversion을 구현하며,
 서비스 인스턴스를 중앙에서 관리합니다.
 
-📦 구조:
+패키지 구조:
     dependencies/
-    ├── llm.py              → LLM 서비스 (OpenAI 기반)
-    ├── feedback.py         → 피드백 평가 서비스
-    ├── repositories.py     → 데이터 접근 계층 (Redis, DB)
-    ├── services.py         → 비즈니스 로직 서비스
-    └── __init__.py         → 이 파일 (Facade)
+    ├── llm.py          → LLM 서비스 (ConversationAnalyzer, ScenarioGenerator, ...)
+    ├── feedback.py     → 피드백 평가 서비스 (PronunciationEvaluator, GrammarEvaluator, ...)
+    ├── repositories.py → 데이터 접근 계층 (SessionRepository, ScenarioRepository)
+    ├── services.py     → 비즈니스 로직 (AITutorService, SlackScenarioService, ...)
+    └── __init__.py     → 이 파일 (모든 심볼 재 export)
 
-💡 하위 호환성:
-    기존 코드는 다음과 같이 import할 수 있습니다:
-
-    # 방법 1: 직접 import (권장)
+사용 방법:
+    # 방법 1: 중앙 Facade에서 import (권장)
     from app.roleplaying.services.dependencies import ConversationAnalyzerDep
 
-    # 방법 2: 하위 모듈 import
+    # 방법 2: 하위 모듈에서 import
     from app.roleplaying.services.dependencies.llm import get_conversation_analyzer
 
-🔄 의존성 주입 흐름:
+의존성 주입 흐름:
+    1. 라우터 함수: @router.post("/analyze")
+       async def analyze(analyzer: ConversationAnalyzerDep): ...
 
-    1. 라우터 함수에서 의존성 타입 사용
-       @router.post("/analyze")
-       async def analyze(analyzer: ConversationAnalyzerDep):
-           ...
-
-    2. FastAPI가 Depends() 감지하여 자동 주입
-       → get_conversation_analyzer() 호출
+    2. FastAPI가 Depends() 감지 → get_conversation_analyzer() 호출
        → ConversationAnalyzerImpl 인스턴스 생성
-       → @lru_cache로 캐싱
+       → @lru_cache로 싱글톤 캐싱
 
-    3. 함수 파라미터로 주입됨
-       analyzer = <싱글톤 인스턴스>
+    3. 함수 파라미터: analyzer = <싱글톤 인스턴스>
 """
 
 # ============================================

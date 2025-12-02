@@ -1,35 +1,30 @@
 """
 LLM Service Dependencies
-========================
+(ConversationAnalyzer, ScenarioGenerator, QuestionGenerator, AIResponseGenerator, MessageSummarizer, FixedQuestionBuilder, ScenarioEnhancer)
+================================================================================================================================================
 
-🔧 역할: OpenAI 기반 LLM 서비스 의존성 관리
+OpenAI 기반 LLM 서비스 의존성 주입 (Dependency Injection)
 
-서비스 목록:
-    - ConversationAnalyzer: Slack 대화 분석 (토론 내용 추출)
-    - ScenarioGenerator: 시나리오 생성 (역할극 상황 생성)
-    - QuestionGenerator: 질문 생성 (다음 턴 질문)
-    - AIResponseGenerator: AI 응답 생성 (AI 발언)
-    - MessageSummarizer: 메시지 요약 (대화 요약)
-    - FixedQuestionBuilder: 고정 질문 생성 (턴 1, 4, 7 질문)
-    - ScenarioEnhancer: 시나리오 강화 (상황 구체화, 제목 생성)
+주요 서비스:
+    - ConversationAnalyzer: Slack 대화 분석
+    - ScenarioGenerator: 역할극 시나리오 생성
+    - QuestionGenerator: 다음 턴 질문 생성
+    - AIResponseGenerator: AI 캐릭터 응답 생성
+    - MessageSummarizer: 대화 히스토리 요약
+    - FixedQuestionBuilder: 턴 1, 4, 7 고정 질문 생성
+    - ScenarioEnhancer: 상황 구체화 및 제목/질문 자동 생성
 
-📋 설계:
+설계:
     - 모든 서비스는 싱글톤 (@lru_cache)
     - OpenAI API 키와 모델명 설정값 주입
     - Temperature 설정으로 창의성/안정성 조절
 
-💡 사용 방법:
-
-    from app.roleplaying.services.dependencies.llm import (
-        ConversationAnalyzerDep,
-        ScenarioGeneratorDep
-    )
+사용 예:
+    from app.roleplaying.services.dependencies.llm import ConversationAnalyzerDep
 
     @router.post("/analyze")
-    async def analyze(
-        analyzer: ConversationAnalyzerDep
-    ):
-        situation = await analyzer.analyze_situation(...)
+    async def analyze(analyzer: ConversationAnalyzerDep):
+        result = await analyzer.analyze_situation(...)
 """
 
 from functools import lru_cache

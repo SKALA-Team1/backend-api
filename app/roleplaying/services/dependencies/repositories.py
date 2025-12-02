@@ -1,20 +1,20 @@
 """
 Repository Dependencies
-=======================
+(SessionRepository, ScenarioRepository)
+======================================
 
-🔧 역할: 데이터 접근 계층(DAO) 의존성 관리
+데이터 접근 계층(DAO) 의존성 주입 (Dependency Injection)
 
-저장소 목록:
-    - SessionRepository: Redis 기반 세션 상태 관리
-    - ScenarioRepository: DB 기반 시나리오 조회
+주요 저장소:
+    - SessionRepository: Redis 기반 실시간 세션 상태 관리
+    - ScenarioRepository: DB 기반 시나리오 조회 및 관리
 
-📋 설계:
+설계:
     - 각 저장소는 요청별로 새로운 인스턴스 생성 (Request-scoped)
-    - Redis/DB 연결은 내부에서 풀링으로 관리
+    - Redis/DB 연결은 클라이언트 내부에서 풀링으로 관리
     - Repository Pattern으로 비즈니스 로직과 데이터 접근 분리
 
-💡 사용 방법:
-
+사용 예:
     from app.roleplaying.services.dependencies.repositories import (
         SessionRepositoryDep,
         ScenarioRepositoryDep

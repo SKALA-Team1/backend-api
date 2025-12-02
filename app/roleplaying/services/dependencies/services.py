@@ -1,22 +1,22 @@
 """
 Business Service Dependencies
-=============================
+(AITutorService, SlackScenarioService, PromptBasedScenarioService, SessionService)
+==================================================================================
 
-🔧 역할: 비즈니스 로직 서비스 의존성 관리
+비즈니스 로직 서비스 의존성 주입 (Dependency Injection)
 
-서비스 목록:
-    - AITutorService: 대화 진행 및 자동 질문 생성
-    - SlackScenarioService: Slack 대화에서 시나리오 생성
-    - PromptBasedScenarioService: 사용자 프롬프트에서 시나리오 생성
-    - SessionService: 세션 생성 및 초기화
+주요 서비스:
+    - AITutorService: 역할극 대화 진행 및 자동 질문 생성
+    - SlackScenarioService: Slack 대화 분석 및 시나리오 생성
+    - PromptBasedScenarioService: 사용자 프롬프트 기반 시나리오 생성
+    - SessionService: WebSocket 세션 생성 및 초기화
 
-📋 설계:
+설계:
     - 각 서비스는 요청별로 새로운 인스턴스 생성 (Request-scoped)
-    - 생성자에서 의존성 주입 (LLM, Repository 등)
-    - FastAPI의 Depends() 체인으로 자동 주입
+    - 생성자에서 의존성 자동 주입 (LLM, Repository 등)
+    - FastAPI의 Depends() 체인으로 재귀적 의존성 해결
 
-💡 사용 방법:
-
+사용 예:
     from app.roleplaying.services.dependencies.services import (
         AITutorServiceDep,
         SessionServiceDep
