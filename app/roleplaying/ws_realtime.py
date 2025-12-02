@@ -430,8 +430,9 @@ async def _handle_user_text(
         # ========================================
         # Step 2: 피드백 평가 (텍스트 기반 - 발음 제외)
         # ========================================
-        from app.roleplaying.services.feedback_agent_service import feedback_agent_service
+        from app.roleplaying.services.dependencies import get_feedback_orchestrator
 
+        feedback_orchestrator = get_feedback_orchestrator()
         feedback_result = None
         try:
             import time
@@ -441,7 +442,7 @@ async def _handle_user_text(
             # 텍스트 기반이므로 audio_data=None
             # 타임아웃: 60초 (OpenAI 병렬 평가 + LangSmith 추적 + 버퍼)
             feedback_result = await asyncio.wait_for(
-                feedback_agent_service.evaluate_response_fast(
+                feedback_orchestrator.evaluate_response_fast(
                     user_text=user_text,
                     audio_data=None,  # 텍스트 기반이므로 발음 평가 불가
                     conversation_history=session_state.history if session_state else [],
@@ -810,9 +811,10 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         # ========================================
         # Step 3: 피드백 평가 (실시간)
         # ========================================
-        from app.roleplaying.services.feedback_agent_service import feedback_agent_service
+        from app.roleplaying.services.dependencies import get_feedback_orchestrator
         from app.roleplaying.services.azure_usage_tracker import usage_tracker
 
+        feedback_orchestrator = get_feedback_orchestrator()
         try:
             # Azure Speech 사용량 확인
             can_use_azure = await usage_tracker.can_use_azure()
@@ -823,7 +825,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
 
             # 피드백 평가 실행 (60초 타임아웃)
             feedback_result = await asyncio.wait_for(
-                feedback_agent_service.evaluate_response_fast(
+                feedback_orchestrator.evaluate_response_fast(
                     user_text=stt_text,
                     audio_data=audio_data if can_use_azure else None,  # 발음 평가는 Azure 가능할 때만
                     conversation_history=session_state.history if session_state else [],
