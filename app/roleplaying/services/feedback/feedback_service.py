@@ -119,7 +119,7 @@ class GrammarEvaluatorImpl:
                     logger.warning(f"Failed to parse grammar score from: {response_text}")
                     return None
                 logger.info(f"✅ [문법 평가 완료 (파싱)] {score}점")
-                return {"score": score, "feedback": response_text[:100]}
+                return {"score": score, "feedback": response_text}
 
         except Exception as e:
             logger.error(f"Grammar evaluation failed: {e}")
@@ -221,7 +221,7 @@ class RelevanceEvaluatorImpl:
                     logger.warning(f"Failed to parse relevance score from: {response_text}")
                     return None
                 logger.info(f"✅ [맥락 평가 완료 (파싱)] {score}점")
-                return {"score": score, "feedback": response_text[:100]}
+                return {"score": score, "feedback": response_text}
 
         except Exception as e:
             logger.error(f"Relevance evaluation failed: {e}")
@@ -470,9 +470,14 @@ class FeedbackOrchestratorImpl:
         pronunciation: Optional[Dict],
         grammar: Optional[Dict],
         relevance: Optional[Dict],
-        needs_correction: bool
+        needs_correction: bool,
+        max_feedback_length: int = 500
     ) -> str:
-        """피드백 텍스트 생성 (None 평가 결과 안전 처리)"""
+        """피드백 텍스트 생성 (None 평가 결과 안전 처리)
+
+        Args:
+            max_feedback_length: 최대 피드백 글자수 (기본 500자)
+        """
         try:
             feedback_parts = []
 
@@ -494,6 +499,22 @@ class FeedbackOrchestratorImpl:
                 feedback_text += f"\n다시 한 번 시도해주세요."
             else:
                 feedback_text = "좋습니다! 계속 진행하겠습니다."
+
+            # 글자수 제한 (최대 max_feedback_length)
+            if len(feedback_text) > max_feedback_length:
+                # 마지막 완전한 문장까지만 자르기
+                truncated = feedback_text[:max_feedback_length]
+                last_period = truncated.rfind('.')
+                if last_period > 0:
+                    feedback_text = truncated[:last_period + 1]
+                else:
+                    # 마침표가 없으면 마지막 완전한 단어까지
+                    last_space = truncated.rfind(' ')
+                    if last_space > 0:
+                        feedback_text = truncated[:last_space] + "..."
+                    else:
+                        feedback_text = truncated + "..."
+                logger.info(f"Feedback truncated to {len(feedback_text)} characters")
 
             return feedback_text
 

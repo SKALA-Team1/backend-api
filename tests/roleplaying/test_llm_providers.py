@@ -7,10 +7,10 @@ OpenAIProvider, OllamaProvider, create_llm_provider 테스트.
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from app.roleplaying.services.llm_providers import (
+from app.roleplaying.services.llm.llm_provider_factory import (
     OpenAIProvider,
     OllamaProvider,
-    create_llm_provider
+    create_llm_provider,
 )
 
 
@@ -19,7 +19,7 @@ class TestOpenAIProvider:
 
     def test_openai_provider_initialization(self):
         """OpenAI 프로바이더 초기화"""
-        with patch('app.roleplaying.services.llm_providers.ChatOpenAI') as mock_chat:
+        with patch('app.roleplaying.services.llm.llm_provider_factory.ChatOpenAI') as mock_chat:
             provider = OpenAIProvider(
                 api_key="test-key",
                 model_name="gpt-4",
@@ -32,7 +32,7 @@ class TestOpenAIProvider:
     @pytest.mark.asyncio
     async def test_openai_provider_invoke(self):
         """OpenAI 프로바이더 invoke 메서드"""
-        with patch('app.roleplaying.services.llm_providers.ChatOpenAI') as mock_chat:
+        with patch('app.roleplaying.services.llm.llm_provider_factory.ChatOpenAI') as mock_chat:
             mock_llm = AsyncMock()
             mock_response = MagicMock()
             mock_response.content = "Test response"
@@ -58,7 +58,7 @@ class TestOpenAIProvider:
     @pytest.mark.asyncio
     async def test_openai_provider_invoke_without_content_attribute(self):
         """OpenAI 응답이 content 속성이 없을 때"""
-        with patch('app.roleplaying.services.llm_providers.ChatOpenAI') as mock_chat:
+        with patch('app.roleplaying.services.llm.llm_provider_factory.ChatOpenAI') as mock_chat:
             mock_llm = MagicMock()
             mock_response = "Direct string response"
             mock_llm.invoke = MagicMock(return_value=mock_response)
@@ -85,7 +85,7 @@ class TestOllamaProvider:
 
     def test_ollama_provider_initialization(self):
         """Ollama 프로바이더 초기화"""
-        with patch('app.roleplaying.services.llm_providers.OllamaLLM') as mock_ollama:
+        with patch('app.roleplaying.services.llm.llm_provider_factory.OllamaLLM') as mock_ollama:
             provider = OllamaProvider(
                 model_name="llama2",
                 base_url="http://localhost:11434",
@@ -98,7 +98,7 @@ class TestOllamaProvider:
     @pytest.mark.asyncio
     async def test_ollama_provider_invoke(self):
         """Ollama 프로바이더 invoke 메서드"""
-        with patch('app.roleplaying.services.llm_providers.OllamaLLM') as mock_ollama:
+        with patch('app.roleplaying.services.llm.llm_provider_factory.OllamaLLM') as mock_ollama:
             mock_llm = MagicMock()
             mock_response = MagicMock()
             mock_response.content = "Ollama response"
@@ -126,7 +126,7 @@ class TestCreateLLMProvider:
 
     def test_create_openai_provider(self, mock_settings):
         """OpenAI 프로바이더 생성"""
-        with patch('app.roleplaying.services.llm_providers.ChatOpenAI'):
+        with patch('app.roleplaying.services.llm.llm_provider_factory.ChatOpenAI'):
             provider = create_llm_provider(
                 provider_type="openai",
                 api_key="test-key",
@@ -139,7 +139,7 @@ class TestCreateLLMProvider:
 
     def test_create_ollama_provider(self):
         """Ollama 프로바이더 생성"""
-        with patch('app.roleplaying.services.llm_providers.OllamaLLM'):
+        with patch('app.roleplaying.services.llm.llm_provider_factory.OllamaLLM'):
             provider = create_llm_provider(
                 provider_type="ollama",
                 model_name="llama2",
@@ -198,7 +198,7 @@ class TestCreateLLMProvider:
 
     def test_create_provider_with_default_temperature(self):
         """기본 temperature 사용"""
-        with patch('app.roleplaying.services.llm_providers.ChatOpenAI'):
+        with patch('app.roleplaying.services.llm.llm_provider_factory.ChatOpenAI'):
             provider = create_llm_provider(
                 provider_type="openai",
                 api_key="test-key",

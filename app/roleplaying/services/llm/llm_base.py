@@ -12,7 +12,7 @@ LLM Service Base Class
 import logging
 from abc import ABC
 
-from app.core.settings import settings
+from app.config import settings
 from app.roleplaying.services.llm.llm_provider_factory import create_llm_provider
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,8 @@ class LLMServiceBase(ABC):
     공통적인 LLM 초기화 로직을 제공합니다.
 
     의존성:
-        - app.core.settings (OpenAI API 키, 모델명)
-        - app.roleplaying.services.llm_providers (LLM 프로바이더)
+        - app.config (OpenAI API 키, 모델명)
+        - app.roleplaying.services.llm.llm_provider_factory (LLM 프로바이더)
     """
 
     def __init__(

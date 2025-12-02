@@ -18,7 +18,6 @@ from app.roleplaying.services.dependencies import (
     get_relevance_evaluator,
     get_feedback_judge,
     get_feedback_orchestrator,
-    get_feedback_agent_service,
     get_session_repository,
     get_scenario_repository,
     get_session_service,
@@ -41,7 +40,6 @@ from app.roleplaying.services.dependencies import (
     AITutorServiceDep,
     SlackScenarioServiceDep,
     PromptBasedScenarioServiceDep,
-    FeedbackAgentServiceDep,
     SessionServiceDep,
 )
 
@@ -144,26 +142,6 @@ class TestFeedbackServiceDependencies:
 
             assert orchestrator is not None
             assert hasattr(orchestrator, 'evaluate_response_fast')
-
-    def test_get_feedback_agent_service(self, mock_settings):
-        """피드백 에이전트 서비스 의존성 주입"""
-        with patch('app.roleplaying.services.dependencies.settings', mock_settings):
-            # Clear caches
-            get_grammar_evaluator.cache_clear()
-            get_relevance_evaluator.cache_clear()
-            get_pronunciation_evaluator.cache_clear()
-            get_feedback_judge.cache_clear()
-            get_azure_usage_tracker.cache_clear()
-            get_feedback_orchestrator.cache_clear()
-
-            # Pass orchestrator as a mock to avoid complex DI initialization
-            mock_orchestrator = MagicMock()
-            service = get_feedback_agent_service(orchestrator=mock_orchestrator)
-
-            assert service is not None
-            # FeedbackAgentService is a deprecated facade
-            assert hasattr(service, '__class__')
-
 
 class TestRepositoryDependencies:
     """Repository 의존성 주입 테스트"""
