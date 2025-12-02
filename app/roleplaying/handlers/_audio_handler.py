@@ -63,7 +63,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
 
         logger.info(f"Processing utterance: session={session_id}, audio_size={len(audio_data)} bytes")
 
-        # Step 1: STT 처리 (user_utterance_processor 사용)
+        # Step 1: STT 처리
         stt_text = await UtteranceProcessor.process_stt(audio_data)
 
         # 히스토리에 추가
@@ -116,7 +116,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             except Exception as e:
                 logger.warning(f"Failed to increment Azure usage: {e}")
 
-        # ✅ 피드백 메시지 전송 및 재시도 확인
+        # 피드백 메시지 전송 및 재시도 확인
         if await _send_feedback_messages(
             websocket=websocket,
             session_id=session_id,
