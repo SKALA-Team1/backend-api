@@ -24,6 +24,7 @@ from sqlalchemy import text
 from app.roleplaying.services.interfaces import ScenarioEnhancer
 from app.roleplaying.schemas import ScenarioInfoDto
 from app.roleplaying.services.title_utils import compact_title
+from app.roleplaying.services.utils import normalize_questions
 
 logger = logging.getLogger(__name__)
 
@@ -205,8 +206,8 @@ class PromptBasedScenarioService:
                 ai_role=ai_role
             )
 
-            # 검증
-            validated = self._normalize_questions(questions)
+            # 검증 (utils 함수 사용)
+            validated = normalize_questions(questions, expected_count=3)
             return validated
 
         except Exception as error:
@@ -216,28 +217,6 @@ class PromptBasedScenarioService:
             )
             # Fallback: 기본 질문
             return self._default_questions(my_role, ai_role)
-
-    def _normalize_questions(self, questions: List[str]) -> List[str]:
-        """
-        질문들을 정규화하고 정확히 3개인지 검증합니다.
-
-        Args:
-            questions: 정규화할 질문 목록
-
-        Returns:
-            정규화된 3개의 질문
-
-        Raises:
-            ValueError: 질문 개수가 3개가 아님
-        """
-        # ScenarioEnhancer는 이미 문자열 리스트를 반환하므로
-        # 단순히 검증만 수행
-        normalized = [q.strip() for q in questions if isinstance(q, str) and q.strip()]
-
-        if len(normalized) != 3:
-            raise ValueError(f"Expected exactly 3 questions, got {len(normalized)}")
-
-        return normalized
 
     def _default_questions(self, my_role: str, ai_role: str) -> List[str]:
         """

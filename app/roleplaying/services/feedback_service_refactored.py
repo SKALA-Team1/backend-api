@@ -35,6 +35,15 @@ from app.roleplaying.services.interfaces import (
     FeedbackJudge,
     FeedbackOrchestrator
 )
+from app.roleplaying.prompts.constants import (
+    GRAMMAR_EVALUATION_PROMPT,
+    RELEVANCE_EVALUATION_PROMPT,
+)
+from app.roleplaying.services.utils import (
+    extract_json_from_response,
+    normalize_score,
+    normalize_score_from_string,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,33 +103,28 @@ class GrammarEvaluatorImpl:
                 "feedback": str
             }
         """
-        prompt = f"""문법 평가: "{user_text}"
-점수(0-100)와 간단한 피드백만 JSON으로 응답:
-{{"score": int, "feedback": str}}"""
+        prompt = GRAMMAR_EVALUATION_PROMPT.format(user_text=user_text)
 
         try:
             logger.info("🟢 [문법 평가] LLM 호출 중...")
 
             response = await self.llm.invoke(prompt)
-
             response_text = response if isinstance(response, str) else str(response)
 
             # JSON 객체 추출 시도
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-                score = int(result.get("score", 70))
+            result = extract_json_from_response(response_text)
+            if result:
+                score = normalize_score(result.get("score", 70))
                 logger.info(f"✅ [문법 평가 완료] {score}점")
                 return {
-                    "score": max(0, min(100, score)),
+                    "score": score,
                     "feedback": result.get("feedback", "")
                 }
             else:
                 # 점수만 추출
-                score_match = re.search(r'\d+', response_text)
-                score = int(score_match.group()) if score_match else 70
+                score = normalize_score_from_string(response_text)
                 logger.info(f"✅ [문법 평가 완료 (파싱)] {score}점")
-                return {"score": min(100, max(0, score)), "feedback": response_text[:100]}
+                return {"score": score, "feedback": response_text[:100]}
 
         except Exception as e:
             logger.error(f"Grammar evaluation failed: {e}")
@@ -191,34 +195,31 @@ class RelevanceEvaluatorImpl:
         """
         context = self._build_conversation_context(conversation_history, scenario_context)
 
-        prompt = f"""맥락 평가: "{context}"
-응답: "{user_text}"
-점수(0-100)와 간단한 피드백만 JSON:
-{{"score": int, "feedback": str}}"""
+        prompt = RELEVANCE_EVALUATION_PROMPT.format(
+            context=context,
+            user_text=user_text
+        )
 
         try:
             logger.info("🔴 [맥락 평가] LLM 호출 중...")
 
             response = await self.llm.invoke(prompt)
-
             response_text = response if isinstance(response, str) else str(response)
 
             # JSON 객체 추출 시도
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-                score = int(result.get("score", 70))
+            result = extract_json_from_response(response_text)
+            if result:
+                score = normalize_score(result.get("score", 70))
                 logger.info(f"✅ [맥락 평가 완료] {score}점")
                 return {
-                    "score": max(0, min(100, score)),
+                    "score": score,
                     "feedback": result.get("feedback", "")
                 }
             else:
                 # 점수만 추출
-                score_match = re.search(r'\d+', response_text)
-                score = int(score_match.group()) if score_match else 70
+                score = normalize_score_from_string(response_text)
                 logger.info(f"✅ [맥락 평가 완료 (파싱)] {score}점")
-                return {"score": min(100, max(0, score)), "feedback": response_text[:100]}
+                return {"score": score, "feedback": response_text[:100]}
 
         except Exception as e:
             logger.error(f"Relevance evaluation failed: {e}")
@@ -401,9 +402,9 @@ class FeedbackOrchestratorImpl:
             logger.info(f"  - 맥락: {relevance.get('score', '?')}점")
 
             # 평가 점수 정규화 (0-100)
-            pronunciation_score = max(0, min(100, pronunciation.get("score", 70)))
-            grammar_score = max(0, min(100, grammar.get("score", 70)))
-            relevance_score = max(0, min(100, relevance.get("score", 70)))
+            pronunciation_score = normalize_score(pronunciation.get("score", 70))
+            grammar_score = normalize_score(grammar.get("score", 70))
+            relevance_score = normalize_score(relevance.get("score", 70))
 
             # 종합 점수 (평균)
             overall_score = int((pronunciation_score + grammar_score + relevance_score) / 3)

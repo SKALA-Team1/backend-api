@@ -32,6 +32,7 @@ from app.roleplaying.services.interfaces import (
     FixedQuestionBuilder
 )
 from app.roleplaying.services.title_utils import compact_title
+from app.roleplaying.services.utils import normalize_questions
 from app.roleplaying.schemas import (
     AnalysisRequestDto,
     AnalysisResultDto,
@@ -280,7 +281,7 @@ class SlackScenarioService:
                 user_summary=formatted_user_summary,
                 counterpart_summary=formatted_counterpart_summary
             )
-            return self._normalize_questions(generated_questions)
+            return normalize_questions(generated_questions, expected_count=3)
         except Exception as error:
             logger.error(
                 "Failed to build fixed questions for %s/%s: %s",
@@ -289,7 +290,7 @@ class SlackScenarioService:
                 error
             )
             try:
-                return self._normalize_questions(fallback_questions)
+                return normalize_questions(fallback_questions, expected_count=3)
             except Exception as fallback_error:
                 logger.error(
                     "Fallback questions from scenario invalid for %s/%s: %s",
@@ -320,25 +321,6 @@ class SlackScenarioService:
             f"[Situation: {situation}] "
             f"{clean_summary}"
         )
-
-    def _normalize_questions(self, questions: List) -> List[str]:
-        """Ensure fixed questions are returned as plain strings and exactly 3 entries."""
-        normalized: List[str] = []
-
-        for question in questions:
-            if isinstance(question, dict):
-                text = question.get("text")
-                if isinstance(text, str):
-                    normalized.append(text.strip())
-            elif isinstance(question, str):
-                normalized.append(question.strip())
-
-        normalized = [q for q in normalized if q]
-
-        if len(normalized) != 3:
-            raise ValueError(f"LLM must return exactly 3 questions, got {len(normalized)}")
-
-        return normalized
 
     def _default_questions(self, my_role: str) -> List[str]:
         """Fallback questions when both generation and scenario-provided questions fail."""

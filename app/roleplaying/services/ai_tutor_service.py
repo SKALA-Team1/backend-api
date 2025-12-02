@@ -24,6 +24,8 @@ from typing import AsyncGenerator, Tuple, Optional
 
 from app.roleplaying.session_manager import SessionState
 from app.roleplaying.services.interfaces import QuestionGenerator
+from app.roleplaying.prompts.constants import FOLLOWUP_QUESTION_PROMPT
+from app.roleplaying.services.utils import format_conversation_history
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ class AITutorService:
         user_text: str
     ) -> Tuple[str, bool]:
         """
-        사용자 발화에 대한 AI 응답 생성
+        사용자 발화에 대한 AI 응답 생성 (스트리밍 버전을 감싼 헬퍼)
 
         Args:
             session_state: 세션 상태 (대화 히스토리, 시나리오 정보 포함)
@@ -65,42 +67,14 @@ class AITutorService:
             - ai_response: AI 응답 텍스트
             - is_fixed_question: 고정 질문 여부 (True/False)
         """
-        try:
-            # 다음 AI 턴 번호 확인
-            next_turn = session_state.get_ai_turn_number()
+        full_response = ""
+        is_fixed = False
 
-            logger.info(
-                f"Generating AI reply: session={session_state.session_id}, "
-                f"turn={next_turn}, user_text='{user_text[:30]}...'"
-            )
+        async for chunk, is_fixed_q in self.generate_reply_stream(session_state, user_text):
+            full_response += chunk
+            is_fixed = is_fixed_q
 
-            # ========================================
-            # Step 1: 고정 질문 턴 확인 (턴 1, 4, 7)
-            # ========================================
-            if session_state.should_use_fixed_question():
-                fixed_index = session_state.get_fixed_question_index()
-                if fixed_index is not None and fixed_index < len(session_state.fixed_questions):
-                    fixed_question = session_state.fixed_questions[fixed_index]
-                    logger.info(
-                        f"Using fixed question (turn {next_turn}): {fixed_question[:50]}..."
-                    )
-                    return (fixed_question, True)
-
-            # ========================================
-            # Step 2: 동적 질문 생성 (LLM)
-            # ========================================
-            ai_response = await self._generate_dynamic_question(
-                session_state=session_state,
-                user_text=user_text
-            )
-
-            logger.info(f"Generated dynamic question (turn {next_turn}): {ai_response[:50]}...")
-            return (ai_response, False)
-
-        except Exception as e:
-            logger.error(f"Failed to generate AI reply: {e}", exc_info=True)
-            # Fallback: 기본 질문 반환
-            return ("Could you tell me more about that?", False)
+        return (full_response, is_fixed)
 
     async def generate_reply_stream(
         self,
@@ -161,66 +135,6 @@ class AITutorService:
             fallback_question = "Could you tell me more about that?"
             yield (fallback_question, False)
 
-    async def _generate_dynamic_question(
-        self,
-        session_state: SessionState,
-        user_text: str
-    ) -> str:
-        """
-        LLM을 사용하여 동적 질문 생성
-
-        Args:
-            session_state: 세션 상태
-            user_text: 사용자 발화
-
-        Returns:
-            생성된 질문
-        """
-        # ========================================
-        # Step 1: 시나리오 & 대화 컨텍스트 구성
-        # ========================================
-        scenario_context = self._build_scenario_context(session_state)
-        conversation_history = self._build_conversation_history(session_state)
-
-        # ========================================
-        # Step 2: 프롬프트 구성
-        # ========================================
-        prompt = f"""You are roleplaying as a {session_state.ai_role} in a professional English conversation practice session.
-
-Scenario context:
-{scenario_context}
-
-Conversation so far:
-{conversation_history}
-
-User just said:
-"{user_text}"
-
-Your task:
-- Ask a follow-up question that:
-  1. Relates to what the user just said
-  2. Helps them practice professional English
-  3. Matches your role as a {session_state.ai_role}
-  4. Encourages detailed responses (avoid yes/no questions)
-
-Generate ONE natural, professional question in English.
-Return ONLY the question text, nothing else."""
-
-        try:
-            # ========================================
-            # Step 3: LLM 호출 (의존성 주입)
-            # ========================================
-            response = await self.question_generator.generate_followup_question(prompt)
-            return response.strip() or "Could you expand on that a bit more?"
-
-        except Exception as e:
-            logger.error(f"LLM call failed: {e}", exc_info=True)
-            # Fallback
-            return (
-                f"That's interesting. As a {session_state.ai_role}, "
-                "I'd like to know more. Could you elaborate?"
-            )
-
     async def _generate_dynamic_question_stream(
         self,
         session_state: SessionState,
@@ -245,26 +159,12 @@ Return ONLY the question text, nothing else."""
         # ========================================
         # Step 2: 프롬프트 구성
         # ========================================
-        prompt = f"""You are roleplaying as a {session_state.ai_role} in a professional English conversation practice session.
-
-Scenario context:
-{scenario_context}
-
-Conversation so far:
-{conversation_history}
-
-User just said:
-"{user_text}"
-
-Your task:
-- Ask a follow-up question that:
-  1. Relates to what the user just said
-  2. Helps them practice professional English
-  3. Matches your role as a {session_state.ai_role}
-  4. Encourages detailed responses (avoid yes/no questions)
-
-Generate ONE natural, professional question in English.
-Return ONLY the question text, nothing else."""
+        prompt = FOLLOWUP_QUESTION_PROMPT.format(
+            role=session_state.ai_role,
+            scenario_context=scenario_context,
+            conversation_history=conversation_history,
+            user_text=user_text
+        )
 
         try:
             # ========================================
@@ -301,7 +201,7 @@ Return ONLY the question text, nothing else."""
         max_turns: int = 5
     ) -> str:
         """
-        대화 히스토리 문자열 구성
+        대화 히스토리 문자열 구성 (유틸리티 함수를 래퍼)
 
         Args:
             session_state: 세션 상태
@@ -310,19 +210,16 @@ Return ONLY the question text, nothing else."""
         Returns:
             대화 히스토리 문자열
         """
+        # SessionState의 history를 딕셔너리 리스트로 변환
         if not session_state.history:
             return "(No conversation yet)"
 
-        # 최근 max_turns 개의 턴만 포함
-        recent_turns = session_state.history[-max_turns:]
+        history_dicts = [
+            {"speaker": "ai" if turn.speaker == "ai" else "user", "text": turn.text}
+            for turn in session_state.history
+        ]
 
-        history_lines = []
-        for turn in recent_turns:
-            # turn.speaker 값에 따라 라벨 설정
-            speaker_label = "AI" if turn.speaker == "ai" else "User"
-            history_lines.append(f"{speaker_label}: {turn.text}")
-
-        return "\n".join(history_lines)
+        return format_conversation_history(history_dicts, max_turns)
 
 
 # ============================================
