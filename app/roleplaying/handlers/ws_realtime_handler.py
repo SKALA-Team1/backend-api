@@ -39,7 +39,7 @@ from app.roleplaying.core.session_state_manager import SessionStatus, session_ma
 from app.roleplaying.handlers.session_validators import ErrorHandler, InitStateValidator
 from app.roleplaying.handlers.ws_message_router import create_message_router
 from app.roleplaying.handlers.message_handlers import (
-    handle_init, handle_audio_chunk, handle_user_text,
+    handle_init, handle_user_text,
     handle_utterance_end, handle_end_session
 )
 
@@ -87,8 +87,6 @@ redis_validator = RedisSessionValidator(settings.REDIS_URL)
 # ========================================
 # WebSocket 엔드포인트
 # ========================================
-
-
 @router.websocket("/ws/roleplaying/{session_id}")
 async def roleplaying_websocket(websocket: WebSocket, session_id: str):
     """
@@ -134,10 +132,10 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
         websocket.scope["session_data"] = session_data
         websocket.scope["user_id"] = user_id
 
-        # 메시지 라우터 생성 (모든 핸들러 등록)
+        # 메시지 라우터 생성 (4개 핸들러 등록)
+        # 참고: audio_chunk는 binary 데이터로 메인 루프에서 직접 처리하므로 라우터에 등록하지 않음
         message_router = create_message_router(
             init_handler=handle_init,
-            audio_chunk_handler=handle_audio_chunk,
             user_text_handler=handle_user_text,
             utterance_end_handler=handle_utterance_end,
             end_session_handler=handle_end_session
@@ -159,9 +157,12 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
                 ):
                     continue
 
-                # 오디오 청크를 라우터를 통해 처리
-                audio_message = {"type": "AUDIO_CHUNK", "data": raw_data["bytes"]}
-                await message_router.dispatch(websocket, session_id, audio_message)
+                # 오디오 청크를 세션 버퍼에 저장 (라우터를 거치지 않음 - binary 데이터)
+                try:
+                    session_manager.append_audio_chunk(session_id, raw_data["bytes"])
+                    logger.debug(f"Audio chunk appended: session={session_id}, size={len(raw_data['bytes'])} bytes")
+                except Exception as e:
+                    logger.error(f"Failed to append audio chunk: {e}", exc_info=True)
                 continue
 
             # Text 메시지 (JSON)

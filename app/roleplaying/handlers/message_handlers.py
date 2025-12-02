@@ -67,7 +67,7 @@ async def _send_error(websocket: WebSocket, message: str, code: str = "ERROR") -
 async def _check_turn_limit(
     websocket: WebSocket, session_id: str, session_state
 ) -> bool:
-    """턴 제한(10 AI↔사용자 페어) 초과 여부를 확인하고 초과 시 세션 종료"""
+    """턴 제한(7 AI↔사용자 페어) 초과 여부를 확인하고 초과 시 세션 종료"""
     try:
         if session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS):
             logger.info(f"Turn limit reached for session {session_id}, ending session.")
@@ -214,41 +214,6 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
         logger.error(f"INIT handler error: {e}", exc_info=True)
         await _send_error(websocket, "Session initialization failed")
         await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
-
-
-async def handle_audio_chunk(router, websocket: WebSocket, session_id: str, message: dict) -> None:
-    """
-    오디오 청크 처리
-
-    1. SessionManager에 오디오 청크 추가
-    2. STT 스트리밍 처리
-    3. 부분 결과 전송
-
-    Note: 실제 오디오 데이터는 binary로 전달되므로 이 핸들러는 직접 호출되지 않습니다.
-          메인 루프에서 직접 처리합니다.
-    """
-    try:
-        # 세션 검증
-        session_state = session_manager.get_session(session_id)
-        if not session_state:
-            await _send_error(websocket, "Session not found")
-            return
-
-        # 세션 만료 확인
-        if session_state.is_expired():
-            await _send_error(websocket, "Session expired")
-            await websocket.close(
-                code=status.WS_1008_POLICY_VIOLATION, reason="Session expired"
-            )
-            return
-
-        # message에서 audio_chunk 데이터를 가져옴 (필요시)
-        # 실제 구현에서는 binary 데이터를 직접 처리합니다.
-        logger.debug(f"Audio chunk received for session: {session_id}")
-
-    except Exception as e:
-        logger.error(f"Audio chunk handler error: {e}", exc_info=True)
-        await _send_error(websocket, "Audio processing failed")
 
 
 async def handle_user_text(router, websocket: WebSocket, session_id: str, message: dict) -> None:
