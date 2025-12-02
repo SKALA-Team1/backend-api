@@ -1,6 +1,6 @@
 """
-LLM Service Refactored (SOLID 준수)
-====================================
+LLM Service (SOLID 준수)
+=======================
 분리된 LLM 서비스들의 Facade
 
 구조 (분리됨):
@@ -18,7 +18,7 @@ LLM Service Refactored (SOLID 준수)
     - 필요시 Facade 패턴으로 확장 가능
 
 사용 예시 (기존과 동일):
-    from app.roleplaying.services.llm.llm_service_refactored import (
+    from app.roleplaying.services.llm.llm_service import (
         ConversationAnalyzerImpl,
         ScenarioGeneratorImpl,
         QuestionGeneratorImpl,

@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
 from dataclasses import dataclass
 
-from app.roleplaying.services.ai_tutor_service import AITutorService
-from app.roleplaying.session_manager import SessionState, SessionStatus
+from app.roleplaying.services.business.ai_tutor_service import AITutorService
+from app.roleplaying.core.session_models import SessionState, SessionStatus
 
 
 # Turn 클래스 정의 (session_manager에 없는 경우 사용)

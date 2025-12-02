@@ -75,7 +75,7 @@ def get_grammar_evaluator() -> "GrammarEvaluator":
         LLM 공급자는 settings.FEEDBACK_LLM_PROVIDER로 선택
         (기본: OpenAI, 확장 가능)
     """
-    from app.roleplaying.services.feedback.feedback_service_refactored import GrammarEvaluatorImpl
+    from app.roleplaying.services.feedback.feedback_service import GrammarEvaluatorImpl
 
     return GrammarEvaluatorImpl(
         provider=settings.FEEDBACK_LLM_PROVIDER,
@@ -99,7 +99,7 @@ def get_relevance_evaluator() -> "RelevanceEvaluator":
     Note:
         LLM 공급자는 settings.FEEDBACK_LLM_PROVIDER로 선택
     """
-    from app.roleplaying.services.feedback.feedback_service_refactored import RelevanceEvaluatorImpl
+    from app.roleplaying.services.feedback.feedback_service import RelevanceEvaluatorImpl
 
     return RelevanceEvaluatorImpl(
         provider=settings.FEEDBACK_LLM_PROVIDER,
@@ -121,7 +121,7 @@ def get_feedback_judge() -> "FeedbackJudge":
     Returns:
         FeedbackJudge 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.feedback.feedback_service_refactored import FeedbackJudgeImpl
+    from app.roleplaying.services.feedback.feedback_service import FeedbackJudgeImpl
 
     return FeedbackJudgeImpl()
 
@@ -146,7 +146,7 @@ def get_feedback_orchestrator() -> "FeedbackOrchestrator":
         - FeedbackJudge: 판단
         - AzureUsageTracker: 사용량 추적
     """
-    from app.roleplaying.services.feedback.feedback_service_refactored import FeedbackOrchestratorImpl
+    from app.roleplaying.services.feedback.feedback_service import FeedbackOrchestratorImpl
 
     return FeedbackOrchestratorImpl(
         grammar_evaluator=get_grammar_evaluator(),

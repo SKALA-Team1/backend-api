@@ -1,6 +1,6 @@
 """
-Session Service Refactored Tests
-=================================
+Session Service Tests
+=====================
 SessionServiceImpl 테스트.
 """
 
@@ -8,8 +8,8 @@ import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from app.roleplaying.services.session_service_refactored import SessionServiceImpl
-from app.roleplaying.schemas import ScenarioDetail
+from app.roleplaying.services.business.session_service import SessionServiceImpl
+from app.roleplaying.api.api_schemas import ScenarioDetail
 
 
 class TestSessionServiceImpl:

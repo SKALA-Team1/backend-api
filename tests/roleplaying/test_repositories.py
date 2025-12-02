@@ -9,11 +9,11 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.roleplaying.services.repositories import (
+from app.roleplaying.services.data.data_repositories import (
     RedisSessionRepository,
-    DatabaseScenarioRepository
+    DatabaseScenarioRepository,
 )
-from app.roleplaying.schemas import ScenarioDetail
+from app.roleplaying.api.api_schemas import ScenarioDetail
 
 
 class TestRedisSessionRepository:

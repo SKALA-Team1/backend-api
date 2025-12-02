@@ -1,6 +1,6 @@
 """
-Feedback Service Refactored Tests
-==================================
+Feedback Service Tests
+======================
 GrammarEvaluatorImpl, RelevanceEvaluatorImpl, FeedbackJudgeImpl, FeedbackOrchestratorImpl 테스트.
 """
 
@@ -8,7 +8,7 @@ import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.roleplaying.services.feedback_service_refactored import (
+from app.roleplaying.services.feedback.feedback_service import (
     GrammarEvaluatorImpl,
     RelevanceEvaluatorImpl,
     FeedbackJudgeImpl,

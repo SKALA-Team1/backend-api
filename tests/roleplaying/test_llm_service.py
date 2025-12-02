@@ -1,6 +1,6 @@
 """
-LLM Service Refactored Tests
-============================
+LLM Service Tests
+================
 ConversationAnalyzerImpl, ScenarioGeneratorImpl, QuestionGeneratorImpl, AIResponseGeneratorImpl 테스트.
 """
 
@@ -8,7 +8,7 @@ import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.roleplaying.services.llm_service_refactored import (
+from app.roleplaying.services.llm.llm_service import (
     ConversationAnalyzerImpl,
     ScenarioGeneratorImpl,
     QuestionGeneratorImpl,

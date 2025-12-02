@@ -213,7 +213,7 @@ def get_session_service(
                 "expires_at": expires_at
             }
     """
-    from app.roleplaying.services.business.session_service_refactored import SessionServiceImpl
+    from app.roleplaying.services.business.session_service import SessionServiceImpl
 
     return SessionServiceImpl(
         session_repository=session_repo,
