@@ -305,14 +305,14 @@ async def _handle_init(
             session_state.current_question_text = first_question
 
         # 세션 히스토리에 추가
-        session_manager.append_message(
+        await session_manager.append_message_async(
             session_id=session_id,
             speaker="ai",
             text=first_question,
             is_fixed_question=True,
         )
 
-        first_ai_index = session_manager.increment_utterance_index(session_id)
+        first_ai_index = await session_manager.increment_utterance_index_async(session_id)
         _schedule_spring2_save(
             session_id=session_id,
             text=first_question,
@@ -420,7 +420,7 @@ async def _handle_user_text(
         # ========================================
         # Step 1: 세션 히스토리에 사용자 발화 추가
         # ========================================
-        session_manager.append_message(
+        await session_manager.append_message_async(
             session_id=session_id,
             speaker="user",
             text=user_text,
@@ -691,7 +691,7 @@ async def _handle_user_text(
             )
 
         # 세션 히스토리에 완전한 AI 응답 추가
-        session_manager.append_message(
+        await session_manager.append_message_async(
             session_id=session_id,
             speaker="ai",
             text=full_ai_response,
@@ -703,7 +703,7 @@ async def _handle_user_text(
             session_state.current_question_text = full_ai_response
             session_state.reset_retry_count()  # 새 질문이므로 재시도 카운트 리셋
 
-        ai_index = session_manager.increment_utterance_index(session_id)
+        ai_index = await session_manager.increment_utterance_index_async(session_id)
         _schedule_spring2_save(
             session_id=session_id,
             text=full_ai_response,
@@ -770,7 +770,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                     return None
 
                 # 세션 히스토리에 사용자 발화 추가
-                session_manager.append_message(
+                await session_manager.append_message_async(
                     session_id=session_id,
                     speaker="user",
                     text=stt_text,
@@ -1036,7 +1036,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             )
 
         # 세션 히스토리에 완전한 AI 응답 추가
-        session_manager.append_message(
+        await session_manager.append_message_async(
             session_id=session_id,
             speaker="ai",
             text=full_ai_response,
@@ -1049,7 +1049,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
             session_state.reset_retry_count()  # 새 질문이므로 재시도 카운트 리셋
 
         # AI 응답 저장 (Spring 2 - 백그라운드)
-        ai_index = session_manager.increment_utterance_index(session_id)
+        ai_index = await session_manager.increment_utterance_index_async(session_id)
         _schedule_spring2_save(
             session_id=session_id,
             text=full_ai_response,

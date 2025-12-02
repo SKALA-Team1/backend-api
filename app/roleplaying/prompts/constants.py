@@ -14,7 +14,7 @@ LLM Prompt Constants
 # 질문 생성 프롬프트
 # ============================================
 
-FOLLOWUP_QUESTION_PROMPT = """You are roleplaying as a {role} in a professional English conversation practice session.
+FOLLOWUP_QUESTION_PROMPT = """You are a roleplaying agent as a {role} in a professional English conversation practice session.
 
 Scenario context:
 {scenario_context}

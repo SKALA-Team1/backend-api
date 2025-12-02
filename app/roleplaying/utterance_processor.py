@@ -82,7 +82,7 @@ class UtteranceProcessor:
     ) -> None:
         """히스토리에 저장"""
         try:
-            session_manager.append_message(
+            await session_manager.append_message_async(
                 session_id=session_id,
                 speaker=speaker,
                 text=text,

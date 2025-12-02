@@ -3,12 +3,6 @@ LLM Service Refactored (SOLID 준수)
 ====================================
 분리된 LLM 서비스들의 Facade
 
-변경 이유:
-- 기존 파일이 818줄로 너무 큼
-- 7개 클래스를 별도 파일로 분리
-- 각 클래스의 책임이 명확해짐
-- 테스트 및 재사용이 용이해짐
-
 구조 (분리됨):
     llm_conversation_analyzer.py    → ConversationAnalyzerImpl
     llm_scenario_generator.py       → ScenarioGeneratorImpl
