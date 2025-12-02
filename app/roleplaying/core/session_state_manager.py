@@ -84,7 +84,6 @@ class SessionState:
         ai_turn_count: AI 턴 카운트 (고정 질문 판단용)
         current_question_text: 현재 질문 보관 (재시도 시 사용)
         current_question_retry_count: 현재 질문 재시도 횟수
-        total_retry_count: 전체 재시도 횟수
         max_retry_per_question: 질문당 최대 재시도 횟수
         feedback_history: 피드백 기록
 
@@ -110,7 +109,6 @@ class SessionState:
     # ========================================
     current_question_text: str = ""
     current_question_retry_count: int = 0
-    total_retry_count: int = 0
     max_retry_per_question: int = 3
     feedback_history: List[dict] = field(default_factory=list)
 
@@ -188,7 +186,6 @@ class SessionState:
     def increment_retry_count(self) -> None:
         """재시도 카운터 증가"""
         self.current_question_retry_count += 1
-        self.total_retry_count += 1
 
     def reset_retry_count(self) -> None:
         """다음 질문으로 진행 시 재시도 카운터 초기화"""
