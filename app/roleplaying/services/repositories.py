@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.config import settings
-from app.roleplaying.schemas import ScenarioDetail
+from app.roleplaying.api_schemas import ScenarioDetail
 from app.roleplaying.services.interfaces import SessionRepository, ScenarioRepository
 
 logger = logging.getLogger(__name__)

@@ -14,7 +14,7 @@ from typing import Awaitable, Callable, Dict, Optional
 
 from fastapi import WebSocket
 
-from app.roleplaying.ws_models import (InitMessage, UserTextMessage,
+from app.roleplaying.ws_message_models import (InitMessage, UserTextMessage,
                                        UtteranceEndMessage)
 
 logger = logging.getLogger(__name__)

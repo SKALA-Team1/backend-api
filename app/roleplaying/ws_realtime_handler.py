@@ -35,9 +35,9 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.config import settings
 from app.integrations.clients.redis_client import RedisSessionValidator
 from app.roleplaying.session_manager import SessionStatus, SessionState, session_manager
-from app.roleplaying.validators import (ErrorHandler, InitStateValidator,
+from app.roleplaying.session_validators import (ErrorHandler, InitStateValidator,
                                         SessionValidator)
-from app.roleplaying.ws_models import (AckMessage, AiTextMessage,
+from app.roleplaying.ws_message_models import (AckMessage, AiTextMessage,
                                        AiTypingMessage, EndSessionMessage,
                                        ErrorMessage, FeedbackMessage,
                                        FeedbackStreamingMessage,
@@ -664,7 +664,7 @@ async def _handle_user_text(
 
         # AI 튜터 서비스를 사용하여 동적 응답 생성 (스트리밍)
         from app.roleplaying.services.ai_tutor_service import ai_tutor_service
-        from app.roleplaying.ws_models import AiTextStreamingMessage
+        from app.roleplaying.ws_message_models import AiTextStreamingMessage
 
         full_ai_response = ""
         is_fixed_question = False
@@ -1022,7 +1022,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                 is_fixed_question = is_fixed
 
                 # ✅ 청크를 즉시 클라이언트에 전송
-                from app.roleplaying.ws_models import AiTextStreamingMessage
+                from app.roleplaying.ws_message_models import AiTextStreamingMessage
                 await websocket.send_json(
                     AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
                 )

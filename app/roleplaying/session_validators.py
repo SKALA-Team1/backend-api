@@ -82,7 +82,7 @@ from fastapi import WebSocket
 
 from app.config import settings
 from app.roleplaying.session_manager import SessionStatus, SessionState, session_manager
-from app.roleplaying.ws_models import ErrorMessage
+from app.roleplaying.ws_message_models import ErrorMessage
 
 logger = logging.getLogger(__name__)
 

@@ -33,7 +33,7 @@ from app.roleplaying.services.interfaces import (
 )
 from app.roleplaying.services.title_utils import compact_title
 from app.roleplaying.services.utils import normalize_questions
-from app.roleplaying.schemas import (
+from app.roleplaying.api_schemas import (
     AnalysisRequestDto,
     AnalysisResultDto,
     SubjectInfoDto,

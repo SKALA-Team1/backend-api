@@ -112,7 +112,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 import logging
 
-from app.roleplaying.schemas import (
+from app.roleplaying.api_schemas import (
     AnalysisRequestDto,
     AnalysisResultDto,
     MessageRole,

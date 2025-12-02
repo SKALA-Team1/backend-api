@@ -1,13 +1,23 @@
 """
-세션 생성 빌더 패턴
-===============================================
+Session Builder (SessionCreationRequest) + Spring 2 Integration Guide
+=====================================================================
 
-역할:
-- 세션 생성 요청 객체화
-- Builder 패턴으로 파라미터 축소
-- 유효성 검증
-# Spring 2 Backend Modification Guide
-## scenario_session 테이블 턴 정보 업데이트
+세션 생성 빌더 패턴 (Builder Pattern)
+
+주요 클래스:
+    - SessionCreationRequest: Fluent API로 세션 생성
+      • with_session_id, with_user_id, with_subject_id
+      • with_roles, with_fixed_questions, with_expiration
+      • validate(), build()
+
+책임:
+    - 세션 생성 요청 매개변수 구성 (Builder Pattern)
+    - 유효성 검증 (validator)
+    - session_manager.create_session() 호출
+
+참고:
+    - 앞부분: 빌더 패턴 구현
+    - 뒷부분: Spring 2 Backend Modification Guide (scenario_session 턴 정보)
 
 ---
 

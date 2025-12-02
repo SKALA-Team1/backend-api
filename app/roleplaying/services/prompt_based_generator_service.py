@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.roleplaying.services.interfaces import ScenarioEnhancer
-from app.roleplaying.schemas import ScenarioInfoDto
+from app.roleplaying.api_schemas import ScenarioInfoDto
 from app.roleplaying.services.title_utils import compact_title
 from app.roleplaying.services.utils import normalize_questions
 
