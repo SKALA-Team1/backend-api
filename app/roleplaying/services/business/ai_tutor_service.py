@@ -22,10 +22,10 @@ AI Tutor Service
 import logging
 from typing import AsyncGenerator, Tuple, Optional
 
-from app.roleplaying.session_manager import SessionState
-from app.roleplaying.services.interfaces import QuestionGenerator
+from app.roleplaying.core.session_state_manager import SessionState
+from app.roleplaying.services.service_interfaces import QuestionGenerator
 from app.roleplaying.prompts.constants import FOLLOWUP_QUESTION_PROMPT
-from app.roleplaying.services.utils import format_conversation_history
+from app.roleplaying.services.utils.service_utils import format_conversation_history
 
 logger = logging.getLogger(__name__)
 

@@ -35,7 +35,7 @@ from fastapi import Depends
 from app.config import settings
 
 if TYPE_CHECKING:
-    from app.roleplaying.services.interfaces import (
+    from app.roleplaying.services.service_interfaces import (
         SessionRepository,
         ScenarioRepository,
     )
@@ -71,7 +71,7 @@ def get_session_repository() -> "SessionRepository":
             )
             return session
     """
-    from app.roleplaying.services.repositories import RedisSessionRepository
+    from app.roleplaying.services.data.data_repositories import RedisSessionRepository
 
     return RedisSessionRepository(redis_url=settings.REDIS_URL)
 
@@ -100,7 +100,7 @@ def get_scenario_repository() -> "ScenarioRepository":
             scenarios = await scenario_repo.find_by_user(user_id)
             return scenarios
     """
-    from app.roleplaying.services.repositories import DatabaseScenarioRepository
+    from app.roleplaying.services.data.data_repositories import DatabaseScenarioRepository
 
     return DatabaseScenarioRepository()
 

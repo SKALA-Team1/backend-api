@@ -18,7 +18,7 @@ LLM Service Refactored (SOLID 준수)
     - 필요시 Facade 패턴으로 확장 가능
 
 사용 예시 (기존과 동일):
-    from app.roleplaying.services.llm_service_refactored import (
+    from app.roleplaying.services.llm.llm_service_refactored import (
         ConversationAnalyzerImpl,
         ScenarioGeneratorImpl,
         QuestionGeneratorImpl,
@@ -33,25 +33,25 @@ LLM Service Refactored (SOLID 준수)
 # 하위 호환성을 위해 모든 서비스를 import하여 재 export
 # ============================================
 
-from app.roleplaying.services.llm_conversation_analyzer import (
+from app.roleplaying.services.llm.llm_conversation_analyzer import (
     ConversationAnalyzerImpl,
 )
-from app.roleplaying.services.llm_scenario_generator import (
+from app.roleplaying.services.llm.llm_scenario_generator import (
     ScenarioGeneratorImpl,
 )
-from app.roleplaying.services.llm_question_generator import (
+from app.roleplaying.services.llm.llm_question_generator import (
     QuestionGeneratorImpl,
 )
-from app.roleplaying.services.llm_ai_response_generator import (
+from app.roleplaying.services.llm.llm_ai_response_generator import (
     AIResponseGeneratorImpl,
 )
-from app.roleplaying.services.llm_message_summarizer import (
+from app.roleplaying.services.llm.llm_message_summarizer import (
     MessageSummarizerImpl,
 )
-from app.roleplaying.services.llm_fixed_question_builder import (
+from app.roleplaying.services.llm.llm_fixed_question_builder import (
     FixedQuestionBuilderImpl,
 )
-from app.roleplaying.services.llm_scenario_enhancer import (
+from app.roleplaying.services.llm.llm_scenario_enhancer import (
     ScenarioEnhancerImpl,
 )
 

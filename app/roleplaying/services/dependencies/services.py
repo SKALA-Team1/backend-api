@@ -49,7 +49,7 @@ from app.roleplaying.services.dependencies.repositories import (
 )
 
 if TYPE_CHECKING:
-    from app.roleplaying.services.interfaces import (
+    from app.roleplaying.services.service_interfaces import (
         QuestionGenerator,
         ConversationAnalyzer,
         ScenarioGenerator,
@@ -91,7 +91,7 @@ def get_ai_tutor_service(
             )
             return {"response": response}
     """
-    from app.roleplaying.services.ai_tutor_service import AITutorService
+    from app.roleplaying.services.business.ai_tutor_service import AITutorService
 
     return AITutorService(question_generator=question_generator)
 
@@ -131,7 +131,7 @@ def get_slack_scenario_service(
             )
             return scenario
     """
-    from app.roleplaying.services.slack_scenario_service import SlackScenarioService
+    from app.roleplaying.services.business.slack_scenario_service import SlackScenarioService
 
     return SlackScenarioService(
         analyzer=analyzer,
@@ -172,7 +172,7 @@ def get_prompt_based_scenario_service(
             )
             return scenario
     """
-    from app.roleplaying.services.prompt_based_generator_service import PromptBasedScenarioService
+    from app.roleplaying.services.business.prompt_scenario_generator_service import PromptBasedScenarioService
 
     return PromptBasedScenarioService(enhancer=enhancer)
 
@@ -213,7 +213,7 @@ def get_session_service(
                 "expires_at": expires_at
             }
     """
-    from app.roleplaying.services.session_service_refactored import SessionServiceImpl
+    from app.roleplaying.services.business.session_service_refactored import SessionServiceImpl
 
     return SessionServiceImpl(
         session_repository=session_repo,

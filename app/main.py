@@ -8,8 +8,8 @@ from fastapi import FastAPI
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import setup_logging
 from app.health.router import router as health_router
-from app.roleplaying.roleplaying_router import router as roleplaying_router
-from app.roleplaying.ws_realtime_handler import router as ws_realtime_router
+from app.roleplaying.api.roleplaying_router import router as roleplaying_router
+from app.roleplaying.handlers.ws_realtime_handler import router as ws_realtime_router
 
 logger = logging.getLogger(__name__)
 

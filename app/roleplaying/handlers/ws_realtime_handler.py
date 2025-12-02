@@ -34,10 +34,10 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from app.config import settings
 from app.integrations.clients.redis_client import RedisSessionValidator
-from app.roleplaying.session_manager import SessionStatus, SessionState, session_manager
-from app.roleplaying.session_validators import (ErrorHandler, InitStateValidator,
+from app.roleplaying.core.session_state_manager import SessionStatus, SessionState, session_manager
+from app.roleplaying.handlers.session_validators import (ErrorHandler, InitStateValidator,
                                         SessionValidator)
-from app.roleplaying.ws_message_models import (AckMessage, AiTextMessage,
+from app.roleplaying.handlers.ws_message_models import (AckMessage, AiTextMessage,
                                        AiTypingMessage, EndSessionMessage,
                                        ErrorMessage, FeedbackMessage,
                                        FeedbackStreamingMessage,
@@ -278,7 +278,7 @@ async def _handle_init(
         )
 
         # STT 스트리밍 세션 생성 (Deepgram WebSocket, SDK 3.x)
-        from app.roleplaying.services.stt_service import stt_service
+        from app.roleplaying.services.stt.speech_to_text_service import stt_service
         try:
             # ✅ SDK 3.x: create_streaming_session()은 이제 비동기
             await stt_service.create_streaming_session(session_id)
@@ -369,7 +369,7 @@ async def _handle_audio_chunk(
         session_manager.append_audio_chunk(session_id, chunk)
 
         # STT 스트리밍 처리 (Deepgram WebSocket)
-        from app.roleplaying.services.stt_service import stt_service
+        from app.roleplaying.services.stt.speech_to_text_service import stt_service
         try:
             partial_text = await stt_service.process_chunk(session_id, chunk)
             if partial_text:
@@ -663,8 +663,8 @@ async def _handle_user_text(
         await websocket.send_json(AiTypingMessage().model_dump())
 
         # AI 튜터 서비스를 사용하여 동적 응답 생성 (스트리밍)
-        from app.roleplaying.services.ai_tutor_service import ai_tutor_service
-        from app.roleplaying.ws_message_models import AiTextStreamingMessage
+        from app.roleplaying.services.business.ai_tutor_service import ai_tutor_service
+        from app.roleplaying.handlers.ws_message_models import AiTextStreamingMessage
 
         full_ai_response = ""
         is_fixed_question = False
@@ -757,8 +757,8 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         # ========================================
         # Step 1: STT 처리 시작 (백그라운드 태스크)
         # ========================================
-        from app.roleplaying.services.stt_service import stt_service
-        from app.roleplaying.services.ai_tutor_service import ai_tutor_service
+        from app.roleplaying.services.stt.speech_to_text_service import stt_service
+        from app.roleplaying.services.business.ai_tutor_service import ai_tutor_service
 
         async def process_stt_and_history(audio_data: bytes) -> Optional[str]:
             """STT 처리 및 히스토리 추가"""
@@ -812,7 +812,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
         # Step 3: 피드백 평가 (실시간)
         # ========================================
         from app.roleplaying.services.dependencies import get_feedback_orchestrator
-        from app.roleplaying.services.azure_usage_tracker import usage_tracker
+        from app.roleplaying.services.utils.azure_usage_tracker import usage_tracker
 
         feedback_orchestrator = get_feedback_orchestrator()
         try:
@@ -1022,7 +1022,7 @@ async def _handle_utterance_end(websocket: WebSocket, session_id: str) -> None:
                 is_fixed_question = is_fixed
 
                 # ✅ 청크를 즉시 클라이언트에 전송
-                from app.roleplaying.ws_message_models import AiTextStreamingMessage
+                from app.roleplaying.handlers.ws_message_models import AiTextStreamingMessage
                 await websocket.send_json(
                     AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
                 )
@@ -1272,7 +1272,7 @@ async def _cleanup_session(session_id: str, reason: str) -> None:
     """세션 정리 (연결 끊김 또는 에러 시)"""
     try:
         # STT 스트리밍 세션 강제 정리 (최종 결과 대기 없이)
-        from app.roleplaying.services.stt_service import stt_service
+        from app.roleplaying.services.stt.speech_to_text_service import stt_service
         try:
             # ✅ cleanup() 사용: finalize_streaming()과 달리 최종 결과를 기다리지 않음
             # 이는 예상치 못한 클라이언트 연결 해제 시 리소스 누수를 방지합니다

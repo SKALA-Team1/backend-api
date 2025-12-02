@@ -27,8 +27,8 @@ import re
 from typing import Dict, List, Optional, Any
 
 from app.config import settings
-from app.roleplaying.services.llm_providers import create_llm_provider
-from app.roleplaying.services.interfaces import (
+from app.roleplaying.services.llm.llm_provider_factory import create_llm_provider
+from app.roleplaying.services.service_interfaces import (
     PronunciationEvaluator,
     GrammarEvaluator,
     RelevanceEvaluator,
@@ -39,7 +39,7 @@ from app.roleplaying.prompts.constants import (
     GRAMMAR_EVALUATION_PROMPT,
     RELEVANCE_EVALUATION_PROMPT,
 )
-from app.roleplaying.services.utils import (
+from app.roleplaying.services.utils.service_utils import (
     extract_json_from_response,
     normalize_score,
     normalize_score_from_string,

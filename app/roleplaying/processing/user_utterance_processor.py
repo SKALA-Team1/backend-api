@@ -15,7 +15,7 @@ from typing import Optional
 
 from app.config import settings
 from app.integrations.clients.spring2_client import spring2_client
-from app.roleplaying.session_manager import session_manager
+from app.roleplaying.core.session_state_manager import session_manager
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class UtteranceProcessor:
             인식된 텍스트 또는 None (침묵 감지)
         """
         try:
-            from app.roleplaying.services.stt_service import stt_service
+            from app.roleplaying.services.stt.speech_to_text_service import stt_service
 
             stt_text = await stt_service.transcribe(audio_data)
 

@@ -13,7 +13,7 @@ import logging
 from abc import ABC
 
 from app.core.settings import settings
-from app.roleplaying.services.llm_providers import create_llm_provider
+from app.roleplaying.services.llm.llm_provider_factory import create_llm_provider
 
 logger = logging.getLogger(__name__)
 

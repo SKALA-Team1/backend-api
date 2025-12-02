@@ -15,7 +15,7 @@ from typing import Optional
 from deepgram import DeepgramClient
 
 from app.config import settings
-from app.roleplaying.services.audio_converter import AudioConverter
+from app.roleplaying.services.stt.audio_converter import AudioConverter
 
 logger = logging.getLogger(__name__)
 

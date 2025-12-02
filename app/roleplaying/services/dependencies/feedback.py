@@ -37,7 +37,7 @@ from fastapi import Depends
 from app.config import settings
 
 if TYPE_CHECKING:
-    from app.roleplaying.services.interfaces import (
+    from app.roleplaying.services.service_interfaces import (
         PronunciationEvaluator,
         GrammarEvaluator,
         RelevanceEvaluator,
@@ -65,7 +65,7 @@ def get_pronunciation_evaluator() -> "PronunciationEvaluator":
     Note:
         Azure Speech Services는 별도 인증키 필요
     """
-    from app.roleplaying.services.azure_speech_service import AzureSpeechService
+    from app.roleplaying.services.feedback.azure_speech_service import AzureSpeechService
 
     return AzureSpeechService()
 
@@ -85,7 +85,7 @@ def get_grammar_evaluator() -> "GrammarEvaluator":
         LLM 공급자는 settings.FEEDBACK_LLM_PROVIDER로 선택
         (기본: OpenAI, 확장 가능)
     """
-    from app.roleplaying.services.feedback_service_refactored import GrammarEvaluatorImpl
+    from app.roleplaying.services.feedback.feedback_service_refactored import GrammarEvaluatorImpl
 
     return GrammarEvaluatorImpl(
         provider=settings.FEEDBACK_LLM_PROVIDER,
@@ -109,7 +109,7 @@ def get_relevance_evaluator() -> "RelevanceEvaluator":
     Note:
         LLM 공급자는 settings.FEEDBACK_LLM_PROVIDER로 선택
     """
-    from app.roleplaying.services.feedback_service_refactored import RelevanceEvaluatorImpl
+    from app.roleplaying.services.feedback.feedback_service_refactored import RelevanceEvaluatorImpl
 
     return RelevanceEvaluatorImpl(
         provider=settings.FEEDBACK_LLM_PROVIDER,
@@ -131,7 +131,7 @@ def get_feedback_judge() -> "FeedbackJudge":
     Returns:
         FeedbackJudge 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.feedback_service_refactored import FeedbackJudgeImpl
+    from app.roleplaying.services.feedback.feedback_service_refactored import FeedbackJudgeImpl
 
     return FeedbackJudgeImpl()
 
@@ -156,7 +156,7 @@ def get_feedback_orchestrator() -> "FeedbackOrchestrator":
         - FeedbackJudge: 판단
         - AzureUsageTracker: 사용량 추적
     """
-    from app.roleplaying.services.feedback_service_refactored import FeedbackOrchestratorImpl
+    from app.roleplaying.services.feedback.feedback_service_refactored import FeedbackOrchestratorImpl
 
     return FeedbackOrchestratorImpl(
         grammar_evaluator=get_grammar_evaluator(),
@@ -196,7 +196,7 @@ def get_azure_usage_tracker():
     Returns:
         AzureUsageTracker 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.azure_usage_tracker import AzureUsageTracker
+    from app.roleplaying.services.utils.azure_usage_tracker import AzureUsageTracker
 
     return AzureUsageTracker()
 

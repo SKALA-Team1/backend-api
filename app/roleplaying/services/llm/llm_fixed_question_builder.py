@@ -26,9 +26,9 @@ import logging
 from typing import List, Dict, Any
 
 from app.config import settings
-from app.roleplaying.services.llm_base import LLMServiceBase
+from app.roleplaying.services.llm.llm_base import LLMServiceBase
 from app.roleplaying.prompts.constants import FIXED_QUESTIONS_PROMPT
-from app.roleplaying.services.utils import (
+from app.roleplaying.services.utils.service_utils import (
     extract_json_from_response,
     normalize_questions,
     validate_questions_count,

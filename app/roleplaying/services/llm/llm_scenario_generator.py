@@ -28,9 +28,9 @@ import logging
 from typing import Dict, Any, AsyncGenerator
 
 from app.config import settings
-from app.roleplaying.services.llm_base import LLMServiceBase
+from app.roleplaying.services.llm.llm_base import LLMServiceBase
 from app.roleplaying.prompts.constants import SCENARIO_GENERATION_PROMPT
-from app.roleplaying.services.utils import (
+from app.roleplaying.services.utils.service_utils import (
     extract_json_from_response,
     normalize_questions,
 )

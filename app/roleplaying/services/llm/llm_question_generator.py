@@ -26,9 +26,9 @@ import logging
 from typing import Dict, Any, List
 
 from app.config import settings
-from app.roleplaying.services.llm_base import LLMServiceBase
+from app.roleplaying.services.llm.llm_base import LLMServiceBase
 from app.roleplaying.prompts.constants import NEXT_QUESTION_PROMPT
-from app.roleplaying.services.utils import format_conversation_history_korean
+from app.roleplaying.services.utils.service_utils import format_conversation_history_korean
 
 logger = logging.getLogger(__name__)
 

@@ -34,7 +34,7 @@ from fastapi import Depends
 from app.config import settings
 
 if TYPE_CHECKING:
-    from app.roleplaying.services.interfaces import (
+    from app.roleplaying.services.service_interfaces import (
         ConversationAnalyzer,
         ScenarioGenerator,
         QuestionGenerator,
@@ -61,7 +61,7 @@ def get_conversation_analyzer() -> "ConversationAnalyzer":
     Returns:
         ConversationAnalyzer 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.llm_service_refactored import ConversationAnalyzerImpl
+    from app.roleplaying.services.llm.llm_service_refactored import ConversationAnalyzerImpl
 
     return ConversationAnalyzerImpl(
         api_key=settings.openai_api_key,
@@ -81,7 +81,7 @@ def get_scenario_generator() -> "ScenarioGenerator":
     Returns:
         ScenarioGenerator 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.llm_service_refactored import ScenarioGeneratorImpl
+    from app.roleplaying.services.llm.llm_service_refactored import ScenarioGeneratorImpl
 
     return ScenarioGeneratorImpl(
         api_key=settings.openai_api_key,
@@ -101,7 +101,7 @@ def get_question_generator() -> "QuestionGenerator":
     Returns:
         QuestionGenerator 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.llm_service_refactored import QuestionGeneratorImpl
+    from app.roleplaying.services.llm.llm_service_refactored import QuestionGeneratorImpl
 
     return QuestionGeneratorImpl(
         api_key=settings.openai_api_key,
@@ -121,7 +121,7 @@ def get_ai_response_generator() -> "AIResponseGenerator":
     Returns:
         AIResponseGenerator 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.llm_service_refactored import AIResponseGeneratorImpl
+    from app.roleplaying.services.llm.llm_service_refactored import AIResponseGeneratorImpl
 
     return AIResponseGeneratorImpl(
         api_key=settings.openai_api_key,
@@ -141,7 +141,7 @@ def get_message_summarizer() -> "MessageSummarizer":
     Returns:
         MessageSummarizer 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.llm_service_refactored import MessageSummarizerImpl
+    from app.roleplaying.services.llm.llm_service_refactored import MessageSummarizerImpl
 
     return MessageSummarizerImpl(
         api_key=settings.openai_api_key,
@@ -161,7 +161,7 @@ def get_fixed_question_builder() -> "FixedQuestionBuilder":
     Returns:
         FixedQuestionBuilder 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.llm_service_refactored import FixedQuestionBuilderImpl
+    from app.roleplaying.services.llm.llm_service_refactored import FixedQuestionBuilderImpl
 
     return FixedQuestionBuilderImpl(
         api_key=settings.openai_api_key,
@@ -181,7 +181,7 @@ def get_scenario_enhancer() -> "ScenarioEnhancer":
     Returns:
         ScenarioEnhancer 인스턴스 (싱글톤)
     """
-    from app.roleplaying.services.llm_service_refactored import ScenarioEnhancerImpl
+    from app.roleplaying.services.llm.llm_service_refactored import ScenarioEnhancerImpl
 
     return ScenarioEnhancerImpl(
         api_key=settings.openai_api_key,

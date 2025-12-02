@@ -12,9 +12,9 @@ import logging
 from typing import Optional
 
 from app.config import settings
-from app.roleplaying.services.audio_converter import AudioConverter
-from app.roleplaying.services.batch_stt_engine import BatchSTTEngine
-from app.roleplaying.services.streaming_stt_manager import (
+from app.roleplaying.services.stt.audio_converter import AudioConverter
+from app.roleplaying.services.stt.batch_speech_to_text_engine import BatchSTTEngine
+from app.roleplaying.services.stt.streaming_speech_to_text_manager import (
     StreamingSTTManager,
     StreamingSTTSession,
 )

@@ -25,15 +25,15 @@ import asyncio
 from dataclasses import dataclass
 from typing import List, Optional
 
-from app.roleplaying.services.interfaces import (
+from app.roleplaying.services.service_interfaces import (
     ConversationAnalyzer,
     ScenarioGenerator,
     MessageSummarizer,
     FixedQuestionBuilder
 )
-from app.roleplaying.services.title_utils import compact_title
-from app.roleplaying.services.utils import normalize_questions
-from app.roleplaying.api_schemas import (
+from app.roleplaying.services.utils.scenario_title_utils import compact_title
+from app.roleplaying.services.utils.service_utils import normalize_questions
+from app.roleplaying.api.api_schemas import (
     AnalysisRequestDto,
     AnalysisResultDto,
     SubjectInfoDto,

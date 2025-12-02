@@ -21,10 +21,10 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.roleplaying.services.interfaces import ScenarioEnhancer
-from app.roleplaying.api_schemas import ScenarioInfoDto
-from app.roleplaying.services.title_utils import compact_title
-from app.roleplaying.services.utils import normalize_questions
+from app.roleplaying.services.service_interfaces import ScenarioEnhancer
+from app.roleplaying.api.api_schemas import ScenarioInfoDto
+from app.roleplaying.services.utils.scenario_title_utils import compact_title
+from app.roleplaying.services.utils.service_utils import normalize_questions
 
 logger = logging.getLogger(__name__)
 
