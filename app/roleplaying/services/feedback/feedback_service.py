@@ -556,13 +556,23 @@ class FeedbackOrchestratorImpl:
             eval_start = time.time()
             logger.info("📊 [병렬 평가 시작] 발음, 문법, 맥락 평가 중...")
 
-            pronunciation, grammar, relevance = await asyncio.gather(
-                self.pronunciation_evaluator.evaluate_pronunciation(audio_data, user_text),
-                self.grammar_evaluator.evaluate_grammar(user_text),
-                self.relevance_evaluator.evaluate_relevance(
-                    user_text, conversation_history, scenario_context
+            if audio_data:
+                pronunciation, grammar, relevance = await asyncio.gather(
+                    self.pronunciation_evaluator.evaluate_pronunciation(audio_data, user_text),
+                    self.grammar_evaluator.evaluate_grammar(user_text),
+                    self.relevance_evaluator.evaluate_relevance(
+                        user_text, conversation_history, scenario_context
+                    )
                 )
-            )
+            else:
+                logger.debug("Skipping pronunciation evaluation (no audio data)")
+                grammar, relevance = await asyncio.gather(
+                    self.grammar_evaluator.evaluate_grammar(user_text),
+                    self.relevance_evaluator.evaluate_relevance(
+                        user_text, conversation_history, scenario_context
+                    )
+                )
+                pronunciation = None
 
             eval_time = time.time() - eval_start
             logger.info(f"✅ [병렬 평가 완료] 소요 시간: {eval_time:.2f}초")
@@ -572,9 +582,9 @@ class FeedbackOrchestratorImpl:
             grammar_score = normalize_score(grammar.get("score") if grammar else None)
             relevance_score = normalize_score(relevance.get("score") if relevance else None)
 
-            logger.info(f"  - 발음: {pronunciation_score or '?'}점")
-            logger.info(f"  - 문법: {grammar_score or '?'}점")
-            logger.info(f"  - 맥락: {relevance_score or '?'}점")
+            logger.info(f"  - 발음: {pronunciation_score if pronunciation_score is not None else '?'}점")
+            logger.info(f"  - 문법: {grammar_score if grammar_score is not None else '?'}점")
+            logger.info(f"  - 맥락: {relevance_score if relevance_score is not None else '?'}점")
 
             # 종합 점수 (성공한 항목만으로 평균 계산)
             scores_list = [s for s in [pronunciation_score, grammar_score, relevance_score] if s is not None]
@@ -607,6 +617,15 @@ class FeedbackOrchestratorImpl:
             logger.info(f"🎉 [피드백 평가 전체 완료] 총 소요 시간: {total_time:.2f}초")
             logger.info(f"   종합 점수: {overall_score}점 | 교정 필요: {needs_correction}")
 
+            feedback_sections = self._build_feedback_sections(
+                pronunciation,
+                grammar,
+                relevance,
+                pronunciation_score,
+                grammar_score,
+                relevance_score
+            )
+
             return {
                 "needs_correction": needs_correction,
                 "primary_issue": primary_issue,
@@ -616,14 +635,14 @@ class FeedbackOrchestratorImpl:
                     "relevance_score": int(relevance_score) if relevance_score is not None else None,
                     "overall_score": int(overall_score) if overall_score is not None else None
                 },
+                "feedback_sections": feedback_sections,
                 "feedback_text": feedback_text,
                 "retry_count": retry_count
             }
 
         except Exception as e:
             logger.error(f"Response evaluation failed: {e}", exc_info=True)
-            # 호출자가 None을 받아 처리 (feedback 없이 진행)
-            return None
+            raise
 
     async def _generate_feedback_text(
         self,
@@ -682,3 +701,63 @@ class FeedbackOrchestratorImpl:
         except Exception as e:
             logger.error(f"Feedback generation failed: {e}")
             return "평가를 완료했습니다."
+
+    def _build_feedback_sections(
+        self,
+        pronunciation: Optional[Dict],
+        grammar: Optional[Dict],
+        relevance: Optional[Dict],
+        pronunciation_score: Optional[int],
+        grammar_score: Optional[int],
+        relevance_score: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        """피드백 섹션(영문) 구성"""
+        sections: List[Dict[str, Any]] = []
+
+        sections.append(
+            self._build_single_section(
+                section_type="pronunciation",
+                evaluation=pronunciation,
+                score=pronunciation_score,
+                fallback="Pronunciation feedback is unavailable."
+            )
+        )
+        sections.append(
+            self._build_single_section(
+                section_type="grammar",
+                evaluation=grammar,
+                score=grammar_score,
+                fallback="Grammar feedback is unavailable."
+            )
+        )
+        sections.append(
+            self._build_single_section(
+                section_type="relevance",
+                evaluation=relevance,
+                score=relevance_score,
+                fallback="Relevance feedback is unavailable."
+            )
+        )
+
+        return sections
+
+    def _build_single_section(
+        self,
+        section_type: str,
+        evaluation: Optional[Dict[str, Any]],
+        score: Optional[int],
+        fallback: str
+    ) -> Dict[str, Any]:
+        """개별 섹션 포맷"""
+        feedback_text = ""
+        if evaluation and isinstance(evaluation, dict):
+            feedback_text = evaluation.get("feedback") or ""
+        feedback_text = feedback_text.strip() or fallback
+
+        normalized_score = int(score) if isinstance(score, (int, float)) else None
+
+        return {
+            "type": section_type,
+            "feedback_en": feedback_text,
+            "score": normalized_score,
+        }

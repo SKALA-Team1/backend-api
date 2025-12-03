@@ -160,16 +160,15 @@ class SessionState:
 
     def has_reached_turn_limit(self, max_turns: int) -> bool:
         """
-        주어진 턴 수(사용자+AI 쌍) 이상 진행되었는지 판단
+        주어진 턴 수(AI 7번 질문 + 사용자 7번 답변) 이상 진행되었는지 판단
+
+        AI가 max_turns번 질문하고 사용자가 max_turns번 답변한 후 세션 종료
 
         Args:
-            max_turns: 허용된 최대 턴 수 (AI+사용자 = 2개의 메시지)
+            max_turns: 허용된 최대 턴 수 (AI 질문 수와 사용자 답변 수)
         """
-        turn_pair_limit = (
-            self.ai_turn_count >= max_turns and self.user_turn_count >= max_turns
-        )
-        message_limit = self.utterance_index >= max_turns * 2
-        return turn_pair_limit or message_limit
+        # AI가 max_turns번 질문하고 사용자가 max_turns번 답변했는지 확인
+        return self.ai_turn_count >= max_turns and self.user_turn_count >= max_turns
 
     # ========================================
     # Feedback & Retry Methods

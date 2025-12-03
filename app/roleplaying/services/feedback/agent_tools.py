@@ -93,6 +93,8 @@ async def evaluate_response_tool(
             "feedback_text": result.get("feedback_text", ""),
             "needs_correction": result.get("needs_correction", False),
             "primary_issue": result.get("primary_issue", "none"),
+            "feedback_sections": result.get("feedback_sections", []),
+            "retry_count": result.get("retry_count", retry_count),
         }
 
     except Exception as e:
@@ -105,6 +107,8 @@ async def evaluate_response_tool(
             "feedback_text": "",
             "needs_correction": False,
             "primary_issue": "tool_error",
+            "feedback_sections": [],
+            "retry_count": retry_count,
         }
 
 

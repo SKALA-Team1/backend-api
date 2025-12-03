@@ -109,16 +109,26 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
 
         first_ai_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
 
-        # Spring 2 저장은 비동기로 (첫 질문이므로 피드백 없음)
+        # Spring 2 저장 (첫 질문은 고정 질문이므로 한글 + 키워드 포함해야 함)
         import asyncio
-        from app.roleplaying.handlers._common import _schedule_spring2_save
+        from app.roleplaying.handlers._common import _save_question_with_keywords
 
-        asyncio.create_task(_schedule_spring2_save(
-            session_id=session_id,
-            text=first_question,
-            utterance_index=first_ai_index,
-            speaker="AI",
-        ))
+        try:
+            await _save_question_with_keywords(
+                session_id=session_id,
+                question_en=first_question,
+                turn_number=1,
+                utterance_index=first_ai_index,
+                user_role=init_msg.myRole,
+                ai_role=init_msg.aiRole,
+                scenario_context=init_msg.subjectId,
+                session_state=session_state,
+                slack_message=None,
+                is_fixed_question=True,  # ✅ 고정 질문임을 명시
+            )
+            logger.info(f"✅ First fixed question saved: session={session_id}, index={first_ai_index}")
+        except Exception as e:
+            logger.error(f"❌ Failed to save first fixed question: {e}", exc_info=True)
 
         # 클라이언트에 전송
         ai_msg = AiTextMessage(text=first_question, is_fixed_question=True)

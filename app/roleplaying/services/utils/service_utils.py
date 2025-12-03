@@ -178,8 +178,8 @@ def normalize_score(
     score: Any,
     min_val: int = 0,
     max_val: int = 100,
-    default: int = 70
-) -> int:
+    default: Optional[int] = None
+) -> Optional[int]:
     """
     점수를 지정된 범위 내로 정규화합니다.
 
@@ -190,7 +190,7 @@ def normalize_score(
         default: 파싱 실패 시 기본값
 
     Returns:
-        정규화된 정수 점수
+        정규화된 정수 점수 또는 기본값(default)
     """
     try:
         int_score = int(score)
@@ -204,8 +204,8 @@ def normalize_score_from_string(
     text: str,
     min_val: int = 0,
     max_val: int = 100,
-    default: int = 70
-) -> int:
+    default: Optional[int] = None
+) -> Optional[int]:
     """
     텍스트에서 숫자를 찾아 점수로 정규화합니다.
 
@@ -216,8 +216,11 @@ def normalize_score_from_string(
         default: 찾지 못한 경우 기본값
 
     Returns:
-        정규화된 정수 점수
+        정규화된 정수 점수 또는 기본값(default)
     """
+    if not text:
+        return default
+
     match = re.search(r'\d+', text)
     if match:
         return normalize_score(match.group(), min_val, max_val, default)

@@ -196,6 +196,8 @@ class FeedbackDecisionAgentImpl:
                     "feedback_text": filtered_feedback,
                     "needs_correction": evaluation_result.get("needs_correction", False),
                     "primary_issue": primary_issue,
+                    "feedback_sections": evaluation_result.get("feedback_sections", []),
+                    "retry_count": evaluation_result.get("retry_count", retry_count),
                 }
 
             logger.info(

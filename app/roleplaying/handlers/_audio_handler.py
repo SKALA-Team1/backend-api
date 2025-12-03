@@ -39,6 +39,7 @@ from app.roleplaying.handlers._common import (
 from app.roleplaying.handlers.session_validators import ErrorHandler
 from app.roleplaying.handlers.ws_message_models import (
     AiTypingMessage,
+    ErrorMessage,
     SttFinalMessage,
     UtteranceSavedMessage,
 )
@@ -155,21 +156,14 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             except Exception as e:
                 logger.warning(f"Failed to increment Azure usage: {e}")
 
-        # 피드백 메시지 전송 및 재시도 확인
-        if await _send_feedback_messages(
-            websocket=websocket,
-            session_id=session_id,
-            session_state=session_state,
-            feedback_result=feedback_result,
-        ):
-            # 재시도 필요 - early return
-            return
-
-        # Step 3: Spring 2에 사용자 발화 저장
+        # Step 3: 🔑 항상 먼저 index를 증가 (Retry든 Success든 상관없이)
+        logger.info(f"🔼 Before increment: session={session_id}")
         utterance_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
+        logger.info(f"🔼 After increment: session={session_id}, index={utterance_index}")
 
-        async def _save_user_utterance():
-            await _save_utterance_with_feedback(
+        # Step 4: 사용자 발화 DB에 저장 (항상 저장)
+        try:
+            result = await _save_utterance_with_feedback(
                 session_id=session_id,
                 speaker="user",
                 text=stt_text,
@@ -179,17 +173,38 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
                 session_state=session_state,
                 feedback_result=feedback_result,
             )
-
-        task = asyncio.create_task(_save_user_utterance())
-        task.add_done_callback(lambda t: _handle_task_error(t, f"save_utterance(session={session_id})"))
+            logger.info(f"✅ User utterance saved to Spring2: session={session_id}, index={utterance_index}")
+        except Exception as e:
+            logger.error(f"❌ Failed to save user utterance: session={session_id}, error={e}", exc_info=True)
+            await websocket.send_json(
+                ErrorMessage(message="Failed to save user utterance", code="DB_SAVE_ERROR").model_dump()
+            )
 
         await websocket.send_json(UtteranceSavedMessage(index=utterance_index).model_dump())
 
-        # 턴 제한 확인
-        if await _check_turn_limit(websocket, session_id, session_state):
+        # Step 5: 피드백 메시지 전송 및 재시도 확인
+        needs_retry = await _send_feedback_messages(
+            websocket=websocket,
+            session_id=session_id,
+            session_state=session_state,
+            feedback_result=feedback_result,
+        )
+
+        # Step 6: Retry일 때는 조기 종료 (AI 응답 생성 안 함)
+        if needs_retry:
+            logger.info(f"Retry required for session={session_id}, exiting without generating AI response")
             return
 
-        # Step 4: AI 응답 생성
+        # Step 7: 🔑 다음 AI 질문이 8번째가 될 것인지 미리 확인 (생성 전)
+        next_ai_turn = session_state.get_ai_turn_number() if session_state else 1
+        if next_ai_turn > 7:
+            logger.info(f"Turn limit reached: next_ai_turn={next_ai_turn}, ending session")
+            from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
+            await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
+            await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
+            return
+
+        # Step 8: AI 응답 생성 (정상 응답일 때만)
         await websocket.send_json(AiTypingMessage().model_dump())
 
         full_ai_response, is_fixed_question = await _generate_and_stream_ai_response(
@@ -199,35 +214,32 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             user_text=stt_text,
         )
 
+        # Step 8: AI 질문 저장
         ai_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
-        await _schedule_spring2_save(
-            session_id=session_id,
-            text=full_ai_response,
-            utterance_index=ai_index,
-            speaker="AI",
-            played_turns=session_state.ai_turn_count if session_state else None,
-            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
-            status="IN_PROGRESS",
-        )
-
-        # Step 5: AI 질문 저장 (바이링궐 + 추천 키워드)
         turn_number = session_state.get_ai_turn_number() if session_state else 1
-        await _save_question_with_keywords(
-            session_id=session_id,
-            question_en=full_ai_response,
-            turn_number=turn_number,
-            user_role=session_state.my_role if session_state else "User",
-            ai_role=session_state.ai_role if session_state else "AI",
-            scenario_context=session_state.subject_id if session_state else "",
-            slack_message=None,  # TODO: slack_message를 session_state에서 가져오기
-            is_fixed_question=is_fixed_question,
-        )
+
+        # AI 질문 저장 (즉시 동기 실행 + 에러 처리)
+        try:
+            await _save_question_with_keywords(
+                session_id=session_id,
+                question_en=full_ai_response,
+                turn_number=turn_number,
+                utterance_index=ai_index,
+                user_role=session_state.my_role if session_state else "User",
+                ai_role=session_state.ai_role if session_state else "AI",
+                scenario_context=session_state.subject_id if session_state else "",
+                session_state=session_state,
+                slack_message=None,  # TODO: slack_message를 session_state에서 가져오기
+                is_fixed_question=is_fixed_question,
+            )
+            logger.info(f"✅ AI question saved: session={session_id}, index={ai_index}, turn={turn_number}")
+        except Exception as e:
+            logger.error(f"❌ Failed to save AI question: session={session_id}, error={e}", exc_info=True)
+            await websocket.send_json(
+                ErrorMessage(message="Failed to save AI question", code="AI_SAVE_ERROR").model_dump()
+            )
 
         logger.info(f"AI response completed: {full_ai_response[:50]}...")
-
-        # 턴 제한 재확인
-        if await _check_turn_limit(websocket, session_id, session_state):
-            return
 
     except Exception as e:
         logger.error(f"Utterance end handler error: {e}", exc_info=True)

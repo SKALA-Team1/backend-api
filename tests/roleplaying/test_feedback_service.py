@@ -68,8 +68,7 @@ class TestGrammarEvaluatorImpl:
 
         result = await evaluator.evaluate_grammar("Any text")
 
-        assert result["score"] == 70
-        assert "error" in result["feedback"].lower()
+        assert result is None
 
 
 class TestRelevanceEvaluatorImpl:
@@ -258,6 +257,9 @@ class TestFeedbackOrchestratorImpl:
         assert "scores" in result
         assert result["needs_correction"] is False
         assert "feedback_text" in result
+        assert "feedback_sections" in result
+        assert len(result["feedback_sections"]) == 3
+        assert result["feedback_sections"][0]["type"] == "pronunciation"
 
     @pytest.mark.asyncio
     async def test_evaluate_response_fast_with_correction_needed(
@@ -315,15 +317,11 @@ class TestFeedbackOrchestratorImpl:
         # 예외 발생
         mock_grammar_evaluator.evaluate_grammar.side_effect = Exception("Error")
 
-        result = await orchestrator.evaluate_response_fast(
-            user_text="Any text",
-            audio_data=None,
-            conversation_history=[],
-            scenario_context={},
-            retry_count=0
-        )
-
-        # Fallback 응답 반환
-        assert result["needs_correction"] is False
-        assert result["primary_issue"] == "error"
-        assert result["scores"]["overall_score"] == 70
+        with pytest.raises(Exception):
+            await orchestrator.evaluate_response_fast(
+                user_text="Any text",
+                audio_data=None,
+                conversation_history=[],
+                scenario_context={},
+                retry_count=0
+            )

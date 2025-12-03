@@ -84,14 +84,19 @@ class Spring2Client:
         feedback_text: Optional[str] = None,
         needs_correction: Optional[bool] = None,
         retry_count: Optional[int] = None,
+        primary_issue: Optional[str] = None,
+        feedback_sections: Optional[list] = None,
+        question_ko: Optional[str] = None,
+        recommended_keywords: Optional[list] = None,
     ) -> dict:
         """
-        발화 저장 API 호출
+        발화 저장 API 호출 (바이링궐 피드백 포함)
 
         Spring 2는:
         1. (오디오 있을 경우) S3에 오디오 업로드: s3://skala/sessions/{session_id}/utterance_{index}.wav
-        2. MySQL에 메타데이터 저장 (텍스트는 항상 저장)
-        3. scenario_session 테이블 업데이트 (turnCount, completedAllTurns, status 등)
+        2. MySQL의 scenario_message에 메타데이터 저장 (텍스트, 피드백 등)
+        3. scenario_message.feedback_sections에 구조화된 바이링궐 피드백 저장 (NEW)
+        4. scenario_session 테이블 업데이트 (turnCount, completedAllTurns, status 등)
 
         Args:
             session_id: 세션 ID
@@ -109,6 +114,17 @@ class Spring2Client:
             feedback_text: 피드백 메시지 (없으면 None)
             needs_correction: 재시도 필요 여부
             retry_count: 현재 재시도 횟수
+            primary_issue: 피드백 이슈 분류 (pronunciation, grammar, relevance 등)
+            feedback_sections: 구조화된 바이링궐 피드백 (NEW - optional)
+                [
+                    {
+                        "type": "pronunciation",
+                        "feedback_en": "...",
+                        "feedback_ko": "...",
+                        "score": 70
+                    },
+                    ...
+                ]
 
         Returns:
             API 응답 ({"success": true, "s3_url": "...", "utterance_id": 123})
@@ -166,21 +182,42 @@ class Spring2Client:
                 payload["audio"] = base64.b64encode(audio_data).decode('utf-8')
 
             # Feedback metadata (nullable)
+            # needs_correction: Convert Python Boolean to Integer (0/1) for DB
+            needs_correction_int = None
+            if needs_correction is not None:
+                needs_correction_int = 1 if needs_correction else 0
+
             payload.update(
                 pronunciation_score=pronunciation_score,
                 grammar_score=grammar_score,
                 relevance_score=relevance_score,
                 overall_score=overall_score,
                 feedback_text=feedback_text,
-                needs_correction=needs_correction,
+                needs_correction=needs_correction_int,  # ✅ Integer 0/1
                 retry_count=retry_count,
+                primary_issue=primary_issue,
             )
 
+            # Structured bilingual feedback sections (NEW - optional)
+            if feedback_sections:
+                payload["feedback_sections"] = feedback_sections
+
+            # AI question fields (bilingual + keywords) - stored directly in scenario_message
+            if question_ko:
+                payload["question_ko"] = question_ko
+            if recommended_keywords:
+                payload["recommended_keywords"] = recommended_keywords
+
+            logger.info(f"📤 [Spring2] Sending payload: {payload}")
+
             response = await client.post(url, json=payload)
+
+            logger.info(f"📥 [Spring2] Response status: {response.status_code}")
 
             response.raise_for_status()
 
             result = response.json()
+            logger.info(f"📥 [Spring2] Response body: {result}")
 
             if audio_data:
                 logger.info(
@@ -381,94 +418,6 @@ class Spring2Client:
 
         except Exception as e:
             logger.error(f"Question save error: {e}", exc_info=True)
-            raise
-
-    async def save_feedback(
-        self,
-        session_id: str,
-        turn_number: int,
-        utterance_id: str,
-        feedback_type: str,
-        scores: dict,
-        feedback_sections: list,
-        needs_correction: bool = False,
-        primary_issue: Optional[str] = None,
-        retry_count: int = 0,
-        max_retries: int = 3,
-    ) -> dict:
-        """
-        피드백 저장 (바이링궐 섹션 포함)
-
-        Args:
-            session_id: 세션 ID
-            turn_number: 턴 번호
-            utterance_id: 발화 ID
-            feedback_type: 피드백 타입 ("pronunciation", "grammar", "relevance", "combined")
-            scores: 점수 딕셔너리
-                {
-                    "pronunciation_score": int,
-                    "grammar_score": int,
-                    "relevance_score": int,
-                    "overall_score": int
-                }
-            feedback_sections: 피드백 섹션 리스트
-                [
-                    {
-                        "type": "pronunciation",
-                        "feedback_en": "...",
-                        "feedback_ko": "...",
-                        "score": int
-                    },
-                    ...
-                ]
-            needs_correction: 재시도 필요 여부
-            primary_issue: 주요 문제 ("pronunciation", "grammar", "relevance", "none")
-            retry_count: 현재 재시도 횟수
-            max_retries: 최대 재시도 횟수
-
-        Returns:
-            API 응답 ({"success": true, "feedback_id": "...", ...})
-
-        Raises:
-            httpx.HTTPStatusError: HTTP 에러 발생 시
-        """
-        url = f"/internal/sessions/{session_id}/feedback"
-
-        payload = {
-            "turn_number": turn_number,
-            "utterance_id": utterance_id,
-            "feedback_type": feedback_type,
-            "scores": scores,
-            "feedback_sections": feedback_sections,
-            "needs_correction": needs_correction,
-            "retry_count": retry_count,
-            "max_retries": max_retries,
-        }
-
-        if primary_issue:
-            payload["primary_issue"] = primary_issue
-
-        try:
-            client = await self._get_client()
-            response = await client.post(url, json=payload)
-            response.raise_for_status()
-
-            result = response.json()
-            logger.info(
-                f"Feedback saved: session={session_id}, turn={turn_number}, "
-                f"feedback_id={result.get('feedback_id')}, type={feedback_type}"
-            )
-            return result
-
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Failed to save feedback: session={session_id}, turn={turn_number}, "
-                f"status={e.response.status_code}, error={e}"
-            )
-            raise
-
-        except Exception as e:
-            logger.error(f"Feedback save error: {e}", exc_info=True)
             raise
 
     async def close(self):

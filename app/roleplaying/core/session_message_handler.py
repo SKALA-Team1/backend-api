@@ -12,6 +12,7 @@ Session Message Handler
 
 메서드:
     - append_message_async(): 메시지 추가 (비동기, 스레드 안전)
+    - get_utterance_index_async(): 발화 인덱스 조회 (증가 안 함, Retry 시 사용)
     - increment_utterance_index_async(): 발화 인덱스 증가 (비동기, 스레드 안전)
 
 동시성 모델:
@@ -80,6 +81,32 @@ class SessionMessageHandler:
                 f"Message added to session {session_id}: {speaker} "
                 f"(turn {session.ai_turn_count if speaker == 'ai' else 'N/A'})"
             )
+
+    @staticmethod
+    async def get_utterance_index_async(session_id: str) -> int:
+        """
+        현재 발화 인덱스 조회 (증가 안 함, 비동기, 스레드 안전)
+
+        - Race condition 방지: asyncio.Lock 사용
+        - 인덱스를 증가시키지 않음 (Retry 시 사용)
+
+        Args:
+            session_id: 세션 ID
+
+        Returns:
+            현재 발화 인덱스 (증가 전)
+
+        Raises:
+            ValueError: 세션이 존재하지 않는 경우
+        """
+        lock = session_manager._get_lock(session_id)
+        async with lock:
+            session = session_manager.get_session(session_id)
+            if not session:
+                raise ValueError(f"Session {session_id} not found")
+
+            logger.debug(f"Utterance index retrieved for session {session_id}: {session.utterance_index}")
+            return session.utterance_index
 
     @staticmethod
     async def increment_utterance_index_async(session_id: str) -> int:

@@ -71,12 +71,31 @@ async def _send_error(websocket: WebSocket, message: str, code: str = "ERROR") -
 async def _check_turn_limit(
     websocket: WebSocket, session_id: str, session_state
 ) -> bool:
-    """턴 제한(7 AI↔사용자 페어) 초과 여부를 확인하고 초과 시 세션 종료"""
+    """턴 제한(7 AI↔사용자 페어) 초과 여부를 확인하고 초과 시 세션 종료
+
+    주의: Retry 중에는 이 함수가 호출되지 않으므로 turn count가 증가하지 않음
+    """
     try:
         if session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS):
             logger.info(f"Turn limit reached for session {session_id}, ending session.")
-            # 순환 import 피하기 위해 여기서는 직접 호출하지 않음
-            # handle_end_session이 이 함수를 호출
+
+            # 클라이언트에 세션 종료 메시지 전송
+            from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
+            try:
+                await websocket.send_json(
+                    SessionEndedMessage(reason="turn_limit").model_dump()
+                )
+                logger.info(f"SESSION_ENDED message sent: session={session_id}, reason=turn_limit")
+            except Exception as e:
+                logger.warning(f"Failed to send SESSION_ENDED message: {e}")
+
+            # ✅ WebSocket 연결 종료
+            try:
+                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
+                logger.info(f"WebSocket closed: session={session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to close WebSocket: {e}")
+
             return True
         return False
     except Exception as exc:
@@ -349,6 +368,9 @@ async def _save_utterance_with_feedback(
 ) -> None:
     """
     Spring 2에 발화 저장 (feedback이 있을 때만 포함)
+
+    Option 3: 모든 피드백 데이터(점수, 텍스트, 구조화된 섹션)를 한 번의 호출로 저장
+    별도의 save_feedback 호출 불필요
     """
     try:
         # Base kwargs
@@ -366,32 +388,43 @@ async def _save_utterance_with_feedback(
 
         # ✅ Conditionally include feedback fields
         if feedback_result:
+            needs_correction = feedback_result.get("needs_correction", False)
+            # needs_correction이 True일 때만 retry_count 유지, False면 0
+            retry_count = session_state.current_question_retry_count if (session_state and needs_correction) else 0
+
             save_kwargs.update({
                 "pronunciation_score": feedback_result["scores"].get("pronunciation_score"),
                 "grammar_score": feedback_result["scores"].get("grammar_score"),
                 "relevance_score": feedback_result["scores"].get("relevance_score"),
                 "overall_score": feedback_result["scores"].get("overall_score"),
                 "feedback_text": feedback_result.get("feedback_text", ""),
-                "needs_correction": feedback_result.get("needs_correction", False),
-                "retry_count": session_state.current_question_retry_count if session_state else 0,
+                "needs_correction": needs_correction,  # Boolean (변환은 spring2_client에서)
+                "retry_count": retry_count,
+                "primary_issue": feedback_result.get("primary_issue", "none"),
+                "feedback_sections": feedback_result.get("feedback_sections"),  # Option 3: 구조화된 피드백
             })
         else:
-            # No feedback data - Spring 2 should handle None values
+            # No feedback data - explicitly set fields
+            # needs_correction should be False (not None) when no feedback
             save_kwargs.update({
                 "pronunciation_score": None,
                 "grammar_score": None,
                 "relevance_score": None,
                 "overall_score": None,
                 "feedback_text": None,
-                "needs_correction": None,
+                "needs_correction": False,  # ✅ Boolean False (spring2_client에서 0으로 변환)
                 "retry_count": None,
+                "primary_issue": "none",  # ✅ 명시적으로 "none"
+                "feedback_sections": None,
             })
 
-        await spring2_client.save_utterance(**save_kwargs)
+        result = await spring2_client.save_utterance(**save_kwargs)
         logger.info(f"Utterance saved to Spring 2: session={session_id}, index={utterance_index}")
+        return result
 
     except Exception as e:
         logger.error(f"Failed to save utterance: session={session_id}, error={e}", exc_info=True)
+        return None
 
 
 # ========================================
@@ -468,9 +501,11 @@ async def _save_question_with_keywords(
     session_id: str,
     question_en: str,
     turn_number: int,
+    utterance_index: int,
     user_role: str,
     ai_role: str,
     scenario_context: str,
+    session_state=None,
     slack_message: Optional[str] = None,
     is_fixed_question: bool = False,
 ) -> None:
@@ -480,7 +515,7 @@ async def _save_question_with_keywords(
     흐름:
     1. 추천 키워드 생성 (RECOMMENDED_KEYWORDS_PROMPT 사용)
     2. 한글 번역 생성 (QUESTION_BILINGUAL_PROMPT 사용)
-    3. Spring 2에 저장 (save_question() API 호출)
+    3. Spring 2에 저장 (save_utterance() API 호출)
 
     Args:
         session_id: 세션 ID
@@ -492,90 +527,91 @@ async def _save_question_with_keywords(
         slack_message: 원본 Slack 메시지 (선택사항)
         is_fixed_question: 고정 질문 여부
     """
-    async def _save():
+    try:
+        from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
+        from app.roleplaying.services.llm.llm_base import LLMServiceBase
+        from app.roleplaying.prompts.constants import QUESTION_BILINGUAL_PROMPT
+        import json
+
+        logger.info(
+            f"🟢 [질문 저장] 추천 키워드 생성 중... "
+            f"session={session_id}, turn={turn_number}"
+        )
+
+        # ====================================
+        # Step 1: 추천 키워드 생성
+        # ====================================
+        keywords = await keyword_generator.generate_recommended_keywords(
+            question=question_en,
+            user_role=user_role,
+            ai_role=ai_role,
+            scenario_context=scenario_context,
+            slack_message=slack_message,
+            conversation_summary=""
+        )
+
+        logger.info(f"✅ [질문 저장] 키워드 생성 완료: {keywords}")
+
+        # ====================================
+        # Step 2: 한글 번역 생성
+        # ====================================
+        logger.info(f"🟢 [질문 저장] 한글 번역 생성 중...")
+
+        llm = LLMServiceBase(
+            api_key=settings.openai_api_key,
+            model_name=settings.OPENAI_MODEL_FEEDBACK,
+            temperature=0.3
+        ).llm
+
+        translation_prompt = QUESTION_BILINGUAL_PROMPT.format(
+            english_question=question_en
+        )
+        translation_response = await llm.invoke(translation_prompt)
+
+        # JSON에서 korean_question 추출
+        question_ko = question_en  # 기본값: 번역 실패 시 영문 사용
         try:
-            from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
-            from app.roleplaying.services.llm.llm_base import LLMServiceBase
-            from app.roleplaying.prompts.constants import QUESTION_BILINGUAL_PROMPT
-            import json
-
-            logger.info(
-                f"🟢 [질문 저장] 추천 키워드 생성 중... "
-                f"session={session_id}, turn={turn_number}"
-            )
-
-            # ====================================
-            # Step 1: 추천 키워드 생성
-            # ====================================
-            keywords = await keyword_generator.generate_recommended_keywords(
-                question=question_en,
-                user_role=user_role,
-                ai_role=ai_role,
-                scenario_context=scenario_context,
-                slack_message=slack_message,
-                conversation_summary=""
-            )
-
-            logger.info(f"✅ [질문 저장] 키워드 생성 완료: {keywords}")
-
-            # ====================================
-            # Step 2: 한글 번역 생성
-            # ====================================
-            logger.info(f"🟢 [질문 저장] 한글 번역 생성 중...")
-
-            llm = LLMServiceBase(
-                api_key=settings.openai_api_key,
-                model_name=settings.OPENAI_MODEL_FEEDBACK,
-                temperature=0.3
-            ).llm
-
-            translation_prompt = QUESTION_BILINGUAL_PROMPT.format(
-                english_question=question_en
-            )
-            translation_response = await llm.invoke(translation_prompt)
-
-            # JSON에서 korean_question 추출
-            question_ko = question_en  # 기본값: 번역 실패 시 영문 사용
-            try:
-                json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', translation_response, re.DOTALL)
-                if json_match:
-                    parsed = json.loads(json_match.group(0))
-                    question_ko = parsed.get("korean_question", question_en)
-            except Exception as e:
-                logger.warning(f"Failed to parse Korean translation: {e}")
-
-            logger.info(f"✅ [질문 저장] 한글 번역 완료")
-
-            # ====================================
-            # Step 3: Spring 2에 저장
-            # ====================================
-            logger.info(
-                f"🟢 [질문 저장] Spring 2에 저장 중... "
-                f"session={session_id}, turn={turn_number}"
-            )
-
-            await spring2_client.save_question(
-                session_id=session_id,
-                turn_number=turn_number,
-                question_en=question_en,
-                question_ko=question_ko,
-                recommended_keywords=keywords,
-                is_fixed_question=is_fixed_question,
-                scenario_id=None  # session에서 가져올 수도 있음
-            )
-
-            logger.info(
-                f"✅ [질문 저장] 완료: session={session_id}, turn={turn_number}, "
-                f"keywords={len(keywords)}"
-            )
-
+            json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', translation_response, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+                question_ko = parsed.get("korean_question", question_en)
         except Exception as e:
-            logger.error(
-                f"❌ [질문 저장] 실패: session={session_id}, turn={turn_number}, error={e}",
-                exc_info=True
-            )
+            logger.warning(f"Failed to parse Korean translation: {e}")
 
-    # 백그라운드 태스크로 비동기 실행
-    task = asyncio.create_task(_save())
-    context = f"save_question(session={session_id}, turn={turn_number})"
-    task.add_done_callback(lambda t: _handle_task_error(t, context))
+        logger.info(f"✅ [질문 저장] 한글 번역 완료")
+
+        # ====================================
+        # Step 3: Spring 2에 저장 (ScenarioMessage에 통합)
+        # ====================================
+        logger.info(
+            f"🟢 [질문 저장] Spring 2에 저장 중... "
+            f"session={session_id}, utterance_index={utterance_index}"
+        )
+
+        # Option 3: AI 질문을 ScenarioMessage에 직접 저장
+        # save_utterance()에 question_ko와 recommended_keywords를 포함시킴
+        await spring2_client.save_utterance(
+            session_id=session_id,
+            stt_text=question_en,
+            utterance_index=utterance_index,
+            speaker="ai",
+            text=question_en,
+            audio_data=None,
+            played_turns=session_state.ai_turn_count if session_state else None,
+            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
+            status="IN_PROGRESS",
+            question_ko=question_ko,  # 한글 질문
+            recommended_keywords=keywords,  # 추천 키워드
+        )
+
+        logger.info(
+            f"✅ [질문 저장] 완료: session={session_id}, utterance_index={utterance_index}, "
+            f"keywords={len(keywords)}"
+        )
+
+    except Exception as e:
+        logger.error(
+            f"❌ [질문 저장] 실패: session={session_id}, turn={turn_number}, error={e}",
+            exc_info=True
+        )
+        raise  # ✅ 에러를 호출자에게 전파
