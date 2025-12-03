@@ -339,3 +339,116 @@ Respond in valid JSON format ONLY:
 
 Do not include any other text, explanations, or commentary.
 """
+
+# ============================================
+# Translation Prompts (Bilingual Support)
+# ============================================
+
+KOREAN_TRANSLATION_PROMPT = """
+Translate the following English text to Korean.
+
+Rules:
+1. Maintain technical accuracy and professional tone
+2. Use appropriate IT/business Korean terminology
+3. Preserve the original meaning and intent
+4. Keep formatting and structure intact
+5. Translate field names/labels as-is (no translation needed)
+
+English Text to Translate:
+"{english_text}"
+
+Provide ONLY the Korean translation, no other text.
+"""
+
+FEEDBACK_BILINGUAL_PROMPT = """
+You are a translator specializing in IT English learning materials.
+
+Translate the provided English feedback to Korean while maintaining:
+1. Professional tone appropriate for IT professionals
+2. Technical accuracy
+3. Learning guidance clarity
+
+English Feedback:
+"{english_feedback}"
+
+Provide the response in JSON format ONLY:
+{{
+    "korean_feedback": "Korean translation of the feedback"
+}}
+
+Do not include explanations or other text.
+"""
+
+QUESTION_BILINGUAL_PROMPT = """
+You are a translator specializing in IT English learning materials.
+
+Translate the provided English question to Korean while maintaining:
+1. The original conversational context
+2. Professional tone appropriate for IT role-play
+3. Clear, natural Korean that encourages detailed response
+
+English Question:
+"{english_question}"
+
+Provide the response in JSON format ONLY:
+{{
+    "korean_question": "Korean translation of the question"
+}}
+
+Do not include explanations or other text.
+"""
+
+# ============================================
+# Recommendation Prompts (Learning Guidance)
+# ============================================
+
+RECOMMENDED_KEYWORDS_PROMPT = """
+Analyze the Slack message context and AI question to generate highly specific, actionable keywords for the user's response.
+
+Original Slack Message (Scenario Source):
+{slack_message}
+
+Current Role Play Context:
+Question: "{question}"
+User Role: {user_role}
+AI Role: {ai_role}
+Scenario Background: {scenario_context}
+
+Recent Conversation (Last 2 exchanges):
+{conversation_summary}
+
+Task:
+Generate 3 specific, domain-focused keywords that:
+1. Directly extracted from or closely related to the Slack message content
+2. Represent actual technical issues, tools, or processes mentioned in Slack
+3. Are appropriate for the user's role in this scenario
+4. Guide the user toward a professional, context-aware response
+5. Include technical terms, processes, and best practices relevant to the real situation
+
+Priority Guidelines:
+- Extract specific keywords FROM the Slack message (highest priority)
+- Add related technical terms based on the Slack context
+- Consider the actual IT domain (debugging, architecture, deployment, etc.)
+- Include tools/technologies mentioned or implied
+- Suggest best practices relevant to the specific problem
+
+Examples:
+Slack: "DB migration causing latency in production"
+Keywords: "database migration", "latency optimization", "connection pooling", "query profiling", "rollback strategy"
+
+Slack: "CI/CD pipeline failing on staging environment"
+Keywords: "environment-specific configuration", "pipeline debugging", "staging deployment", "log analysis", "failure recovery"
+
+DO NOT include:
+- Generic words (very, important, good, bad)
+- Words already in the question
+- Instructions or meta-commentary
+- Spelling variations of the same concept
+
+Provide the response in JSON format ONLY:
+{{
+    "keywords": ["keyword1", "keyword2", "keyword3"]
+}}
+
+Return valid JSON only.
+"""
