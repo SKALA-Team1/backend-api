@@ -36,8 +36,6 @@ from app.health.router import router as health_router
 from app.roleplaying.router import router as roleplaying_router
 from app.roleplaying.ws_realtime import router as ws_realtime_router
 from app.feedback.router import router as feedback_router
-from app.textbook.rag.router import router as rag_router
-from app.scenario.router import router as scenario_router
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +110,6 @@ app.include_router(health_router, tags=["health"])
 app.include_router(roleplaying_router, tags=["roleplaying"])
 app.include_router(ws_realtime_router, tags=["websocket"])
 app.include_router(feedback_router, tags=["feedback"])
-app.include_router(rag_router, prefix="/textbook", tags=["RAG (에이전트1)"])
-app.include_router(scenario_router, tags=["시나리오 (에이전트2)"])
 
 
 @app.get("/")
