@@ -77,6 +77,13 @@ class Spring2Client:
         completed_all_turns: bool = False,
         finish_reason: Optional[str] = None,
         status: str = "IN_PROGRESS",
+        pronunciation_score: Optional[int] = None,
+        grammar_score: Optional[int] = None,
+        relevance_score: Optional[int] = None,
+        overall_score: Optional[int] = None,
+        feedback_text: Optional[str] = None,
+        needs_correction: Optional[bool] = None,
+        retry_count: Optional[int] = None,
     ) -> dict:
         """
         발화 저장 API 호출
@@ -97,6 +104,11 @@ class Spring2Client:
             completed_all_turns: 모든 턴(10개)을 완료했는지 여부
             finish_reason: 세션 종료 사유 (turn_limit, user_end, timeout, error 등)
             status: 세션 상태 (IN_PROGRESS, FINISHED, ERROR)
+            pronunciation_score / grammar_score / relevance_score / overall_score:
+                피드백 점수 (없으면 None)
+            feedback_text: 피드백 메시지 (없으면 None)
+            needs_correction: 재시도 필요 여부
+            retry_count: 현재 재시도 횟수
 
         Returns:
             API 응답 ({"success": true, "s3_url": "...", "utterance_id": 123})
@@ -152,6 +164,17 @@ class Spring2Client:
             # Add audio as base64-encoded string if provided
             if audio_data:
                 payload["audio"] = base64.b64encode(audio_data).decode('utf-8')
+
+            # Feedback metadata (nullable)
+            payload.update(
+                pronunciation_score=pronunciation_score,
+                grammar_score=grammar_score,
+                relevance_score=relevance_score,
+                overall_score=overall_score,
+                feedback_text=feedback_text,
+                needs_correction=needs_correction,
+                retry_count=retry_count,
+            )
 
             response = await client.post(url, json=payload)
 

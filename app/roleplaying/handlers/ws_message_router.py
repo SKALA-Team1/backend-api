@@ -91,7 +91,15 @@ class MessageRouter:
             성공 여부
         """
         try:
-            message = json.loads(raw_message)
+            # Smart quotes를 일반 따옴표로 변환 (U+201C, U+201D → U+0022)
+            cleaned_message = raw_message.replace('\u201c', '"').replace('\u201d', '"')  # " " → "
+            cleaned_message = cleaned_message.replace('\u2018', "'").replace('\u2019', "'")  # ' ' → '
+            cleaned_message = cleaned_message.replace('\u00ab', '"').replace('\u00bb', '"')  # « » → "
+
+            # Whitespace 및 BOM 제거
+            cleaned_message = cleaned_message.lstrip('\ufeff\ufffe').strip()
+
+            message = json.loads(cleaned_message)
             return await self.dispatch(websocket, session_id, message)
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON: {e}")

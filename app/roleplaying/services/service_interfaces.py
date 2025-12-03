@@ -97,7 +97,9 @@ class QuestionGenerator(Protocol):
     async def generate_next_question(
         self,
         situation: str,
-        conversation_history: List[Dict[str, str]]
+        conversation_history: List[Dict[str, str]],
+        role: str = "AI",
+        user_text: str = None
     ) -> str:
         """
         다음 질문 생성
@@ -105,6 +107,8 @@ class QuestionGenerator(Protocol):
         Args:
             situation: 시나리오 상황
             conversation_history: 이전 대화 히스토리
+            role: AI의 역할 (기본값: "AI")
+            user_text: 사용자의 최근 메시지 (None이면 conversation_history에서 자동 추출)
 
         Returns:
             생성된 질문 텍스트
@@ -328,6 +332,51 @@ class FeedbackOrchestrator(Protocol):
                 },
                 "feedback_text": str,
                 "retry_count": int
+            }
+        """
+        ...
+
+
+class FeedbackDecisionAgent(Protocol):
+    """피드백/질문 결정 ReAct 에이전트 인터페이스
+
+    평가 결과를 기반으로 피드백 vs 다음 질문 판단을 ReAct 패턴으로 수행합니다.
+    """
+
+    @abstractmethod
+    async def decide_feedback_or_question(
+        self,
+        session_state: Any,
+        user_text: str,
+        audio_data: Optional[bytes],
+        retry_count: int
+    ) -> Dict[str, Any]:
+        """
+        ReAct 에이전트를 통한 피드백/질문 판단
+
+        Args:
+            session_state: 세션 상태 (대화 히스토리, 역할 등)
+            user_text: 사용자 발화 텍스트
+            audio_data: 사용자 오디오 데이터 (선택사항)
+            retry_count: 현재 질문 재시도 횟수
+
+        Returns:
+            {
+                "action": "FEEDBACK" | "NEXT_QUESTION",
+                "feedback_result": {
+                    "needs_correction": bool,
+                    "primary_issue": str,
+                    "scores": {
+                        "pronunciation_score": int | None,
+                        "grammar_score": int | None,
+                        "relevance_score": int | None,
+                        "overall_score": int | None
+                    },
+                    "feedback_text": str,
+                    "retry_count": int
+                } | None,
+                "reasoning": str,
+                "confidence": float (0-1)
             }
         """
         ...

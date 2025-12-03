@@ -35,7 +35,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 from app.config import settings
 from app.integrations.clients.redis_client import RedisSessionValidator
-from app.roleplaying.core.session_state_manager import SessionStatus, session_manager
+from app.roleplaying.core.session_state_manager import (
+    SessionStatus,
+    session_manager,
+    SessionAudioHandler,
+)
 from app.roleplaying.handlers.session_validators import ErrorHandler, InitStateValidator
 from app.roleplaying.handlers.ws_message_router import create_message_router
 from app.roleplaying.handlers.message_handlers import (
@@ -159,7 +163,7 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
 
                 # 오디오 청크를 세션 버퍼에 저장 (라우터를 거치지 않음 - binary 데이터)
                 try:
-                    session_manager.append_audio_chunk(session_id, raw_data["bytes"])
+                    SessionAudioHandler.append_audio_chunk(session_id, raw_data["bytes"])
                     logger.debug(f"Audio chunk appended: session={session_id}, size={len(raw_data['bytes'])} bytes")
                 except Exception as e:
                     logger.error(f"Failed to append audio chunk: {e}", exc_info=True)
@@ -168,7 +172,22 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
             # Text 메시지 (JSON)
             if "text" in raw_data:
                 try:
-                    message = json.loads(raw_data["text"])
+                    # Whitespace 및 BOM 제거 후 파싱
+                    raw_message = raw_data["text"]
+
+                    # Smart quotes를 일반 따옴표로 변환 (U+201C, U+201D → U+0022)
+                    # 일부 클라이언트가 보내는 "curly quotes"를 처리
+                    raw_message = raw_message.replace('\u201c', '"').replace('\u201d', '"')  # " " → "
+                    raw_message = raw_message.replace('\u2018', "'").replace('\u2019', "'")  # ' ' → '
+                    raw_message = raw_message.replace('\u00ab', '"').replace('\u00bb', '"')  # « » → "
+
+                    # BOM 문자 명시적으로 제거 (UTF-8, UTF-16, UTF-32)
+                    raw_message = raw_message.lstrip('\ufeff\ufffe')
+                    raw_message = raw_message.strip()
+
+                    logger.debug(f"Cleaned message: {raw_message[:100]}")
+
+                    message = json.loads(raw_message)
                     message_type = message.get("type")
 
                     logger.debug(
@@ -199,7 +218,7 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
                             break
 
                 except json.JSONDecodeError as e:
-                    logger.error(f"Invalid JSON: {e}")
+                    logger.error(f"Invalid JSON: {e}, raw_message={raw_data['text'][:200]}")
                     await ErrorHandler.send_error(websocket, "Invalid JSON format")
 
                 except Exception as e:

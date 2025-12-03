@@ -23,7 +23,7 @@ from fastapi import WebSocket, status
 
 from app.config import settings
 from app.integrations.clients.spring2_client import spring2_client
-from app.roleplaying.core.session_state_manager import session_manager
+from app.roleplaying.core.session_state_manager import session_manager, SessionMessageHandler
 from app.roleplaying.handlers._common import _send_error
 from app.roleplaying.handlers._text_handler import handle_user_text
 from app.roleplaying.handlers._audio_handler import handle_utterance_end
@@ -100,14 +100,14 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
             session_state.current_question_text = first_question
 
         # 세션 히스토리에 추가
-        await session_manager.append_message_async(
+        await SessionMessageHandler.append_message_async(
             session_id=session_id,
             speaker="ai",
             text=first_question,
             is_fixed_question=True,
         )
 
-        first_ai_index = await session_manager.increment_utterance_index_async(session_id)
+        first_ai_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
 
         # Spring 2 저장은 비동기로 (첫 질문이므로 피드백 없음)
         import asyncio

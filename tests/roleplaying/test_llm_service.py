@@ -172,9 +172,11 @@ class TestQuestionGeneratorImpl:
         result = await generator.generate_next_question(
             situation="API optimization",
             conversation_history=[
-                {"speaker": "User", "text": "Hello"},
-                {"speaker": "AI", "text": "Hi there"}
-            ]
+                {"speaker": "User", "text": "We need to optimize our API"},
+                {"speaker": "AI", "text": "That sounds important"}
+            ],
+            role="Technical Lead",
+            user_text="We need to optimize our API"
         )
 
         assert "challenges" in result.lower()
@@ -188,7 +190,8 @@ class TestQuestionGeneratorImpl:
 
         result = await generator.generate_next_question(
             situation="Situation",
-            conversation_history=[]
+            conversation_history=[],
+            role="AI"
         )
 
         assert result == "Could you tell me more about that?"

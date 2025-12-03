@@ -265,7 +265,9 @@ class FeedbackMessage(BaseModel):
     """
 
     type: Literal["FEEDBACK"] = "FEEDBACK"
-    pronunciation_score: int = Field(..., ge=0, le=100, description="발음 점수 (0-100)")
+    pronunciation_score: Optional[int] = Field(
+        None, ge=0, le=100, description="발음 점수 (0-100, 텍스트 모드에서는 None)"
+    )
     grammar_score: int = Field(..., ge=0, le=100, description="문법 점수 (0-100)")
     relevance_score: int = Field(..., ge=0, le=100, description="맥락 적절성 점수 (0-100)")
     overall_score: int = Field(..., ge=0, le=100, description="종합 점수 (평균)")

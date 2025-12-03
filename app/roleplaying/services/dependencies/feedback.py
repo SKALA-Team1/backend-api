@@ -45,19 +45,28 @@ def get_pronunciation_evaluator() -> "PronunciationEvaluator":
     """발음 평가기 의존성 주입
 
     역할:
-        - Azure Speech Services API 사용
-        - 사용자 발음 품질 평가
-        - 발음 오류 상세 피드백
+        - Azure Speech Services API로 점수 수집
+        - LLM으로 점수 기반 피드백 생성
+        - 발음 평가 (점수 + 피드백)
 
     Returns:
         PronunciationEvaluator 인스턴스 (싱글톤)
 
     Note:
-        Azure Speech Services는 별도 인증키 필요
+        Azure Speech Services + OpenAI LLM 조합
     """
     from app.roleplaying.services.feedback.azure_speech_service import AzureSpeechService
+    from app.roleplaying.services.feedback.feedback_service import PronunciationEvaluatorImpl
 
-    return AzureSpeechService()
+    azure_service = AzureSpeechService()
+
+    return PronunciationEvaluatorImpl(
+        azure_service=azure_service,
+        provider=settings.FEEDBACK_LLM_PROVIDER,
+        api_key=settings.openai_api_key if settings.FEEDBACK_LLM_PROVIDER == "openai" else None,
+        model_name=settings.OPENAI_MODEL_FEEDBACK,
+        temperature=0.3
+    )
 
 
 @lru_cache(maxsize=1)
@@ -174,6 +183,35 @@ def get_azure_usage_tracker():
     return AzureUsageTracker()
 
 
+@lru_cache(maxsize=1)
+def get_feedback_decision_agent() -> "FeedbackDecisionAgent":
+    """ReAct 기반 피드백 판단 에이전트 의존성 주입
+
+    역할:
+        - LLM의 ReAct 패턴을 통한 피드백/질문 판단
+        - 평가 결과 + 재시도 상황 종합 분석
+        - 사용자 학습 효율성 고려
+
+    Returns:
+        FeedbackDecisionAgent 인스턴스 (싱글톤)
+
+    Note:
+        - Agent 실패 시 자동으로 기존 FeedbackJudge 로직으로 Fallback
+        - Production Safety 보장
+    """
+    from app.roleplaying.services.feedback.feedback_decision_agent import (
+        FeedbackDecisionAgentImpl,
+    )
+
+    return FeedbackDecisionAgentImpl(
+        feedback_orchestrator=get_feedback_orchestrator(),
+        llm_provider=settings.FEEDBACK_LLM_PROVIDER,
+        api_key=settings.openai_api_key if settings.FEEDBACK_LLM_PROVIDER == "openai" else None,
+        model_name=settings.OPENAI_MODEL_FEEDBACK,
+        temperature=0.3,  # 판단 용 - 낮을수록 일관성 있음
+    )
+
+
 # ============================================
 # Type Aliases for FastAPI Depends
 # ============================================
@@ -208,6 +246,12 @@ FeedbackOrchestratorDep = Annotated[
 ]
 """피드백 조율기 의존성 타입 - 모든 평가 통합"""
 
+FeedbackDecisionAgentDep = Annotated[
+    "FeedbackDecisionAgent",
+    Depends(get_feedback_decision_agent)
+]
+"""ReAct 기반 피드백 판단 에이전트 의존성 타입 - LLM의 ReAct 패턴으로 피드백/질문 판단"""
+
 __all__ = [
     "get_pronunciation_evaluator",
     "get_grammar_evaluator",
@@ -215,9 +259,11 @@ __all__ = [
     "get_feedback_judge",
     "get_feedback_orchestrator",
     "get_azure_usage_tracker",
+    "get_feedback_decision_agent",
     "PronunciationEvaluatorDep",
     "GrammarEvaluatorDep",
     "RelevanceEvaluatorDep",
     "FeedbackJudgeDep",
     "FeedbackOrchestratorDep",
+    "FeedbackDecisionAgentDep",
 ]

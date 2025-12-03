@@ -19,11 +19,16 @@ from typing import Optional
 from fastapi import WebSocket
 
 from app.config import settings
-from app.roleplaying.core.session_state_manager import session_manager
+from app.roleplaying.core.session_state_manager import (
+    session_manager,
+    SessionMessageHandler,
+    SessionAudioHandler,
+)
 from app.roleplaying.handlers._common import (
     _send_error,
     _check_turn_limit,
     _evaluate_feedback,
+    _evaluate_feedback_with_agent,
     _send_feedback_messages,
     _generate_and_stream_ai_response,
     _save_utterance_with_feedback,
@@ -56,7 +61,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             await _send_error(websocket, "Session not found")
             return
 
-        audio_data = session_manager.get_current_audio(session_id)
+        audio_data = SessionAudioHandler.get_current_audio(session_id)
         if not audio_data:
             await _send_error(websocket, "No audio data received")
             return
@@ -69,7 +74,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
         # 히스토리에 추가
         if stt_text:
             try:
-                await session_manager.append_message_async(
+                await SessionMessageHandler.append_message_async(
                     session_id=session_id,
                     speaker="user",
                     text=stt_text,
@@ -85,29 +90,62 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
                 "Silence detected. Please speak again.",
                 code="SILENCE_DETECTED",
             )
-            session_manager.clear_audio_buffer(session_id)
+            SessionAudioHandler.clear_audio_buffer(session_id)
             return
 
         await websocket.send_json(SttFinalMessage(text=stt_text).model_dump())
 
-        # Step 2: 피드백 평가 (Azure 사용 가능 여부 확인)
-        from app.roleplaying.services.dependencies import get_feedback_orchestrator
+        # Step 2: 피드백 평가 (ReAct Agent 우선, Fallback 지원)
+        from app.roleplaying.services.dependencies import (
+            get_feedback_orchestrator,
+            get_feedback_decision_agent,
+        )
         from app.roleplaying.services.utils.azure_usage_tracker import usage_tracker
 
         feedback_orchestrator = get_feedback_orchestrator()
+        feedback_decision_agent = get_feedback_decision_agent()
 
         can_use_azure = await usage_tracker.can_use_azure()
-        logger.info(f"⏱️  [Azure 사용 가능] session={session_id}, can_use_azure={can_use_azure}")
+        logger.info(
+            f"⏱️  [Azure 사용 가능] session={session_id}, can_use_azure={can_use_azure}"
+        )
 
-        feedback_result = await _evaluate_feedback(
-            feedback_orchestrator=feedback_orchestrator,
-            websocket=websocket,
+        # ========================================
+        # Step 2a: ReAct Agent를 통한 피드백 판단
+        # ========================================
+        agent_decision = await _evaluate_feedback_with_agent(
+            agent=feedback_decision_agent,
             session_id=session_id,
             user_text=stt_text,
             audio_data=audio_data if can_use_azure else None,
             session_state=session_state,
             can_use_azure=can_use_azure,
         )
+
+        if agent_decision and agent_decision.get("action") == "FEEDBACK":
+            # Agent가 피드백 결정
+            feedback_result = agent_decision.get("feedback_result")
+            logger.info(
+                f"🤖 [Agent Decision] FEEDBACK - reasoning: {agent_decision.get('reasoning')}"
+            )
+        elif agent_decision and agent_decision.get("action") == "NEXT_QUESTION":
+            # Agent가 다음 질문 결정
+            feedback_result = None
+            logger.info(
+                f"🤖 [Agent Decision] NEXT_QUESTION - reasoning: {agent_decision.get('reasoning')}"
+            )
+        else:
+            # Agent 실패 시 Fallback: 기존 평가 로직 사용
+            logger.info("⏮️  [Fallback] Using traditional feedback evaluation")
+            feedback_result = await _evaluate_feedback(
+                feedback_orchestrator=feedback_orchestrator,
+                websocket=websocket,
+                session_id=session_id,
+                user_text=stt_text,
+                audio_data=audio_data if can_use_azure else None,
+                session_state=session_state,
+                can_use_azure=can_use_azure,
+            )
 
         # Azure 사용 시 usage 증가
         if can_use_azure and feedback_result:
@@ -127,7 +165,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             return
 
         # Step 3: Spring 2에 사용자 발화 저장
-        utterance_index = session_manager.increment_utterance_index(session_id)
+        utterance_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
 
         async def _save_user_utterance():
             await _save_utterance_with_feedback(
@@ -160,7 +198,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             user_text=stt_text,
         )
 
-        ai_index = await session_manager.increment_utterance_index_async(session_id)
+        ai_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
         await _schedule_spring2_save(
             session_id=session_id,
             text=full_ai_response,

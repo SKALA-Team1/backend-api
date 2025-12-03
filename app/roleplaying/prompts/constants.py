@@ -113,7 +113,7 @@ Additional Requirements:
 - Produce only the JSON output below.
 
 Output Format (strict):
-{"questions": ["question1", "question2", "question3"]}
+{{"questions": ["question1", "question2", "question3"]}}
 
 Return valid JSON only.
 """
@@ -126,39 +126,81 @@ Return valid JSON only.
 GRAMMAR_EVALUATION_PROMPT = """
 Grammar Evaluation Target: "{user_text}"
 
-Evaluation Guidelines (mention only actual issues found):
-- Verb tense consistency
+Evaluation Principles (only mention issues actually present):
+- Verb tense consistency in technical explanations or process descriptions
 - Subject-verb agreement
-- Article usage
-- Preposition accuracy
-- Sentence structure or phrasing
-- Mention only real errors, with short concrete examples
+- Article usage (especially in technical nouns like "API", "server", "deployment")
+- Preposition accuracy in common IT expressions ("on the server", "in production", "for testing")
+- Sentence clarity and structure (avoid ambiguity in requirements, tasks, or steps)
 
-If no grammatical errors exist, explicitly return:
-"No grammatical errors detected"
+For each issue found:
+- Briefly explain why it is an issue (1 sentence)
+- Do NOT provide improved versions or examples (they will be provided separately)
 
-JSON response format (strict):
-{"score": int (0-100), "feedback": "specific issues OR 'No grammatical errors detected'"}
+Include positive reinforcement:
+- If the sentence has strengths (clarity, vocabulary, structure), mention them briefly.
+
+If no grammatical or clarity issues exist, explicitly return:
+"No grammatical issues detected. Clear and effective communication."
+
+Strict JSON format:
+{{"score": int (0-100), "feedback": "specific issues only OR 'No grammatical issues detected. Clear and effective communication.'"}}
 """
 
 RELEVANCE_EVALUATION_PROMPT = """
-Context Relevance Evaluation
+Context Relevance Evaluation for IT English Training
 
 Question: "{context}"
 User Response: "{user_text}"
 
-Evaluation Criteria (mention only actual issues):
-- Understanding: Did the user grasp the intent of the question?
-- Directness: Did the response directly address the question? (no topic drift)
-- Specificity: Did the response include details or examples?
-- Completeness: Did the response cover all parts of the question without omission?
-- Mention only real shortcomings, with concrete justification
+Evaluation Criteria (mention only actual issues found):
+- Understanding: Did the user clearly understand the technical intention of the question?
+- Directness: Did the response stay on-topic and avoid unrelated details?
+- Specificity: Did the response include concrete examples (systems, tasks, tools, processes)?
+- Completeness: Did the response cover all components of the question (e.g., cause, action, result)?
+- Communication Quality: Would this response be effective in an actual workplace discussion?
 
-If the response sufficiently and specifically answers the question, use:
-"Response adequately and specifically addresses the question"
+For each shortcoming:
+- Explain why it matters in real developer communication
+- Do NOT provide examples of improvements (they will be provided separately)
 
-JSON response format (strict):
-{"score": int (0-100), "feedback": "specific shortcomings OR 'Response adequately and specifically addresses the question'"}
+If the response is strong and workplace-ready, return:
+"Response adequately, specifically, and professionally addresses the question."
+
+Strict JSON format:
+{{"score": int (0-100), "feedback": "specific shortcomings only OR 'Response adequately, specifically, and professionally addresses the question.'"}}
+"""
+
+PRONUNCIATION_FEEDBACK_PROMPT = """
+Pronunciation Evaluation for IT English Training
+
+User Text: "{user_text}"
+
+Pronunciation Scores (from Azure Speech Service):
+- Pronunciation Score: {pronunciation_score}/100 (overall quality)
+- Accuracy Score: {accuracy_score}/100 (correct phonemes)
+- Fluency Score: {fluency_score}/100 (smoothness and rhythm)
+- Completeness Score: {completeness_score}/100 (all phonemes present)
+- Words with Errors: {error_words}
+
+Evaluation Task:
+Based on the pronunciation scores above, provide constructive feedback that:
+1. Identifies the main pronunciation issues (if any)
+2. Explains why clear pronunciation matters in professional IT communication
+3. Provides specific, actionable guidance for improvement
+4. Does NOT include corrected examples (they will be provided separately)
+
+Guidelines:
+- If pronunciation_score >= 80: Acknowledge good performance
+- If pronunciation_score < 80: Identify areas for improvement (accuracy, fluency, completeness)
+- Focus on clarity and professionalism for IT domain communication
+- Keep feedback concise and encouraging
+
+If pronunciation is strong and professional, return:
+"Pronunciation is clear and professional. Well done!"
+
+Strict JSON format:
+{{"score": int (0-100), "feedback": "specific issues only OR 'Pronunciation is clear and professional. Well done!'"}}
 """
 
 # ============================================
@@ -166,29 +208,29 @@ JSON response format (strict):
 # ============================================
 
 CONVERSATION_ANALYSIS_PROMPT = """
-분석할 대화:
+Conversation to Analyze:
 {conversation_text}
 
-역할: {my_role}
-날짜: {conversation_date}
+Role: {my_role}
+Date: {conversation_date}
 
-위 대화의 핵심 상황을 2-3문장으로 간단히 분석해주세요.
-주요 주제와 상황을 파악하는 것이 목적입니다.
+Please provide a brief analysis of the core situation in 2–3 sentences.
+The goal is to identify the main topics and the context.
 """
 
 SCENARIO_GENERATION_PROMPT = """
-상황: {situation}
-사용자 역할: {my_role}
-AI 역할: {ai_role}
+Situation: {situation}
+User Role: {my_role}
+AI Role: {ai_role}
 
-위 상황에서 영어 연습을 위한 시나리오를 생성해주세요.
+Please generate an English-practice scenario based on the situation above.
 
-JSON 형식으로 다음을 포함해주세요:
-1. opening_question: 대화 시작 질문
-2. questions: 정확히 3개의 follow-up 질문 (배열)
-3. context: 시나리오 배경 설명
+Provide the response in valid JSON containing:
+1. opening_question: a question to start the conversation
+2. questions: exactly 3 follow-up questions (array)
+3. context: background description of the scenario
 
-응답은 유효한 JSON만 포함하세요.
+Return only the JSON output.
 """
 
 SITUATION_ENHANCEMENT_PROMPT = """
@@ -208,25 +250,26 @@ AI 역할: {ai_role}
 # ============================================
 
 AI_RESPONSE_PROMPT = """
-역할 설정:
-- 당신은 {ai_role}입니다.
-- 상대방은 {my_role}입니다.
+Role Settings:
+- You are {ai_role}.
+- The other person is {my_role}.
 
-상황: {situation}
+Situation: {situation}
 
-대화:
+Conversation:
 {history_text}
 
-{my_role}의 발언에 자연스럽게 응답하세요.
-전문적이고 도움이 되는 응답을 작성해주세요.
+Respond naturally to the latest message from {my_role}.
+Provide a professional and helpful response.
 """
 
 MESSAGE_SUMMARY_PROMPT = """
-다음은 {perspective} 관점의 메시지들입니다:
+Below are messages from the perspective of {perspective}:
 
 {messages_text}
 
-위 메시지들을 간단히 요약해주세요. 핵심 내용만 2-3문장으로 정리하세요.
+Please provide a brief summary of these messages.
+Summarize the core content in 2–3 sentences.
 """
 
 TITLE_GENERATION_PROMPT = """
@@ -236,4 +279,63 @@ AI Role: {ai_role}
 
 Create a short title (5–10 words) that captures the core of the situation.
 Output only the title and include no additional explanation.
+"""
+
+# ============================================
+# ReAct Agent Prompts (Feedback Decision)
+# ============================================
+
+FEEDBACK_DECISION_AGENT_SYSTEM_PROMPT = """You are a ReAct agent responsible for evaluating English learners' responses and deciding whether to provide corrective feedback or proceed to the next question.
+
+Your role:
+You analyze evaluation scores and conversation context to make intelligent decisions that balance learning effectiveness with user motivation.
+
+Decision Criteria (in priority order):
+
+1. **All evaluations failed?**
+   - If pronunciation_score, grammar_score, and relevance_score are all None → NEXT_QUESTION (no feedback data available)
+
+2. **Max retries exceeded?**
+   - If retry_count >= 3 → NEXT_QUESTION (force pass after 3 attempts)
+
+3. **Critical pronunciation issues?**
+   - If pronunciation_score < 65 AND pronunciation_score is not None → FEEDBACK (pronunciation priority)
+
+4. **Significant grammar errors?**
+   - If grammar_score < 70 AND pronunciation issues not found → FEEDBACK (grammar priority)
+
+5. **Response doesn't address the question?**
+   - If relevance_score < 75 AND no grammar/pronunciation issues → FEEDBACK (relevance priority)
+
+6. **Learner has done well enough?**
+   - If all scores >= 70 OR no major issues detected → NEXT_QUESTION (encourage progress)
+
+Context:
+- User Role: {my_role}
+- AI Role: {ai_role}
+- Current Question: {current_question}
+- Retry Count: {retry_count}/3
+- Evaluation Scores:
+  * Pronunciation: {pronunciation_score}
+  * Grammar: {grammar_score}
+  * Relevance: {relevance_score}
+  * Overall: {overall_score}
+
+Important Principles:
+- Be encouraging but honest about areas for improvement
+- Remember that over-correcting discourages learners
+- Balance learning rigor with learner motivation
+- Consider the learner's effort and progress
+
+Your task:
+Based on the evaluation scores and context above, decide whether to provide FEEDBACK or proceed to the NEXT_QUESTION.
+
+Respond in valid JSON format ONLY:
+{{
+    "action": "FEEDBACK" or "NEXT_QUESTION",
+    "reasoning": "Brief explanation (1-2 sentences) of why you chose this action",
+    "confidence": <float between 0.0 and 1.0>
+}}
+
+Do not include any other text, explanations, or commentary.
 """

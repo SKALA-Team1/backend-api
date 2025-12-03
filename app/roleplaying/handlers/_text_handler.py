@@ -19,11 +19,15 @@ from typing import Optional
 from fastapi import WebSocket, status
 
 from app.config import settings
-from app.roleplaying.core.session_state_manager import session_manager
+from app.roleplaying.core.session_state_manager import (
+    session_manager,
+    SessionMessageHandler,
+)
 from app.roleplaying.handlers._common import (
     _send_error,
     _check_turn_limit,
     _evaluate_feedback,
+    _evaluate_feedback_with_agent,
     _send_feedback_messages,
     _generate_and_stream_ai_response,
     _save_utterance_with_feedback,
@@ -72,26 +76,58 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         )
 
         # Step 1: 세션 히스토리에 사용자 발화 추가
-        await session_manager.append_message_async(
+        await SessionMessageHandler.append_message_async(
             session_id=session_id,
             speaker="user",
             text=user_text,
             audio_s3_url=None,
         )
 
-        # Step 2: 피드백 평가 (Option 1 - 실패해도 세션 계속)
-        from app.roleplaying.services.dependencies import get_feedback_orchestrator
+        # Step 2: 피드백 평가 (ReAct Agent 우선, Fallback 지원)
+        from app.roleplaying.services.dependencies import (
+            get_feedback_orchestrator,
+            get_feedback_decision_agent,
+        )
 
         feedback_orchestrator = get_feedback_orchestrator()
-        feedback_result = await _evaluate_feedback(
-            feedback_orchestrator=feedback_orchestrator,
-            websocket=websocket,
+        feedback_decision_agent = get_feedback_decision_agent()
+
+        # ========================================
+        # Step 2a: ReAct Agent를 통한 피드백 판단
+        # ========================================
+        agent_decision = await _evaluate_feedback_with_agent(
+            agent=feedback_decision_agent,
             session_id=session_id,
             user_text=user_text,
             audio_data=None,  # Text mode - no audio
             session_state=session_state,
             can_use_azure=False,  # Text mode - no Azure pronunciation
         )
+
+        if agent_decision and agent_decision.get("action") == "FEEDBACK":
+            # Agent가 피드백 결정
+            feedback_result = agent_decision.get("feedback_result")
+            logger.info(
+                f"🤖 [Agent Decision] FEEDBACK - reasoning: {agent_decision.get('reasoning')}"
+            )
+        elif agent_decision and agent_decision.get("action") == "NEXT_QUESTION":
+            # Agent가 다음 질문 결정
+            feedback_result = None
+            logger.info(
+                f"🤖 [Agent Decision] NEXT_QUESTION - reasoning: {agent_decision.get('reasoning')}"
+            )
+        else:
+            # Agent 실패 시 Fallback: 기존 평가 로직 사용
+            logger.info("⏮️  [Fallback] Using traditional feedback evaluation")
+            feedback_result = await _evaluate_feedback(
+                feedback_orchestrator=feedback_orchestrator,
+                websocket=websocket,
+                session_id=session_id,
+                user_text=user_text,
+                audio_data=None,  # Text mode - no audio
+                session_state=session_state,
+                can_use_azure=False,  # Text mode - no Azure pronunciation
+            )
 
         # ✅ 피드백 메시지 전송 및 재시도 확인
         if await _send_feedback_messages(
@@ -104,7 +140,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             return
 
         # Step 3: Spring 2에 텍스트 저장
-        utterance_index = session_manager.increment_utterance_index(session_id)
+        utterance_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
 
         async def _save_user_text():
             await _save_utterance_with_feedback(
@@ -139,7 +175,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             user_text=user_text,
         )
 
-        ai_index = await session_manager.increment_utterance_index_async(session_id)
+        ai_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
         await _schedule_spring2_save(
             session_id=session_id,
             text=full_ai_response,

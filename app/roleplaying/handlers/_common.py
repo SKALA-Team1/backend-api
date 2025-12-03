@@ -23,6 +23,7 @@ from fastapi import WebSocket, status
 from app.config import settings
 from app.integrations.clients.spring2_client import spring2_client
 from app.roleplaying.core.session_state_manager import session_manager
+from app.roleplaying.core.session_message_handler import SessionMessageHandler
 from app.roleplaying.handlers.ws_message_models import (
     AiTextMessage, AiTextStreamingMessage, AiTypingMessage,
     ErrorMessage, FeedbackMessage, FeedbackStreamingMessage,
@@ -167,6 +168,11 @@ async def _evaluate_feedback(
             timeout=60.0
         )
 
+        if feedback_result and (audio_data is None or not can_use_azure):
+            scores = feedback_result.get("scores", {})
+            if scores:
+                scores["pronunciation_score"] = None
+
         feedback_elapsed = time.time() - feedback_start
         logger.info(f"✅ [피드백 평가 완료] session={session_id}, 소요 시간: {feedback_elapsed:.2f}초")
 
@@ -219,11 +225,13 @@ async def _generate_and_stream_ai_response(
         async for chunk, is_fixed in ai_tutor_service.generate_reply_stream(
             session_state, user_text
         ):
-            full_ai_response += chunk
-            is_fixed_question = is_fixed
-            await websocket.send_json(
-                AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
-            )
+            # 빈 chunk는 건너뛰기 (유효하지 않은 JSON 에러 방지)
+            if chunk and chunk.strip():
+                full_ai_response += chunk
+                is_fixed_question = is_fixed
+                await websocket.send_json(
+                    AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
+                )
 
     except Exception as e:
         logger.error(f"Error during AI streaming: {e}", exc_info=True)
@@ -234,7 +242,7 @@ async def _generate_and_stream_ai_response(
         )
 
     # 히스토리와 세션 상태 업데이트
-    await session_manager.append_message_async(
+    await SessionMessageHandler.append_message_async(
         session_id=session_id,
         speaker="ai",
         text=full_ai_response,
@@ -270,37 +278,32 @@ async def _send_feedback_messages(
         return False
 
     # 점수 전송
+    scores = feedback_result.get("scores", {})
     feedback_msg = FeedbackMessage(
-        pronunciation_score=feedback_result["scores"].get("pronunciation_score", 0),
-        grammar_score=feedback_result["scores"].get("grammar_score", 0),
-        relevance_score=feedback_result["scores"].get("relevance_score", 0),
-        overall_score=feedback_result["scores"].get("overall_score", 0)
+        pronunciation_score=scores.get("pronunciation_score"),
+        grammar_score=scores.get("grammar_score", 0),
+        relevance_score=scores.get("relevance_score", 0),
+        overall_score=scores.get("overall_score", 0)
     )
     await websocket.send_json(feedback_msg.model_dump())
     logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
     # 피드백 텍스트 스트리밍
-    async def _generate_and_send_feedback_text():
-        try:
-            feedback_text = feedback_result.get("feedback_text", "")
-            if feedback_text:
-                sentences = re.split(r'(?<=[.!?|])\s+', feedback_text)
-                for i, sentence in enumerate(sentences):
-                    if sentence.strip():
-                        if i < len(sentences) - 1 and not sentence.endswith(('|', '.')):
-                            chunk = sentence.strip() + " "
-                        else:
-                            chunk = sentence.strip()
-                        await websocket.send_json(
-                            FeedbackStreamingMessage(chunk=chunk).model_dump()
-                        )
-                        await asyncio.sleep(0.1)
-                logger.info(f"Feedback text streamed: {feedback_text[:60]}...")
-        except Exception as e:
-            logger.error(f"Failed to send feedback text: {e}")
-
-    feedback_task = asyncio.create_task(_generate_and_send_feedback_text())
-    feedback_task.add_done_callback(lambda t: _handle_task_error(t, f"feedback_text(session={session_id})"))
+    try:
+        feedback_text = feedback_result.get("feedback_text", "")
+        if feedback_text:
+            # '|'로 분할하고 각 부분을 별도로 전송
+            parts = feedback_text.split('|')
+            for part in parts:
+                part = part.strip()
+                if part:
+                    await websocket.send_json(
+                        FeedbackStreamingMessage(chunk=part).model_dump()
+                    )
+                    await asyncio.sleep(0.1)
+            logger.info(f"Feedback text streamed: {feedback_text[:60]}...")
+    except Exception as e:
+        logger.error(f"Failed to send feedback text: {e}")
 
     # 재시도 처리
     needs_correction = feedback_result.get("needs_correction", False)
@@ -389,3 +392,68 @@ async def _save_utterance_with_feedback(
 
     except Exception as e:
         logger.error(f"Failed to save utterance: session={session_id}, error={e}", exc_info=True)
+
+
+# ========================================
+# ReAct Agent 기반 피드백 평가 (신규)
+# ========================================
+
+
+async def _evaluate_feedback_with_agent(
+    agent,
+    session_id: str,
+    user_text: str,
+    audio_data: Optional[bytes],
+    session_state,
+    can_use_azure: bool = False,
+) -> Optional[dict]:
+    """
+    ReAct Agent를 통한 피드백 평가 및 판단
+
+    Args:
+        agent: FeedbackDecisionAgent 인스턴스
+        session_id: 세션 ID
+        user_text: 사용자 발화 텍스트
+        audio_data: 사용자 오디오 데이터
+        session_state: 세션 상태
+        can_use_azure: Azure 발음 평가 사용 가능 여부
+
+    Returns:
+        {
+            "action": "FEEDBACK" | "NEXT_QUESTION",
+            "feedback_result": {...} | None,
+            "reasoning": str,
+            "confidence": float
+        }
+        또는 None (에러 시)
+    """
+    try:
+        logger.info(
+            f"🤖 [ReAct] Starting feedback evaluation: session={session_id}, "
+            f"text_length={len(user_text)}, audio={audio_data is not None}, azure={can_use_azure}"
+        )
+
+        # ReAct Agent 실행
+        agent_decision = await agent.decide_feedback_or_question(
+            session_state=session_state,
+            user_text=user_text,
+            audio_data=audio_data if can_use_azure else None,
+            retry_count=session_state.current_question_retry_count if session_state else 0,
+            can_use_azure=can_use_azure,
+        )
+
+        if agent_decision is None:
+            logger.warning(f"❌ [ReAct] Agent returned None for session={session_id}")
+            return None
+
+        logger.info(
+            f"✅ [ReAct] Agent decision: action={agent_decision.get('action')}, "
+            f"confidence={agent_decision.get('confidence'):.2f}, "
+            f"reasoning={agent_decision.get('reasoning')[:60]}..."
+        )
+
+        return agent_decision
+
+    except Exception as e:
+        logger.error(f"❌ [ReAct] Agent evaluation failed: {e}", exc_info=True)
+        return None

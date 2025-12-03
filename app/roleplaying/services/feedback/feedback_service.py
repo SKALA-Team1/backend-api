@@ -26,6 +26,7 @@ from app.roleplaying.services.service_interfaces import (
 from app.roleplaying.prompts.constants import (
     GRAMMAR_EVALUATION_PROMPT,
     RELEVANCE_EVALUATION_PROMPT,
+    PRONUNCIATION_FEEDBACK_PROMPT,
 )
 from app.roleplaying.services.utils.service_utils import (
     extract_json_from_response,
@@ -249,6 +250,166 @@ class RelevanceEvaluatorImpl:
                 context_parts.append(f"{speaker}: {text}")
 
         return "\n".join(context_parts)
+
+
+# ============================================
+# PronunciationEvaluatorImpl
+# ============================================
+
+class PronunciationEvaluatorImpl:
+    """발음 평가를 담당하는 클래스 (점수 기반 피드백 생성)
+
+    Azure Speech Service에서 점수를 받고,
+    LLM을 사용하여 피드백 텍스트를 생성합니다.
+    책임: 발음 평가 (점수 + 피드백)
+    """
+
+    def __init__(
+        self,
+        azure_service,
+        provider: str = None,
+        api_key: str = None,
+        model_name: str = None,
+        temperature: float = 0.3
+    ):
+        """
+        발음 평가기 초기화
+
+        Args:
+            azure_service: Azure Speech Service 인스턴스
+            provider: LLM 프로바이더 ("openai" 또는 "ollama")
+            api_key: OpenAI API 키 (OpenAI 사용 시)
+            model_name: 모델명
+            temperature: 창의성 레벨 (낮을수록 일관성)
+        """
+        self.azure_service = azure_service
+        self.provider = provider or settings.FEEDBACK_LLM_PROVIDER
+        self.api_key = api_key or settings.openai_api_key
+        self.model_name = model_name or settings.OPENAI_MODEL_FEEDBACK
+        self.temperature = temperature
+
+        self.llm = create_llm_provider(
+            provider_type="openai" if self.provider == "openai" else "ollama",
+            api_key=self.api_key if self.provider == "openai" else None,
+            model_name=self.model_name,
+            base_url=settings.OLLAMA_BASE_URL if self.provider != "openai" else None,
+            temperature=self.temperature
+        )
+
+        logger.info(f"PronunciationEvaluatorImpl initialized with {self.provider} provider")
+
+    async def evaluate_pronunciation(
+        self,
+        audio_data: Optional[bytes],
+        user_text: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        발음 평가 (Azure 점수 + LLM 피드백)
+
+        Args:
+            audio_data: WAV 형식 오디오 데이터
+            user_text: 사용자 발화 텍스트
+
+        Returns:
+            {
+                "success": bool,
+                "score": int (0-100),
+                "feedback": str,
+                "pronunciation_score": float,
+                "accuracy_score": float,
+                "fluency_score": float,
+                "completeness_score": float,
+                "words": [...]
+            }
+            또는 None
+        """
+        if not audio_data:
+            logger.warning("No audio data provided for pronunciation evaluation")
+            return None
+
+        try:
+            logger.info("🔵 [발음 평가] Azure Speech 호출 중...")
+
+            # Step 1: Azure에서 점수 수집
+            azure_result = await self.azure_service.assess_pronunciation(
+                audio_data=audio_data,
+                reference_text=user_text,
+                language="en-US"
+            )
+
+            if not azure_result or not azure_result.get("success"):
+                logger.warning(f"Azure pronunciation assessment failed: {azure_result.get('error_message')}")
+                return None
+
+            pronunciation_score = azure_result.get("pronunciation_score", 0)
+            accuracy_score = azure_result.get("accuracy_score", 0)
+            fluency_score = azure_result.get("fluency_score", 0)
+            completeness_score = azure_result.get("completeness_score", 0)
+            words = azure_result.get("words", [])
+
+            logger.info(f"✅ [Azure 발음 평가 완료] 점수: {pronunciation_score}")
+
+            # Step 2: LLM으로 피드백 생성
+            error_words = [
+                w.get("word", "")
+                for w in words
+                if w.get("error_type") and w.get("accuracy_score", 100) < 80
+            ]
+            error_words_str = ", ".join(error_words[:5]) if error_words else "None"
+
+            prompt = PRONUNCIATION_FEEDBACK_PROMPT.format(
+                user_text=user_text,
+                pronunciation_score=pronunciation_score,
+                accuracy_score=accuracy_score,
+                fluency_score=fluency_score,
+                completeness_score=completeness_score,
+                error_words=error_words_str
+            )
+
+            logger.info("🔵 [발음 피드백] LLM 호출 중...")
+
+            response = await self.llm.invoke(prompt)
+            response_text = response if isinstance(response, str) else str(response)
+
+            # JSON 객체 추출 시도
+            result = extract_json_from_response(response_text)
+            if result:
+                feedback_score = normalize_score(result.get("score"))
+                if feedback_score is None:
+                    logger.warning("Pronunciation feedback generation returned no score")
+                    # Fallback: Azure 점수 사용
+                    feedback_score = int(pronunciation_score)
+
+                feedback_text = result.get("feedback", "")
+                logger.info(f"✅ [발음 피드백 생성 완료] {feedback_score}점")
+
+                return {
+                    "success": True,
+                    "score": feedback_score,
+                    "feedback": feedback_text,
+                    "pronunciation_score": pronunciation_score,
+                    "accuracy_score": accuracy_score,
+                    "fluency_score": fluency_score,
+                    "completeness_score": completeness_score,
+                    "words": words
+                }
+            else:
+                # 피드백만 추출 시도
+                logger.info(f"✅ [발음 피드백 생성 완료 (파싱)] {int(pronunciation_score)}점")
+                return {
+                    "success": True,
+                    "score": int(pronunciation_score),
+                    "feedback": response_text,
+                    "pronunciation_score": pronunciation_score,
+                    "accuracy_score": accuracy_score,
+                    "fluency_score": fluency_score,
+                    "completeness_score": completeness_score,
+                    "words": words
+                }
+
+        except Exception as e:
+            logger.error(f"Pronunciation evaluation failed: {e}", exc_info=True)
+            return None
 
 
 # ============================================
@@ -496,7 +657,7 @@ class FeedbackOrchestratorImpl:
             # 최종 메시지
             if needs_correction:
                 feedback_text = " | ".join(feedback_parts)
-                feedback_text += f"\n다시 한 번 시도해주세요."
+                feedback_text += f"다시 한 번 시도해주세요."
             else:
                 feedback_text = "좋습니다! 계속 진행하겠습니다."
 
