@@ -33,6 +33,7 @@ from app.roleplaying.handlers._common import (
     _save_utterance_with_feedback,
     _handle_task_error,
     _schedule_spring2_save,
+    _save_question_with_keywords,
 )
 from app.roleplaying.handlers.ws_message_models import (
     AiTypingMessage,
@@ -184,6 +185,19 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             played_turns=session_state.ai_turn_count if session_state else None,
             completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
             status="IN_PROGRESS",
+        )
+
+        # Step 5: AI 질문 저장 (바이링궐 + 추천 키워드)
+        turn_number = session_state.get_ai_turn_number() if session_state else 1
+        await _save_question_with_keywords(
+            session_id=session_id,
+            question_en=full_ai_response,
+            turn_number=turn_number,
+            user_role=session_state.my_role if session_state else "User",
+            ai_role=session_state.ai_role if session_state else "AI",
+            scenario_context=session_state.subject_id if session_state else "",
+            slack_message=None,  # TODO: slack_message를 session_state에서 가져오기
+            is_fixed_question=is_fixed_question,
         )
 
         logger.info(f"AI response completed: {full_ai_response[:50]}...")

@@ -317,6 +317,160 @@ class Spring2Client:
             logger.error(f"Session completion error: {e}", exc_info=True)
             raise
 
+    async def save_question(
+        self,
+        session_id: str,
+        turn_number: int,
+        question_en: str,
+        question_ko: str,
+        recommended_keywords: Optional[list] = None,
+        is_fixed_question: bool = False,
+        scenario_id: Optional[str] = None,
+    ) -> dict:
+        """
+        AI 질문 저장 (바이링궐 + 추천 키워드)
+
+        Args:
+            session_id: 세션 ID
+            turn_number: 턴 번호
+            question_en: 영문 질문
+            question_ko: 한글 질문
+            recommended_keywords: 추천 키워드 리스트 (["keyword1", "keyword2", ...])
+            is_fixed_question: 고정 질문 여부
+            scenario_id: 시나리오 ID
+
+        Returns:
+            API 응답 ({"success": true, "question_id": "...", ...})
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = f"/internal/sessions/{session_id}/questions"
+
+        payload = {
+            "turn_number": turn_number,
+            "question_en": question_en,
+            "question_ko": question_ko,
+            "is_fixed_question": is_fixed_question,
+        }
+
+        if recommended_keywords:
+            payload["recommended_keywords"] = recommended_keywords
+
+        if scenario_id:
+            payload["scenario_id"] = scenario_id
+
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"Question saved: session={session_id}, turn={turn_number}, "
+                f"question_id={result.get('question_id')}"
+            )
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to save question: session={session_id}, turn={turn_number}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Question save error: {e}", exc_info=True)
+            raise
+
+    async def save_feedback(
+        self,
+        session_id: str,
+        turn_number: int,
+        utterance_id: str,
+        feedback_type: str,
+        scores: dict,
+        feedback_sections: list,
+        needs_correction: bool = False,
+        primary_issue: Optional[str] = None,
+        retry_count: int = 0,
+        max_retries: int = 3,
+    ) -> dict:
+        """
+        피드백 저장 (바이링궐 섹션 포함)
+
+        Args:
+            session_id: 세션 ID
+            turn_number: 턴 번호
+            utterance_id: 발화 ID
+            feedback_type: 피드백 타입 ("pronunciation", "grammar", "relevance", "combined")
+            scores: 점수 딕셔너리
+                {
+                    "pronunciation_score": int,
+                    "grammar_score": int,
+                    "relevance_score": int,
+                    "overall_score": int
+                }
+            feedback_sections: 피드백 섹션 리스트
+                [
+                    {
+                        "type": "pronunciation",
+                        "feedback_en": "...",
+                        "feedback_ko": "...",
+                        "score": int
+                    },
+                    ...
+                ]
+            needs_correction: 재시도 필요 여부
+            primary_issue: 주요 문제 ("pronunciation", "grammar", "relevance", "none")
+            retry_count: 현재 재시도 횟수
+            max_retries: 최대 재시도 횟수
+
+        Returns:
+            API 응답 ({"success": true, "feedback_id": "...", ...})
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = f"/internal/sessions/{session_id}/feedback"
+
+        payload = {
+            "turn_number": turn_number,
+            "utterance_id": utterance_id,
+            "feedback_type": feedback_type,
+            "scores": scores,
+            "feedback_sections": feedback_sections,
+            "needs_correction": needs_correction,
+            "retry_count": retry_count,
+            "max_retries": max_retries,
+        }
+
+        if primary_issue:
+            payload["primary_issue"] = primary_issue
+
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"Feedback saved: session={session_id}, turn={turn_number}, "
+                f"feedback_id={result.get('feedback_id')}, type={feedback_type}"
+            )
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to save feedback: session={session_id}, turn={turn_number}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Feedback save error: {e}", exc_info=True)
+            raise
+
     async def close(self):
         """HTTP 클라이언트 종료"""
         if self.client:
