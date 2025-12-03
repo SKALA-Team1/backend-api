@@ -1,23 +1,6 @@
 version: '3.8'
 
 services:
-  # Qdrant (벡터 DB - 에이전트1 RAG)
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: skala-qdrant
-    ports:
-      - "6333:6333"  # API + Dashboard
-      - "6334:6334"  # gRPC
-    volumes:
-      - qdrant-data:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-    networks:
-      - skala-network
-
   # Redis (세션 저장소)
   redis:
     image: redis:7-alpine
@@ -74,7 +57,6 @@ services:
       - skala-network
 
 volumes:
-  qdrant-data:
   redis-data:
   minio-data:
 
