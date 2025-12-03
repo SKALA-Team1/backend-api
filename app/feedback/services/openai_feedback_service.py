@@ -41,7 +41,7 @@ class OpenAIFeedbackService:
             raise ValueError("OPENAI_API_KEY is not configured")
 
         self.client = OpenAI(api_key=settings.openai_api_key)
-        self.model = "gpt-4o-mini"
+        self.model = "gpt-3.5-turbo"
 
     def generate_feedback(
         self,
@@ -196,7 +196,7 @@ Return ONLY the JSON object, no additional text."""
         turn_summaries: list[dict]
     ) -> str:
         """
-        세션 전체에 대한 최종 종합 피드백 생성 (5줄 정도)
+        세션 전체에 대한 최종 종합 피드백 생성 (교육학적 구조 + IT 업무 특화)
 
         Args:
             avg_scores: {
@@ -214,19 +214,26 @@ Return ONLY the JSON object, no additional text."""
             }]
 
         Returns:
-            str: 5줄 정도의 최종 종합 피드백
+            str: 교육학적으로 구조화된 종합 피드백
         """
-        # 턴별 요약 구성
-        turns_text = ""
+        # 턴별 피드백 정리
+        turn_feedbacks_text = ""
         for t in turn_summaries:
-            grammar = ", ".join(t.get("grammar_notes", [])) or "없음"
-            turns_text += f"""
-- Turn {t['turn_number']}: "{t['user_message'][:50]}..."
-  추천 문장: "{t.get('suggested_sentence', '')[:50]}..."
-  문법 노트: {grammar}
-"""
+            turn_num = t.get('turn_number', 0)
+            user_msg = t.get('user_message', '')
+            suggested = t.get('suggested_sentence', '')
+            grammar = t.get('grammar_notes', [])
 
-        # 가장 높은 점수와 낮은 점수 항목 찾기
+            feedback_lines = [f"Turn {turn_num}:"]
+            feedback_lines.append(f"  학습자 발화: \"{user_msg}\"")
+            if suggested:
+                feedback_lines.append(f"  개선 제안: \"{suggested}\"")
+            if grammar:
+                feedback_lines.append(f"  문법 노트: {', '.join(grammar)}")
+
+            turn_feedbacks_text += "\n".join(feedback_lines) + "\n\n"
+
+        # 점수 분석
         scores = {
             "정확도": avg_scores.get('avg_accuracy', 0),
             "유창성": avg_scores.get('avg_fluency', 0),
@@ -237,41 +244,69 @@ Return ONLY the JSON object, no additional text."""
         worst_category = min(scores, key=scores.get)
         overall = avg_scores.get('overall_score', 0)
 
-        prompt = f"""You are an expert English conversation coach for Korean learners.
-사용자의 영어 회화 세션 전체를 분석하여 상세하고 따뜻한 종합 피드백을 작성해주세요.
+        prompt = f"""You are an English education expert evaluating a Korean employee's business English performance in an IT company meeting with a Vietnamese colleague.
 
-## 점수 분석
-- 종합 점수: {overall:.0f}점
-- 정확도(Accuracy): {scores['정확도']:.0f}점
-- 유창성(Fluency): {scores['유창성']:.0f}점
-- 완성도(Completeness): {scores['완성도']:.0f}점
-- 발음(Pronunciation): {scores['발음']:.0f}점
-- 강점 영역: {best_category}
-- 개선 필요 영역: {worst_category}
+## Context
+- Scenario: Business meeting between Korean employee (learner) and Vietnamese colleague
+- Focus: Real workplace communication effectiveness, not just grammar checking
+- Evaluation perspective: Educational expert analyzing practical business English skills
+- Task: Synthesize individual turn-by-turn feedback into comprehensive final feedback
 
-## 출력 형식
-다음 구조로 한국어 피드백을 작성하세요:
+## Performance Data
+- Overall Score: {overall:.0f}/100
+- Pronunciation: {scores['발음']:.0f}/100 - Clarity and accuracy
+- Fluency: {scores['유창성']:.0f}/100 - Natural flow and smoothness
+- Completeness: {scores['완성도']:.0f}/100 - Sentence completion
+- Accuracy: {scores['정확도']:.0f}/100 - Grammar and vocabulary precision
+- Strength Area: {best_category}
+- Needs Improvement: {worst_category}
 
-1. **레벨 판정** (1줄): 종합 점수 기반으로 현재 실력 레벨을 알려주세요
-   - 90점 이상: 상급 (Advanced)
-   - 75-89점: 중급 (Intermediate)
-   - 60-74점: 초중급 (Pre-Intermediate)
-   - 40-59점: 초급 (Elementary)
-   - 40점 미만: 입문 (Beginner)
+## Turn-by-Turn Feedback (Individual evaluations already completed)
+{turn_feedbacks_text}
 
-2. **강점 분석** (2-3줄): 가장 잘한 부분을 구체적으로 칭찬해주세요
+**Note:** Each turn has already been individually evaluated. Your job is to analyze these individual feedbacks and synthesize them into comprehensive final feedback.
 
-3. **개선 포인트** (2-3줄): 부족한 부분과 구체적인 개선 방법을 제안해주세요
+## Your Task: Synthesize Individual Feedbacks
 
-4. **학습 팁** (1-2줄): 실력 향상을 위한 실용적인 조언을 해주세요
+Based on the turn-by-turn feedback above, provide comprehensive final feedback by:
+1. Identifying **common patterns** across multiple turns
+2. Highlighting **recurring strengths** and **repeated mistakes**
+3. Providing **actionable next steps** for improvement
 
-5. **응원 메시지** (1줄): 따뜻한 격려로 마무리해주세요
+## Output Format (in Korean)
 
-## 규칙
-- 반드시 한국어로 작성
-- 격려하면서도 솔직한 피드백
-- 구체적이고 실용적인 조언 포함
-- 전체 5-8줄 정도로 작성"""
+### 📊 전반적 평가
+[Overall assessment based on {overall:.0f} score and turn-by-turn patterns]
+- 90+: 글로벌 프로젝트를 주도할 수 있는 수준
+- 75-89: 해외 팀과 원활하게 협업 가능한 수준
+- 60-74: 기본적인 업무 소통이 가능한 수준
+- 60 미만: 기초 비즈니스 표현 학습이 필요한 수준
+
+### 🎯 반복된 패턴 분석
+[Analyze patterns that appeared across multiple turns]
+- 자주 나타난 강점 (예: 특정 표현을 잘 사용함)
+- 반복적으로 나타난 약점 (예: 같은 문법 실수가 여러 턴에서 발생)
+
+### 💼 실무 커뮤니케이션 효과
+[How well did the learner communicate with Vietnamese colleague in business context?]
+- 베트남 동료가 이해하기 쉬웠는지
+- 업무 맥락에 적절했는지
+- 더 전문적으로 개선할 부분
+
+### 📈 우선순위 개선 사항
+[Based on {worst_category} and repeated issues in turn feedbacks]
+- 가장 먼저 고쳐야 할 습관 (턴별 피드백에서 반복된 것)
+- 다음 회의에서 시도할 구체적 표현
+
+### 💪 격려
+[Positive reinforcement with specific growth points]
+
+## Guidelines
+- Write in Korean (한국어)
+- Focus on **patterns** across turns, not individual turns
+- Be specific: reference actual examples from turn feedbacks
+- Actionable: what should learner do differently next time?
+- Length: 8-12 lines total, each section 1-2 lines"""
 
         try:
             response = self.client.chat.completions.create(
@@ -279,12 +314,12 @@ Return ONLY the JSON object, no additional text."""
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert English conversation coach for Korean learners. Provide detailed, warm, and constructive feedback in Korean."
+                        "content": "당신은 IT 업무 영어 전문 교육 코치입니다. 개별 턴별 피드백들을 분석하여 반복된 패턴을 찾고, 이를 바탕으로 종합적인 최종 피드백을 한국어로 제공합니다. 턴별 피드백에서 반복적으로 나타난 강점과 약점을 중심으로 실무에 적용 가능한 구체적인 조언을 제공하세요."
                     },
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=800
             )
 
             content = response.choices[0].message.content.strip()
@@ -297,7 +332,7 @@ Return ONLY the JSON object, no additional text."""
             return self._generate_default_final_feedback(avg_scores)
 
     def _generate_default_final_feedback(self, avg_scores: dict) -> str:
-        """기본 최종 피드백 생성 (API 오류 시 사용)"""
+        """기본 최종 피드백 생성 (API 오류 시 사용) - IT 업무 특화"""
         overall = avg_scores.get('overall_score', 0)
 
         # 강점/약점 분석
@@ -311,49 +346,64 @@ Return ONLY the JSON object, no additional text."""
         worst = min(scores, key=scores.get)
 
         if overall >= 90:
-            return f"""[레벨: 상급 (Advanced)] 종합 {overall:.0f}점
+            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 글로벌 프로젝트 리드 가능 수준
+특히 {best} 영역에서 뛰어난 역량을 보여주셨습니다.
 
-훌륭합니다! 원어민에 가까운 영어 실력을 보여주셨습니다. 특히 {best} 영역에서 뛰어난 능력을 발휘하셨네요.
+🎯 **학습 목표 달성도**: 영어로 복잡한 기술적 내용도 명확하게 전달할 수 있는 수준입니다.
 
-현재 실력을 유지하면서 다양한 주제의 대화에 도전해보세요. 비즈니스 영어나 학술적인 표현도 시도해보시면 좋겠습니다.
+💼 **IT 실무 적용**: 해외 클라이언트와의 미팅, 기술 프레젠테이션, 글로벌 팀 리딩에 자신감을 가지세요.
 
-앞으로도 꾸준히 영어를 사용하시면서 실력을 더욱 발전시켜 나가세요!"""
+📈 **다음 단계**: 고급 비즈니스 협상 표현이나 기술 논문 발표 영어에 도전해보세요.
+
+💪 글로벌 IT 리더로서의 역량이 충분합니다. 계속해서 성장해 나가세요!"""
 
         elif overall >= 75:
-            return f"""[레벨: 중급 (Intermediate)] 종합 {overall:.0f}점
+            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 해외 팀과 원활한 협업 가능
+{best} 영역이 특히 우수합니다.
 
-잘하고 계십니다! 영어로 자연스러운 의사소통이 가능한 수준입니다. {best} 영역이 특히 우수하네요.
+🎯 **학습 목표 달성도**: 업무 관련 영어 소통에 큰 무리가 없는 수준입니다.
 
-{worst} 부분을 조금 더 연습하시면 상급 레벨로 도약할 수 있습니다. 매일 영어 뉴스나 팟캐스트를 듣는 것을 추천드립니다.
+💼 **IT 실무 적용**: 영어 이메일 작성, 화상 미팅, 코드 리뷰 코멘트 작성에 활용하세요.
 
-꾸준한 노력이 빛을 발하고 있습니다. 조금만 더 힘내세요!"""
+📈 **다음 단계**: {worst} 영역을 보완하면 글로벌 프로젝트 리더로 성장할 수 있습니다. 영어 기술 팟캐스트 청취를 추천드립니다.
+
+💪 꾸준한 성장이 돋보입니다. 조금만 더 노력하면 상급 레벨에 도달할 수 있어요!"""
 
         elif overall >= 60:
-            return f"""[레벨: 초중급 (Pre-Intermediate)] 종합 {overall:.0f}점
+            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 기본적인 업무 소통 가능
+{best} 영역에서 강점을 보여주셨습니다.
 
-좋은 진전을 보이고 계십니다! 기본적인 영어 의사소통이 가능한 단계입니다. {best} 영역에서 강점을 보여주셨어요.
+🎯 **학습 목표 달성도**: 간단한 업무 대화와 이메일 소통이 가능한 수준입니다.
 
-{worst} 부분에 집중해서 연습하시면 빠르게 실력이 향상될 거예요. 짧은 영어 문장을 매일 따라 말하는 연습을 해보세요.
+💼 **IT 실무 적용**: 정형화된 이메일 템플릿과 기본 회의 표현부터 실무에 적용해보세요.
 
-지금처럼 꾸준히 노력하시면 분명 목표를 달성하실 수 있습니다!"""
+📈 **다음 단계**: {worst} 부분을 집중 연습하세요. 매일 IT 관련 영어 기사를 소리 내어 읽는 연습을 추천드립니다.
+
+💪 좋은 기반을 다지고 계십니다. 꾸준히 연습하면 분명 더 성장할 수 있어요!"""
 
         elif overall >= 40:
-            return f"""[레벨: 초급 (Elementary)] 종합 {overall:.0f}점
+            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 기초 표현 학습 단계
+{best} 영역에서 가능성이 보입니다.
 
-영어 학습을 잘 시작하셨습니다! {best} 영역에서 가능성을 보여주셨어요.
+🎯 **학습 목표 달성도**: 기본적인 인사와 간단한 표현 사용이 가능합니다.
 
-기초 문장 패턴을 반복해서 연습하고, 매일 10분씩 영어로 말하는 습관을 들여보세요. 처음엔 어렵지만 점점 나아질 거예요.
+💼 **IT 실무 적용**: "Could you please...", "I'd like to..." 같은 기본 업무 표현부터 익혀보세요.
 
-모든 전문가도 처음엔 초보였습니다. 포기하지 마시고 꾸준히 도전하세요!"""
+📈 **다음 단계**: IT 업무에서 자주 쓰는 기본 문장 패턴 20개를 암기하는 것부터 시작해보세요.
+
+💪 모든 전문가도 처음엔 초보였습니다. 꾸준히 도전하면 반드시 성장합니다!"""
 
         else:
-            return f"""[레벨: 입문 (Beginner)] 종합 {overall:.0f}점
+            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 영어 학습 시작 단계
+도전하는 자세가 정말 멋집니다!
 
-영어 학습의 첫 걸음을 내딛으셨군요! 도전하는 자세가 정말 멋집니다.
+🎯 **학습 목표 달성도**: 영어 학습의 첫 걸음을 내딛으셨습니다.
 
-기본 인사말과 자기소개부터 천천히 시작해보세요. 짧고 쉬운 문장을 자신감 있게 말하는 것이 중요합니다.
+💼 **IT 실무 적용**: 먼저 "Hello", "Thank you", "I understand" 같은 기본 표현에 익숙해지세요.
 
-매일 조금씩 연습하면 분명 실력이 늘 거예요. 응원합니다!"""
+📈 **다음 단계**: 짧은 자기소개와 간단한 인사말부터 연습해보세요. 매일 10분씩 꾸준히 하는 것이 중요합니다.
+
+💪 시작이 반입니다! 매일 조금씩 연습하면 분명 실력이 늘 거예요. 응원합니다!"""
 
 
 # 싱글톤 인스턴스

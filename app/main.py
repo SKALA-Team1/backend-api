@@ -1,12 +1,37 @@
 """FastAPI application entrypoint where routers and services are wired."""
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from dotenv import load_dotenv
 
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import setup_logging
+
+# Load environment variables
+load_dotenv()
+
+# ========================================
+# LangSmith 설정 (LLM 모니터링)
+# ========================================
+def setup_langsmith():
+    """LangSmith 트레이싱 설정"""
+    if os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true":
+        api_key = os.getenv("LANGCHAIN_API_KEY")
+        project = os.getenv("LANGCHAIN_PROJECT", "default")
+
+        if api_key:
+            logging.info(f"✅ LangSmith 트레이싱 활성화 (프로젝트: {project})")
+            logging.info(f"   대시보드: https://smith.langchain.com/o/default/projects")
+            return True
+        else:
+            logging.warning("⚠️ LANGCHAIN_API_KEY가 설정되지 않음 - 트레이싱 비활성화")
+            return False
+    else:
+        logging.info("ℹ️ LangSmith 트레이싱 비활성화 (LANGCHAIN_TRACING_V2=false)")
+        return False
 from app.health.router import router as health_router
 from app.roleplaying.router import router as roleplaying_router
 from app.roleplaying.ws_realtime import router as ws_realtime_router
@@ -36,6 +61,9 @@ async def lifespan(app: FastAPI):
     # Startup: 리소스 초기화
     # ========================================
     logger.info("FastAPI application starting up...")
+
+    # LangSmith 트레이싱 초기화
+    setup_langsmith()
 
     try:
         # Redis 클라이언트 초기화 (필요시)
