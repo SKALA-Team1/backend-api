@@ -288,6 +288,8 @@ async def _send_feedback_messages(
 ) -> bool:
     """
     피드백 메시지 전송 및 재시도 여부 판단
+    - 점수 전송
+    - 피드백 섹션 스트리밍 (각 섹션이 생성되면 즉시 전송)
 
     Returns:
         True if retry needed (early return), False otherwise
@@ -296,7 +298,7 @@ async def _send_feedback_messages(
         logger.info(f"Skipping feedback processing: feedback_result is None")
         return False
 
-    # 점수 전송
+    # Step 1: 점수 전송
     scores = feedback_result.get("scores", {})
     feedback_msg = FeedbackMessage(
         pronunciation_score=scores.get("pronunciation_score"),
@@ -307,33 +309,39 @@ async def _send_feedback_messages(
     await websocket.send_json(feedback_msg.model_dump())
     logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
-    # ✅ 구조화된 피드백 섹션 전송 (NEW - 영문 + 한글)
+    # Step 2: ✅ 구조화된 피드백 섹션 스트리밍 (NEW - 각 섹션이 준비되면 즉시 전송)
     try:
-        feedback_sections = feedback_result.get("feedback_sections", [])
-        if feedback_sections:
-            from app.roleplaying.handlers.ws_message_models import FeedbackSectionsMessage
-            sections_msg = FeedbackSectionsMessage(sections=feedback_sections)
-            await websocket.send_json(sections_msg.model_dump())
-            logger.info(f"Feedback sections sent: {len(feedback_sections)} sections")
-    except Exception as e:
-        logger.error(f"Failed to send feedback sections: {e}")
+        from app.roleplaying.handlers.ws_message_models import FeedbackSectionsMessage
+        from app.roleplaying.services.feedback.feedback_service import feedback_orchestrator
 
-    # 피드백 텍스트 스트리밍 (선택사항 - 한글 피드백)
-    try:
-        feedback_text = feedback_result.get("feedback_text", "")
-        if feedback_text:
-            # '|'로 분할하고 각 부분을 별도로 전송
-            parts = feedback_text.split('|')
-            for part in parts:
-                part = part.strip()
-                if part:
-                    await websocket.send_json(
-                        FeedbackStreamingMessage(chunk=part).model_dump()
-                    )
-                    await asyncio.sleep(0.1)
-            logger.info(f"Feedback text streamed: {feedback_text[:60]}...")
+        # 평가 결과에서 필요한 정보 추출
+        pronunciation = feedback_result.get("pronunciation")
+        grammar = feedback_result.get("grammar")
+        relevance = feedback_result.get("relevance")
+        pronunciation_score = feedback_result.get("pronunciation_score")
+        grammar_score = feedback_result.get("grammar_score")
+        relevance_score = feedback_result.get("relevance_score")
+
+        # 피드백 섹션을 스트리밍으로 생성 및 전송
+        section_count = 0
+        async for section in feedback_orchestrator._build_feedback_sections_stream(
+            pronunciation=pronunciation,
+            grammar=grammar,
+            relevance=relevance,
+            pronunciation_score=pronunciation_score,
+            grammar_score=grammar_score,
+            relevance_score=relevance_score
+        ):
+            # 각 섹션이 완성되면 즉시 WebSocket으로 전송
+            sections_msg = FeedbackSectionsMessage(sections=[section])
+            await websocket.send_json(sections_msg.model_dump())
+            section_count += 1
+            logger.info(f"✅ [피드백 섹션 실시간 전송] {section['type']} ({section_count}/3)")
+
+        logger.info(f"All {section_count} feedback sections streamed")
+
     except Exception as e:
-        logger.error(f"Failed to send feedback text: {e}")
+        logger.error(f"Failed to stream feedback sections: {e}", exc_info=True)
 
     # 재시도 처리
     needs_correction = feedback_result.get("needs_correction", False)
@@ -408,11 +416,10 @@ async def _save_utterance_with_feedback(
                 "grammar_score": feedback_result["scores"].get("grammar_score"),
                 "relevance_score": feedback_result["scores"].get("relevance_score"),
                 "overall_score": feedback_result["scores"].get("overall_score"),
-                "feedback_text": feedback_result.get("feedback_text", ""),
                 "needs_correction": needs_correction,  # Boolean (변환은 spring2_client에서)
                 "retry_count": retry_count,
                 "primary_issue": feedback_result.get("primary_issue", "none"),
-                "feedback_sections": feedback_result.get("feedback_sections"),  # Option 3: 구조화된 피드백
+                "feedback_sections": feedback_result.get("feedback_sections"),  # 구조화된 피드백 (영문 + 한글)
             })
         else:
             # No feedback data - explicitly set fields
@@ -422,7 +429,6 @@ async def _save_utterance_with_feedback(
                 "grammar_score": None,
                 "relevance_score": None,
                 "overall_score": None,
-                "feedback_text": None,
                 "needs_correction": False,  # ✅ Boolean False (spring2_client에서 0으로 변환)
                 "retry_count": None,
                 "primary_issue": "none",  # ✅ 명시적으로 "none"

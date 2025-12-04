@@ -604,31 +604,13 @@ class FeedbackOrchestratorImpl:
                 retry_count
             )
 
-            # 피드백 텍스트 생성
-            feedback_start = time.time()
-            feedback_text = await self._generate_feedback_text(
-                user_text,
-                pronunciation,
-                grammar,
-                relevance,
-                needs_correction
-            )
-            feedback_time = time.time() - feedback_start
-            logger.info(f"💬 [피드백 텍스트 생성 완료] 소요 시간: {feedback_time:.2f}초")
 
             total_time = time.time() - start_time
             logger.info(f"🎉 [피드백 평가 전체 완료] 총 소요 시간: {total_time:.2f}초")
             logger.info(f"   종합 점수: {overall_score}점 | 교정 필요: {needs_correction}")
 
-            feedback_sections = await self._build_feedback_sections(
-                pronunciation,
-                grammar,
-                relevance,
-                pronunciation_score,
-                grammar_score,
-                relevance_score
-            )
-
+            # 피드백 섹션 스트리밍은 _common.py에서 별도로 처리
+            # 여기서는 점수와 교정 판단 정보만 반환
             return {
                 "needs_correction": needs_correction,
                 "primary_issue": primary_issue,
@@ -638,8 +620,12 @@ class FeedbackOrchestratorImpl:
                     "relevance_score": int(relevance_score) if relevance_score is not None else None,
                     "overall_score": int(overall_score) if overall_score is not None else None
                 },
-                "feedback_sections": feedback_sections,
-                "feedback_text": feedback_text,
+                "pronunciation": pronunciation,
+                "grammar": grammar,
+                "relevance": relevance,
+                "pronunciation_score": pronunciation_score,
+                "grammar_score": grammar_score,
+                "relevance_score": relevance_score,
                 "retry_count": retry_count
             }
 
@@ -705,7 +691,7 @@ class FeedbackOrchestratorImpl:
             logger.error(f"Feedback generation failed: {e}")
             return "평가를 완료했습니다."
 
-    async def _build_feedback_sections(
+    async def _build_feedback_sections_stream(
         self,
         pronunciation: Optional[Dict],
         grammar: Optional[Dict],
@@ -713,8 +699,12 @@ class FeedbackOrchestratorImpl:
         pronunciation_score: Optional[int],
         grammar_score: Optional[int],
         relevance_score: Optional[int],
-    ) -> List[Dict[str, Any]]:
-        """피드백 섹션(영문 + 한글) 구성 - 병렬 번역"""
+    ):
+        """
+        피드백 섹션(영문 + 한글) 스트리밍 생성
+
+        각 섹션의 번역이 완료되면 즉시 yield함 (실시간 스트리밍)
+        """
         # Step 1: 각 섹션의 영문 피드백 생성 (동기)
         section_en_data = [
             self._build_single_section(
@@ -737,28 +727,24 @@ class FeedbackOrchestratorImpl:
             ),
         ]
 
-        # Step 2: 병렬로 한글 번역 (LLM 호출 최소화)
+        # Step 2: 각 섹션을 순차적으로 번역하고 즉시 yield
         try:
-            translation_tasks = [
-                self._translate_feedback(section["feedback_en"])
-                for section in section_en_data
-            ]
-            korean_feedbacks = await asyncio.gather(*translation_tasks)
+            for section in section_en_data:
+                # 해당 섹션 번역 (한 번에 하나씩)
+                korean_feedback = await self._translate_feedback(section["feedback_en"])
+                section["feedback_ko"] = korean_feedback or section["feedback_en"]
 
-            # Step 3: 한글 번역 결과 병합
-            sections: List[Dict[str, Any]] = []
-            for i, section in enumerate(section_en_data):
-                section["feedback_ko"] = korean_feedbacks[i] or section["feedback_en"]  # 번역 실패 시 영문 사용
-                sections.append(section)
-
-            return sections
+                # 완성된 섹션 즉시 yield
+                yield section
+                logger.info(f"✅ [피드백 섹션 전송] {section['type']}: {section['feedback_en'][:40]}...")
 
         except Exception as e:
-            logger.error(f"Failed to translate feedback sections: {e}", exc_info=True)
-            # Fallback: 한글 번역 없이 영문만 반환 (기존 동작)
+            logger.error(f"Failed to stream feedback sections: {e}", exc_info=True)
+            # Fallback: 영문만으로 기존 섹션들 yield
             for section in section_en_data:
-                section["feedback_ko"] = section["feedback_en"]
-            return section_en_data
+                if not section.get("feedback_ko"):  # 아직 번역 안 된 섹션만
+                    section["feedback_ko"] = section["feedback_en"]
+                yield section
 
     async def _translate_feedback(self, feedback_en: str) -> Optional[str]:
         """LLM을 사용하여 영문 피드백을 한글로 번역"""
