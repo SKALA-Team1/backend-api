@@ -26,7 +26,7 @@ from app.roleplaying.core.session_state_manager import session_manager
 from app.roleplaying.core.session_message_handler import SessionMessageHandler
 from app.roleplaying.handlers.ws_message_models import (
     AiTextMessage, AiTextStreamingMessage, AiTypingMessage,
-    ErrorMessage, FeedbackMessage, FeedbackStreamingMessage,
+    ErrorMessage, FeedbackMessage, FeedbackSectionsMessage, FeedbackStreamingMessage,
     RetryRequiredMessage, UtteranceSavedMessage
 )
 
@@ -311,8 +311,9 @@ async def _send_feedback_messages(
 
     # Step 2: ✅ 구조화된 피드백 섹션 스트리밍 (NEW - 각 섹션이 준비되면 즉시 전송)
     try:
-        from app.roleplaying.handlers.ws_message_models import FeedbackSectionsMessage
-        from app.roleplaying.services.feedback.feedback_service import feedback_orchestrator
+        from app.roleplaying.services.dependencies.feedback import get_feedback_orchestrator
+
+        feedback_orchestrator = get_feedback_orchestrator()
 
         # 평가 결과에서 필요한 정보 추출
         pronunciation = feedback_result.get("pronunciation")
