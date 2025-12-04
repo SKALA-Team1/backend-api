@@ -95,6 +95,10 @@ async def evaluate_response_tool(
             "primary_issue": result.get("primary_issue", "none"),
             "feedback_sections": result.get("feedback_sections", []),
             "retry_count": result.get("retry_count", retry_count),
+            # 🔑 Raw evaluation objects for streaming feedback sections
+            "pronunciation": result.get("pronunciation"),
+            "grammar": result.get("grammar"),
+            "relevance": result.get("relevance"),
         }
 
     except Exception as e:

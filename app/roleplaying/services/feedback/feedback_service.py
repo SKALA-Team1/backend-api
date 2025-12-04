@@ -100,19 +100,24 @@ class GrammarEvaluatorImpl:
 
             response = await self.llm.invoke(prompt)
             response_text = response if isinstance(response, str) else str(response)
+            logger.info(f"🔍 [문법 평가 LLM 응답] {response_text[:200]}...")
 
             # JSON 객체 추출 시도
             result = extract_json_from_response(response_text)
+            logger.info(f"📌 [JSON 추출 결과] {result}")  # ← 직접 추출 결과 로깅
             if result:
                 score = normalize_score(result.get("score"))
+                feedback = result.get("feedback", "")
                 if score is None:
                     logger.warning("Grammar evaluation returned no score")
                     return None
-                logger.info(f"✅ [문법 평가 완료] {score}점")
-                return {
+                logger.info(f"✅ [문법 평가 완료] {score}점 | feedback: {feedback[:50] if feedback else '(없음)'}")
+                return_value = {
                     "score": score,
-                    "feedback": result.get("feedback", "")
+                    "feedback": feedback
                 }
+                logger.info(f"📤 [문법 평가 반환값] {return_value}")  # ← 반환값 로깅
+                return return_value
             else:
                 # 점수만 추출 시도
                 score = normalize_score_from_string(response_text)
@@ -202,19 +207,24 @@ class RelevanceEvaluatorImpl:
 
             response = await self.llm.invoke(prompt)
             response_text = response if isinstance(response, str) else str(response)
+            logger.info(f"🔍 [맥락 평가 LLM 응답] {response_text[:200]}...")
 
             # JSON 객체 추출 시도
             result = extract_json_from_response(response_text)
+            logger.info(f"📌 [JSON 추출 결과] {result}")  # ← 직접 추출 결과 로깅
             if result:
                 score = normalize_score(result.get("score"))
+                feedback = result.get("feedback", "")
                 if score is None:
                     logger.warning("Relevance evaluation returned no score")
                     return None
-                logger.info(f"✅ [맥락 평가 완료] {score}점")
-                return {
+                logger.info(f"✅ [맥락 평가 완료] {score}점 | feedback: {feedback[:50] if feedback else '(없음)'}")
+                return_value = {
                     "score": score,
-                    "feedback": result.get("feedback", "")
+                    "feedback": feedback
                 }
+                logger.info(f"📤 [맥락 평가 반환값] {return_value}")  # ← 반환값 로깅
+                return return_value
             else:
                 # 점수만 추출 시도
                 score = normalize_score_from_string(response_text)
@@ -511,6 +521,9 @@ class FeedbackOrchestratorImpl:
         self.feedback_judge = feedback_judge
         self.azure_tracker = azure_tracker
 
+        # 피드백 번역용 LLM (grammar_evaluator의 llm 사용)
+        self.llm = grammar_evaluator.llm if hasattr(grammar_evaluator, 'llm') else None
+
         logger.info("FeedbackOrchestratorImpl initialized")
 
     async def evaluate_response_fast(
@@ -601,31 +614,13 @@ class FeedbackOrchestratorImpl:
                 retry_count
             )
 
-            # 피드백 텍스트 생성
-            feedback_start = time.time()
-            feedback_text = await self._generate_feedback_text(
-                user_text,
-                pronunciation,
-                grammar,
-                relevance,
-                needs_correction
-            )
-            feedback_time = time.time() - feedback_start
-            logger.info(f"💬 [피드백 텍스트 생성 완료] 소요 시간: {feedback_time:.2f}초")
 
             total_time = time.time() - start_time
             logger.info(f"🎉 [피드백 평가 전체 완료] 총 소요 시간: {total_time:.2f}초")
             logger.info(f"   종합 점수: {overall_score}점 | 교정 필요: {needs_correction}")
 
-            feedback_sections = self._build_feedback_sections(
-                pronunciation,
-                grammar,
-                relevance,
-                pronunciation_score,
-                grammar_score,
-                relevance_score
-            )
-
+            # 피드백 섹션 스트리밍은 _common.py에서 별도로 처리
+            # 여기서는 점수와 교정 판단 정보만 반환
             return {
                 "needs_correction": needs_correction,
                 "primary_issue": primary_issue,
@@ -635,8 +630,12 @@ class FeedbackOrchestratorImpl:
                     "relevance_score": int(relevance_score) if relevance_score is not None else None,
                     "overall_score": int(overall_score) if overall_score is not None else None
                 },
-                "feedback_sections": feedback_sections,
-                "feedback_text": feedback_text,
+                "pronunciation": pronunciation,
+                "grammar": grammar,
+                "relevance": relevance,
+                "pronunciation_score": pronunciation_score,
+                "grammar_score": grammar_score,
+                "relevance_score": relevance_score,
                 "retry_count": retry_count
             }
 
@@ -702,7 +701,7 @@ class FeedbackOrchestratorImpl:
             logger.error(f"Feedback generation failed: {e}")
             return "평가를 완료했습니다."
 
-    def _build_feedback_sections(
+    async def _build_feedback_sections_stream(
         self,
         pronunciation: Optional[Dict],
         grammar: Optional[Dict],
@@ -710,36 +709,83 @@ class FeedbackOrchestratorImpl:
         pronunciation_score: Optional[int],
         grammar_score: Optional[int],
         relevance_score: Optional[int],
-    ) -> List[Dict[str, Any]]:
-        """피드백 섹션(영문) 구성"""
-        sections: List[Dict[str, Any]] = []
+    ):
+        """
+        피드백 섹션(영문 + 한글) 스트리밍 생성
 
-        sections.append(
+        각 섹션의 번역이 완료되면 즉시 yield함 (실시간 스트리밍)
+        """
+        # Step 1: 각 섹션의 영문 피드백 생성 (동기)
+        section_en_data = [
             self._build_single_section(
                 section_type="pronunciation",
                 evaluation=pronunciation,
                 score=pronunciation_score,
                 fallback="Pronunciation feedback is unavailable."
-            )
-        )
-        sections.append(
+            ),
             self._build_single_section(
                 section_type="grammar",
                 evaluation=grammar,
                 score=grammar_score,
                 fallback="Grammar feedback is unavailable."
-            )
-        )
-        sections.append(
+            ),
             self._build_single_section(
                 section_type="relevance",
                 evaluation=relevance,
                 score=relevance_score,
                 fallback="Relevance feedback is unavailable."
-            )
-        )
+            ),
+        ]
 
-        return sections
+        # Step 2: 각 섹션을 순차적으로 번역하고 즉시 yield
+        try:
+            for section in section_en_data:
+                # 해당 섹션 번역 (한 번에 하나씩)
+                korean_feedback = await self._translate_feedback(section["feedback_en"])
+                section["feedback_ko"] = korean_feedback or section["feedback_en"]
+
+                # 완성된 섹션 즉시 yield
+                yield section
+                logger.info(f"✅ [피드백 섹션 전송] {section['type']}: {section['feedback_en'][:40]}...")
+
+        except Exception as e:
+            logger.error(f"Failed to stream feedback sections: {e}", exc_info=True)
+            # Fallback: 영문만으로 기존 섹션들 yield
+            for section in section_en_data:
+                if not section.get("feedback_ko"):  # 아직 번역 안 된 섹션만
+                    section["feedback_ko"] = section["feedback_en"]
+                yield section
+
+    async def _translate_feedback(self, feedback_en: str) -> Optional[str]:
+        """LLM을 사용하여 영문 피드백을 한글로 번역"""
+        try:
+            from app.roleplaying.prompts.constants import FEEDBACK_BILINGUAL_PROMPT
+
+            prompt = FEEDBACK_BILINGUAL_PROMPT.format(english_feedback=feedback_en)
+            response = await self.llm.invoke(prompt)
+
+            # JSON에서 korean_feedback 추출 시도
+            try:
+                json_match = re.search(r'\{[^{}]*"korean_feedback"[^{}]*\}', response, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group(0))
+                    korean_feedback = parsed.get("korean_feedback")
+                    if korean_feedback and korean_feedback.strip():
+                        logger.debug(f"✅ [번역 완료] {feedback_en[:30]}... → {korean_feedback[:30]}...")
+                        return korean_feedback
+            except Exception as e:
+                logger.warning(f"Failed to parse Korean feedback translation: {e}")
+
+            # JSON 파싱 실패 시 전체 응답 사용 (간단한 번역 결과일 수 있음)
+            if response and response.strip():
+                logger.debug(f"✅ [번역 완료 (파싱)] {feedback_en[:30]}... → {response[:30]}...")
+                return response.strip()
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Feedback translation failed: {e}")
+            return None
 
     def _build_single_section(
         self,
@@ -748,7 +794,7 @@ class FeedbackOrchestratorImpl:
         score: Optional[int],
         fallback: str
     ) -> Dict[str, Any]:
-        """개별 섹션 포맷"""
+        """개별 섹션 포맷 (영문만 생성, 한글은 비동기로 추가)"""
         feedback_text = ""
         if evaluation and isinstance(evaluation, dict):
             feedback_text = evaluation.get("feedback") or ""
@@ -759,5 +805,6 @@ class FeedbackOrchestratorImpl:
         return {
             "type": section_type,
             "feedback_en": feedback_text,
+            "feedback_ko": "",  # 이후 async 메서드에서 채워짐
             "score": normalized_score,
         }
