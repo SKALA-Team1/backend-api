@@ -100,18 +100,20 @@ class GrammarEvaluatorImpl:
 
             response = await self.llm.invoke(prompt)
             response_text = response if isinstance(response, str) else str(response)
+            logger.debug(f"🔍 [문법 평가 LLM 응답] {response_text[:200]}...")
 
             # JSON 객체 추출 시도
             result = extract_json_from_response(response_text)
             if result:
                 score = normalize_score(result.get("score"))
+                feedback = result.get("feedback", "")
                 if score is None:
                     logger.warning("Grammar evaluation returned no score")
                     return None
-                logger.info(f"✅ [문법 평가 완료] {score}점")
+                logger.info(f"✅ [문법 평가 완료] {score}점 | feedback: {feedback[:50] if feedback else '(없음)'}")
                 return {
                     "score": score,
-                    "feedback": result.get("feedback", "")
+                    "feedback": feedback
                 }
             else:
                 # 점수만 추출 시도
@@ -202,18 +204,20 @@ class RelevanceEvaluatorImpl:
 
             response = await self.llm.invoke(prompt)
             response_text = response if isinstance(response, str) else str(response)
+            logger.debug(f"🔍 [맥락 평가 LLM 응답] {response_text[:200]}...")
 
             # JSON 객체 추출 시도
             result = extract_json_from_response(response_text)
             if result:
                 score = normalize_score(result.get("score"))
+                feedback = result.get("feedback", "")
                 if score is None:
                     logger.warning("Relevance evaluation returned no score")
                     return None
-                logger.info(f"✅ [맥락 평가 완료] {score}점")
+                logger.info(f"✅ [맥락 평가 완료] {score}점 | feedback: {feedback[:50] if feedback else '(없음)'}")
                 return {
                     "score": score,
-                    "feedback": result.get("feedback", "")
+                    "feedback": feedback
                 }
             else:
                 # 점수만 추출 시도
