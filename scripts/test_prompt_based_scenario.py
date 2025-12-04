@@ -21,7 +21,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
-from app.roleplaying.services.prompt_based_generator_service import PromptBasedScenarioService
+from app.roleplaying.services.business.prompt_scenario_generator_service import (
+    PromptBasedScenarioService,
+)
 
 
 async def test_basic_generation():

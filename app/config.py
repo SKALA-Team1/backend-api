@@ -62,7 +62,33 @@ class Settings(BaseSettings):
     # OpenAI
     # -------------------------------------
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
+
+    # 용도별 모델 설정
+    OPENAI_MODEL_FEEDBACK: str = Field("gpt-4.1", alias="OPENAI_MODEL_FEEDBACK")
+    OPENAI_MODEL_QUESTION_GENERATION: str = Field("gpt-4.1-mini", alias="OPENAI_MODEL_QUESTION_GENERATION")
+    OPENAI_MODEL_AI_RESPONSE: str = Field("gpt-4.1-mini", alias="OPENAI_MODEL_AI_RESPONSE")
+
     deepgram_api_key: Optional[str] = Field(default=None, alias="DEEPGRAM_API_KEY")
+
+    # ========================================
+    # Azure Speech (발음 평가)
+    # ========================================
+    AZURE_SPEECH_KEY: Optional[str] = Field(default=None, alias="AZURE_SPEECH_KEY")
+    AZURE_SPEECH_REGION: str = Field("eastus", alias="AZURE_SPEECH_REGION")
+    AZURE_SPEECH_ENABLED: bool = Field(False, alias="AZURE_SPEECH_ENABLED")
+    AZURE_SPEECH_FREE_TIER_ONLY: bool = Field(True, alias="AZURE_SPEECH_FREE_TIER_ONLY")
+    AZURE_SPEECH_DAILY_LIMIT: int = Field(600, alias="AZURE_SPEECH_DAILY_LIMIT")
+
+    # ========================================
+    # Ollama Settings
+    # ========================================
+    OLLAMA_MODEL: str = Field("llama3.2", alias="OLLAMA_MODEL")
+    OLLAMA_BASE_URL: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
+
+    # ========================================
+    # LLM Provider Selection
+    # ========================================
+    FEEDBACK_LLM_PROVIDER: str = Field("openai", alias="FEEDBACK_LLM_PROVIDER")
 
     # -------------------------------------
     # Redis
@@ -87,7 +113,7 @@ class Settings(BaseSettings):
     # -------------------------------------
     # Roleplay Session Settings
     # -------------------------------------
-    ROLEPLAY_MAX_TURNS: int = Field(10, alias="ROLEPLAY_MAX_TURNS")
+    ROLEPLAY_MAX_TURNS: int = Field(7, alias="ROLEPLAY_MAX_TURNS")
     ROLEPLAY_REDIS_CACHE_TTL: int = Field(7200, alias="ROLEPLAY_REDIS_CACHE_TTL")  # 2시간
     ROLEPLAY_SESSION_TIMEOUT: int = Field(3600, alias="ROLEPLAY_SESSION_TIMEOUT")  # 1시간
     ROLEPLAY_STT_TIMEOUT: int = Field(20, alias="ROLEPLAY_STT_TIMEOUT")
@@ -112,6 +138,15 @@ class Settings(BaseSettings):
     AUDIO_AGC_ENABLED: bool = Field(True, alias="AUDIO_AGC_ENABLED")
     AUDIO_AGC_TARGET_LEVEL: float = Field(0.8, alias="AUDIO_AGC_TARGET_LEVEL")
     AUDIO_MIN_TEXT_LENGTH: int = Field(2, alias="AUDIO_MIN_TEXT_LENGTH")  # 침묵 감지 기준
+
+    # ========================================
+    # Feedback & Evaluation Settings
+    # ========================================
+    FEEDBACK_PRONUNCIATION_THRESHOLD: int = Field(70, alias="FEEDBACK_PRONUNCIATION_THRESHOLD")
+    FEEDBACK_GRAMMAR_THRESHOLD: int = Field(70, alias="FEEDBACK_GRAMMAR_THRESHOLD")
+    FEEDBACK_RELEVANCE_THRESHOLD: int = Field(70, alias="FEEDBACK_RELEVANCE_THRESHOLD")
+    FEEDBACK_MAX_RETRY_PER_QUESTION: int = Field(3, alias="FEEDBACK_MAX_RETRY_PER_QUESTION")
+    FEEDBACK_ASYNC_TEXT_GENERATION: bool = Field(True, alias="FEEDBACK_ASYNC_TEXT_GENERATION")
 
     # ========================================
     # ✅ Field Validators
