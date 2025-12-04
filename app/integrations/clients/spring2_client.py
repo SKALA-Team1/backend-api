@@ -81,7 +81,6 @@ class Spring2Client:
         grammar_score: Optional[int] = None,
         relevance_score: Optional[int] = None,
         overall_score: Optional[int] = None,
-        feedback_text: Optional[str] = None,
         needs_correction: Optional[bool] = None,
         retry_count: Optional[int] = None,
         primary_issue: Optional[str] = None,
@@ -111,7 +110,6 @@ class Spring2Client:
             status: 세션 상태 (IN_PROGRESS, FINISHED, ERROR)
             pronunciation_score / grammar_score / relevance_score / overall_score:
                 피드백 점수 (없으면 None)
-            feedback_text: 피드백 메시지 (없으면 None)
             needs_correction: 재시도 필요 여부
             retry_count: 현재 재시도 횟수
             primary_issue: 피드백 이슈 분류 (pronunciation, grammar, relevance 등)
@@ -192,7 +190,6 @@ class Spring2Client:
                 grammar_score=grammar_score,
                 relevance_score=relevance_score,
                 overall_score=overall_score,
-                feedback_text=feedback_text,
                 needs_correction=needs_correction_int,  # ✅ Integer 0/1
                 retry_count=retry_count,
                 primary_issue=primary_issue,
