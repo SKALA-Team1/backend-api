@@ -198,6 +198,10 @@ class FeedbackDecisionAgentImpl:
                     "primary_issue": primary_issue,
                     "feedback_sections": evaluation_result.get("feedback_sections", []),
                     "retry_count": evaluation_result.get("retry_count", retry_count),
+                    # 🔑 Raw evaluation objects for streaming feedback sections
+                    "pronunciation": evaluation_result.get("pronunciation"),
+                    "grammar": evaluation_result.get("grammar"),
+                    "relevance": evaluation_result.get("relevance"),
                 }
 
             logger.info(
