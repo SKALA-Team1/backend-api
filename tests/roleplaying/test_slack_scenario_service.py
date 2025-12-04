@@ -1,10 +1,10 @@
 from datetime import datetime
 import pytest
 
-from app.roleplaying.schemas import SlackMessageDto, MessageRole
-from app.roleplaying.services.slack_scenario_service import (
+from app.roleplaying.api.api_schemas import SlackMessageDto, MessageRole
+from app.roleplaying.services.business.slack_scenario_service import (
     SlackScenarioService,
-    ConversationSummary
+    ConversationSummary,
 )
 
 
