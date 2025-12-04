@@ -511,6 +511,9 @@ class FeedbackOrchestratorImpl:
         self.feedback_judge = feedback_judge
         self.azure_tracker = azure_tracker
 
+        # 피드백 번역용 LLM (grammar_evaluator의 llm 사용)
+        self.llm = grammar_evaluator.llm if hasattr(grammar_evaluator, 'llm') else None
+
         logger.info("FeedbackOrchestratorImpl initialized")
 
     async def evaluate_response_fast(
@@ -617,7 +620,7 @@ class FeedbackOrchestratorImpl:
             logger.info(f"🎉 [피드백 평가 전체 완료] 총 소요 시간: {total_time:.2f}초")
             logger.info(f"   종합 점수: {overall_score}점 | 교정 필요: {needs_correction}")
 
-            feedback_sections = self._build_feedback_sections(
+            feedback_sections = await self._build_feedback_sections(
                 pronunciation,
                 grammar,
                 relevance,
@@ -702,7 +705,7 @@ class FeedbackOrchestratorImpl:
             logger.error(f"Feedback generation failed: {e}")
             return "평가를 완료했습니다."
 
-    def _build_feedback_sections(
+    async def _build_feedback_sections(
         self,
         pronunciation: Optional[Dict],
         grammar: Optional[Dict],
@@ -711,35 +714,82 @@ class FeedbackOrchestratorImpl:
         grammar_score: Optional[int],
         relevance_score: Optional[int],
     ) -> List[Dict[str, Any]]:
-        """피드백 섹션(영문) 구성"""
-        sections: List[Dict[str, Any]] = []
-
-        sections.append(
+        """피드백 섹션(영문 + 한글) 구성 - 병렬 번역"""
+        # Step 1: 각 섹션의 영문 피드백 생성 (동기)
+        section_en_data = [
             self._build_single_section(
                 section_type="pronunciation",
                 evaluation=pronunciation,
                 score=pronunciation_score,
                 fallback="Pronunciation feedback is unavailable."
-            )
-        )
-        sections.append(
+            ),
             self._build_single_section(
                 section_type="grammar",
                 evaluation=grammar,
                 score=grammar_score,
                 fallback="Grammar feedback is unavailable."
-            )
-        )
-        sections.append(
+            ),
             self._build_single_section(
                 section_type="relevance",
                 evaluation=relevance,
                 score=relevance_score,
                 fallback="Relevance feedback is unavailable."
-            )
-        )
+            ),
+        ]
 
-        return sections
+        # Step 2: 병렬로 한글 번역 (LLM 호출 최소화)
+        try:
+            translation_tasks = [
+                self._translate_feedback(section["feedback_en"])
+                for section in section_en_data
+            ]
+            korean_feedbacks = await asyncio.gather(*translation_tasks)
+
+            # Step 3: 한글 번역 결과 병합
+            sections: List[Dict[str, Any]] = []
+            for i, section in enumerate(section_en_data):
+                section["feedback_ko"] = korean_feedbacks[i] or section["feedback_en"]  # 번역 실패 시 영문 사용
+                sections.append(section)
+
+            return sections
+
+        except Exception as e:
+            logger.error(f"Failed to translate feedback sections: {e}", exc_info=True)
+            # Fallback: 한글 번역 없이 영문만 반환 (기존 동작)
+            for section in section_en_data:
+                section["feedback_ko"] = section["feedback_en"]
+            return section_en_data
+
+    async def _translate_feedback(self, feedback_en: str) -> Optional[str]:
+        """LLM을 사용하여 영문 피드백을 한글로 번역"""
+        try:
+            from app.roleplaying.prompts.constants import FEEDBACK_BILINGUAL_PROMPT
+
+            prompt = FEEDBACK_BILINGUAL_PROMPT.format(english_feedback=feedback_en)
+            response = await self.llm.invoke(prompt)
+
+            # JSON에서 korean_feedback 추출 시도
+            try:
+                json_match = re.search(r'\{[^{}]*"korean_feedback"[^{}]*\}', response, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group(0))
+                    korean_feedback = parsed.get("korean_feedback")
+                    if korean_feedback and korean_feedback.strip():
+                        logger.debug(f"✅ [번역 완료] {feedback_en[:30]}... → {korean_feedback[:30]}...")
+                        return korean_feedback
+            except Exception as e:
+                logger.warning(f"Failed to parse Korean feedback translation: {e}")
+
+            # JSON 파싱 실패 시 전체 응답 사용 (간단한 번역 결과일 수 있음)
+            if response and response.strip():
+                logger.debug(f"✅ [번역 완료 (파싱)] {feedback_en[:30]}... → {response[:30]}...")
+                return response.strip()
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Feedback translation failed: {e}")
+            return None
 
     def _build_single_section(
         self,
@@ -748,7 +798,7 @@ class FeedbackOrchestratorImpl:
         score: Optional[int],
         fallback: str
     ) -> Dict[str, Any]:
-        """개별 섹션 포맷"""
+        """개별 섹션 포맷 (영문만 생성, 한글은 비동기로 추가)"""
         feedback_text = ""
         if evaluation and isinstance(evaluation, dict):
             feedback_text = evaluation.get("feedback") or ""
@@ -759,5 +809,6 @@ class FeedbackOrchestratorImpl:
         return {
             "type": section_type,
             "feedback_en": feedback_text,
+            "feedback_ko": "",  # 이후 async 메서드에서 채워짐
             "score": normalized_score,
         }

@@ -284,6 +284,66 @@ class FeedbackStreamingMessage(BaseModel):
     chunk: str = Field(..., description="피드백 텍스트 청크")
 
 
+class FeedbackSectionsMessage(BaseModel):
+    """
+    구조화된 피드백 섹션 메시지
+
+    발음, 문법, 맥락 각 항목별로 구조화된 피드백을 전송.
+    각 섹션은 type(항목명), feedback_en(영문 피드백), feedback_ko(한글 피드백), score(점수)를 포함.
+
+    예시:
+    {
+        "type": "FEEDBACK_SECTIONS",
+        "sections": [
+            {
+                "type": "pronunciation",
+                "feedback_en": "Your pronunciation is clear.",
+                "feedback_ko": "발음이 명확합니다.",
+                "score": 85
+            },
+            {
+                "type": "grammar",
+                "feedback_en": "Excellent grammar usage.",
+                "feedback_ko": "문법 사용이 뛰어납니다.",
+                "score": 90
+            },
+            {
+                "type": "relevance",
+                "feedback_en": "Your response is relevant.",
+                "feedback_ko": "응답이 주제에 적절합니다.",
+                "score": 88
+            }
+        ]
+    }
+    """
+
+    type: Literal["FEEDBACK_SECTIONS"] = "FEEDBACK_SECTIONS"
+    sections: List[dict] = Field(
+        ...,
+        description="각 항목별 피드백 섹션 (발음, 문법, 맥락)",
+        example=[
+            {
+                "type": "pronunciation",
+                "feedback_en": "Your pronunciation is clear.",
+                "feedback_ko": "발음이 명확합니다.",
+                "score": 85
+            },
+            {
+                "type": "grammar",
+                "feedback_en": "Excellent grammar usage.",
+                "feedback_ko": "문법 사용이 뛰어납니다.",
+                "score": 90
+            },
+            {
+                "type": "relevance",
+                "feedback_en": "Your response is relevant.",
+                "feedback_ko": "응답이 주제에 적절합니다.",
+                "score": 88
+            }
+        ]
+    )
+
+
 class RetryRequiredMessage(BaseModel):
     """
     재시도 요청 메시지
@@ -339,6 +399,7 @@ OutboundMessage = (
     | UtteranceSavedMessage
     | AiTypingMessage
     | FeedbackMessage
+    | FeedbackSectionsMessage
     | FeedbackStreamingMessage
     | RetryRequiredMessage
     | SessionEndedMessage

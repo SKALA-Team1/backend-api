@@ -307,7 +307,18 @@ async def _send_feedback_messages(
     await websocket.send_json(feedback_msg.model_dump())
     logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
-    # 피드백 텍스트 스트리밍
+    # ✅ 구조화된 피드백 섹션 전송 (NEW - 영문 + 한글)
+    try:
+        feedback_sections = feedback_result.get("feedback_sections", [])
+        if feedback_sections:
+            from app.roleplaying.handlers.ws_message_models import FeedbackSectionsMessage
+            sections_msg = FeedbackSectionsMessage(sections=feedback_sections)
+            await websocket.send_json(sections_msg.model_dump())
+            logger.info(f"Feedback sections sent: {len(feedback_sections)} sections")
+    except Exception as e:
+        logger.error(f"Failed to send feedback sections: {e}")
+
+    # 피드백 텍스트 스트리밍 (선택사항 - 한글 피드백)
     try:
         feedback_text = feedback_result.get("feedback_text", "")
         if feedback_text:
