@@ -194,9 +194,9 @@ Return ONLY the JSON object, no additional text."""
         self,
         avg_scores: dict,
         turn_feedbacks: list[dict]
-    ) -> str:
+    ) -> dict:
         """
-        세션 전체에 대한 최종 종합 피드백 생성 (친근한 멘토 톤, 슬랙 메시지 스타일)
+        세션 전체에 대한 최종 종합 피드백 생성 (친근한 멘토 톤)
 
         Args:
             avg_scores: {
@@ -220,7 +220,10 @@ Return ONLY the JSON object, no additional text."""
             }]
 
         Returns:
-            str: 친근한 구어체 종합 피드백 (400자 내외)
+            dict: {
+                "short": str (1-2문장 짧은 피드백),
+                "long": str (7문장 긴 피드백)
+            }
         """
         # 모든 feedback_sections를 LLM에 전달 (필터링 없이)
         # LLM이 멘토 관점에서 반복되는 핵심 패턴을 파악하여 친근하게 조언하도록 함
@@ -234,12 +237,6 @@ Return ONLY the JSON object, no additional text."""
             }
             all_feedback_data.append(turn_data)
 
-        # 평균 점수 계산
-        pronunciation_avg = avg_scores.get('avg_pronunciation', 0)
-        grammar_avg = avg_scores.get('avg_accuracy', 0)
-        relevance_avg = avg_scores.get('avg_fluency', 0)
-        overall = avg_scores.get('overall_score', 0)
-
         # feedback_sections를 JSON 형태로 포맷팅
         import json
         feedback_sections_str = json.dumps(all_feedback_data, ensure_ascii=False, indent=2)
@@ -250,58 +247,104 @@ Return ONLY the JSON object, no additional text."""
 딱딱한 선생님이 아니라, 사용자의 성장을 진심으로 응원하는 **친절하고 스마트한 '사수(Senior)'의 톤**으로 말해야 합니다.
 
 # 2. 입력 데이터 (Input)
-## 평균 점수
-- 발음 (Pronunciation): {pronunciation_avg:.0f}/100
-- 문법 (Grammar): {grammar_avg:.0f}/100
-- 적합성 (Relevance): {relevance_avg:.0f}/100
 
-## 개별 피드백 (Turn Feedback)
-아래는 사용자가 말할 때마다 발생했던 문법/표현 교정 내용입니다:
+1. 대화 로그(Log): 사용자와 AI의 전체 회의 내용
+2. 개별 피드백(Turn Feedback): 문법 및 표현 교정 내역
 
 {feedback_sections_str}
 
 # 3. 작업 목표 (Objective)
+
 사용자의 회의 롤플레잉 기록을 분석하여, **1:1 채팅을 보내듯** 자연스럽게 피드백을 제공하세요.
+
 - 절대 번호(1, 2, 3...)를 매겨서 보고서처럼 쓰지 마세요.
 - 개별 문법 오류를 나열하지 말고, **"개발자로서 더 프로페셔널해 보이는 법"** 위주로 조언하세요.
 
 # 4. 출력 흐름 및 작성 지침 (Output Flow)
-다음 흐름에 따라 **자연스러운 구어체(해요체)**로 연결해서 작성하세요.
 
-1.  **👋 오프닝 (격려):** "오늘 회의 고생하셨어요!" 같은 인사로 시작하며, 전반적인 수행을 칭찬하세요.
-2.  **👍 좋았던 점 (Strengths):** 구체적으로 어떤 기술 용어 사용이나 태도가 좋았는지 콕 집어 언급하세요.
-3.  **🚀 아쉬운 점 & 팁 (Coaching):** 문법 지적보다는 비즈니스 리스크를 언급하세요.
+다음 흐름에 따라 **자연스러운 구어체(해요체)**로 연결해서 작성하세요.
+각 섹션마다 아래 문장 수를 지켜서 충분히 상세하게 작성해주세요 (전체 7문장).
+
+1. **👋 오프닝 (1문장):** "오늘 회의 고생하셨어요!" 같은 간단한 인사말 한 문장.
+2. **👍 좋았던 점 (2-3문장):** 구체적으로 어떤 기술 용어 사용이나 태도가 좋았는지 콕 집어 언급하세요. 칭찬을 충분히 자세하게.
+3. **🚀 아쉬운 점 & 팁 (2-3문장):** 문법 지적보다는 비즈니스 리스크를 언급하세요. 왜 중요한지, 어떻게 개선할지 구체적으로.
     - *나쁜 예:* "주어를 빼먹으셨네요."
     - *좋은 예:* "주어 없이 말하면 책임 소재가 모호해져서 나중에 곤란할 수 있어요. `We`나 `I`를 명확히 써주세요!"
-4.  **✨ 이 문장만은 꼭! (One-Point Lesson):** 아까 대화 중 가장 아쉬웠던 문장 하나를 골라, "이건 이렇게 말하는 게 훨씬 자연스러워요"라며 **원어민급 표현**을 알려주세요.
+4. **✨ 이 문장만은 꼭! (1-2문장):** 아까 대화 중 가장 아쉬웠던 문장 하나를 골라, "이건 이렇게 말하는 게 훨씬 자연스러워요"라며 **원어민급 표현**을 알려주세요.
+    - **중요:** 영어 예시 문장을 제공할 때는 반드시 한글 번역을 괄호 안에 함께 제공하세요.
+    - 예: "We need to monitor the cache hit rate." (캐시 적중률을 모니터링해야 합니다.)
 
 # 5. 제약 사항
+
 - **말투:** "~했습니다" 보다는 "~했어요", "~인 것 같아요" 처럼 부드러운 대화체 사용.
-- **길이:** 슬랙(Slack) 메시지 하나에 들어갈 정도로(공백 포함 400자 내외) 간결하게.
+- **길이:** 전체 7문장 (섹션별 문장 수 준수)
 - **언어:** 한글로 작성하되, IT 용어(Deploy, Root Cause 등)는 영어 원문 유지."""
 
         try:
-            response = self.client.chat.completions.create(
+            # ========== 1. 긴 버전 생성 (7문장, 기존 프롬프트 사용) ==========
+            long_response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "당신은 실리콘밸리 10년 경력의 IT 커뮤니케이션 멘토입니다. 친절한 사수처럼 구어체(해요체)로 피드백을 주세요. 슬랙 메시지처럼 자연스럽게 작성하며(400자 내외), 번호 없이 흐름에 따라 작성하세요: 👋 오프닝(격려) → 👍 좋았던 점 → 🚀 아쉬운 점 & 팁 → ✨ 이 문장만은 꼭! 비즈니스 리스크와 연결해서 조언하되, 딱딱하지 않게 대화하듯 작성하세요."
+                        "content": "당신은 실리콘밸리 10년 경력의 IT 커뮤니케이션 멘토입니다. 친절한 사수처럼 구어체(해요체)로 피드백을 주세요. 반드시 다음 구조를 지켜서 작성하세요:\n\n👋 오프닝: 1문장\n👍 좋았던 점: 2-3문장 (구체적 칭찬)\n🚀 아쉬운 점 & 팁: 2-3문장 (비즈니스 리스크 연결)\n✨ 이 문장만은 꼭: 1-2문장 (구체적 예시)\n\n총 7문장으로 작성하세요. 각 섹션을 충분히 자세하게 작성하여 전체 길이를 채우세요. 번호 없이 자연스럽게 흐름에 따라 대화하듯 작성하세요.\n\n**중요:** 영어 예시 문장을 제공할 때는 반드시 한글 번역을 괄호 안에 함께 제공하세요. 예: \"We need to monitor the cache hit rate.\" (캐시 적중률을 모니터링해야 합니다.)"
                     },
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=400  # 슬랙 메시지 스타일 (400자 내외)
+                max_tokens=800
             )
 
-            content = response.choices[0].message.content.strip()
-            logger.info("Final feedback generated successfully")
-            return content
+            long_feedback = long_response.choices[0].message.content.strip()
+            logger.info("Long feedback generated successfully")
+
+            # ========== 2. 짧은 버전 생성 (긴 버전을 요약) ==========
+            short_prompt = f"""아래의 긴 피드백을 1-2문장으로 요약해주세요.
+
+긴 피드백:
+{long_feedback}
+
+요구사항:
+- 친근한 멘토 톤 (해요체)
+- 인사말, 칭찬 부분은 생략
+- 아쉬운 점과 개선 방법만 1-2문장으로 핵심만 추출
+- IT 실무자 관점에서 가장 중요한 조언만
+- **중요:** 긴 피드백의 논리와 맥락을 유지하세요. 긴 버전에서 긍정적으로 언급한 부분을 부정적으로 바꾸지 마세요.
+
+예시: "답변이 간결한 건 좋지만, 구체적인 수치나 방법까지 함께 설명하면 팀원들이 바로 실행에 옮길 수 있어요."
+예시: "주어와 목적을 명확히 쓰는 연습을 하면 회의에서 책임 소재를 분명하게 전달할 수 있어요."
+"""
+
+            short_response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "당신은 실리콘밸리 IT 커뮤니케이션 멘토입니다. 주어진 긴 피드백에서 핵심 개선점만 1-2문장으로 추출하세요. 인사말, 칭찬은 생략하되, 긴 피드백의 논리와 맥락을 왜곡하지 마세요. 긴 버전에서 긍정적으로 언급한 부분은 부정적으로 바꾸지 말고, 전체적인 뉘앙스를 유지하면서 개선점만 간결하게 전달하세요."
+                    },
+                    {"role": "user", "content": short_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=150
+            )
+
+            short_feedback = short_response.choices[0].message.content.strip()
+            logger.info("Short feedback generated successfully")
+
+            # ========== 3. dict로 반환 ==========
+            return {
+                "short": short_feedback,
+                "long": long_feedback
+            }
 
         except Exception as e:
             logger.error(f"Failed to generate final feedback: {e}")
             # 기본 피드백 반환
-            return self._generate_default_final_feedback(avg_scores)
+            default_long = self._generate_default_final_feedback(avg_scores)
+            return {
+                "short": "피드백 생성 중 오류가 발생했습니다.",
+                "long": default_long
+            }
 
     def _generate_default_final_feedback(self, avg_scores: dict) -> str:
         """기본 최종 피드백 생성 (API 오류 시 사용) - 멘토 톤"""

@@ -205,14 +205,15 @@ async def create_batch_feedback_from_audio(
         avg_pronunciation = ScoreDetail(score=avg_pronunciation_score, level=score_to_level(avg_pronunciation_score))
 
         # 최종 종합 피드백 생성 (모든 세션의 모든 피드백 통합)
-        final_feedback = ""
+        final_feedback_short = ""
+        final_feedback_long = ""
         if successful_results:
             try:
                 # 모든 세션의 모든 피드백 가져오기 (세션 구분 없이)
                 turn_feedbacks = await service.get_all_feedbacks()
                 logger.info(f"Retrieved {len(turn_feedbacks)} turn feedbacks from ALL sessions (integrated)")
 
-                # OpenAI로 멘토 스타일 종합 피드백 생성 (슬랙 메시지 톤)
+                # OpenAI로 멘토 스타일 종합 피드백 생성 (짧은 버전 + 긴 버전)
                 openai_service = get_openai_feedback_service()
                 avg_scores = {
                     "avg_accuracy": avg_accuracy_score,
@@ -221,11 +222,34 @@ async def create_batch_feedback_from_audio(
                     "avg_pronunciation": avg_pronunciation_score,
                     "overall_score": overall_score
                 }
-                final_feedback = openai_service.generate_final_feedback(avg_scores, turn_feedbacks)
-                logger.info("Final feedback generated successfully")
+                feedback_dict = openai_service.generate_final_feedback(avg_scores, turn_feedbacks)
+                final_feedback_short = feedback_dict.get("short", "")
+                final_feedback_long = feedback_dict.get("long", "")
+                logger.info("Final feedback (short & long) generated successfully")
+
+                # Spring2로 종합 피드백 전송하여 scenario_feedback 테이블에 저장
+                # (터미널 출력 항목만: 발음, 문법, 적합성, 종합피드백 텍스트)
+                # DB에는 짧은 버전과 긴 버전 모두 저장
+                # scenario_id는 세션에서 자동으로 가져옴
+                try:
+                    from app.integrations.clients.spring2_client import spring2_client
+                    await spring2_client.save_final_feedback(
+                        session_id=session_id,
+                        final_feedback_long=final_feedback_long,
+                        final_feedback_short=final_feedback_short,
+                        avg_pronunciation_score=avg_pronunciation_score,
+                        avg_accuracy_score=avg_accuracy_score,
+                        avg_fluency_score=avg_fluency_score,
+                    )
+                    logger.info(f"Final feedback (short & long) saved to DB via Spring2: session={session_id}")
+                except Exception as save_error:
+                    logger.error(f"Failed to save final feedback to DB: {save_error}")
+                    # DB 저장 실패해도 사용자에게는 피드백 응답 반환
+
             except Exception as e:
                 logger.error(f"Failed to generate final feedback: {e}")
-                final_feedback = "최종 피드백 생성에 실패했습니다."
+                final_feedback_short = "최종 피드백 생성에 실패했습니다."
+                final_feedback_long = "최종 피드백 생성에 실패했습니다."
 
         return BatchAudioFeedbackResponse(
             session_id=session_id,
@@ -239,7 +263,8 @@ async def create_batch_feedback_from_audio(
             avg_completeness=avg_completeness,
             avg_pronunciation=avg_pronunciation,
             overall_score=overall_score,
-            final_feedback=final_feedback
+            final_feedback_short=final_feedback_short,
+            final_feedback_long=final_feedback_long
         )
 
     finally:

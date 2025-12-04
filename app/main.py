@@ -33,8 +33,8 @@ def setup_langsmith():
         logging.info("ℹ️ LangSmith 트레이싱 비활성화 (LANGCHAIN_TRACING_V2=false)")
         return False
 from app.health.router import router as health_router
-from app.roleplaying.router import router as roleplaying_router
-from app.roleplaying.ws_realtime import router as ws_realtime_router
+from app.roleplaying.api.roleplaying_router import router as roleplaying_router
+from app.roleplaying.handlers.ws_realtime_handler import router as ws_realtime_router
 from app.feedback.router import router as feedback_router
 
 logger = logging.getLogger(__name__)

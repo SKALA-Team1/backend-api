@@ -518,6 +518,68 @@ class Spring2Client:
             logger.error(f"Question save error: {e}", exc_info=True)
             raise
 
+    async def save_final_feedback(
+        self,
+        session_id: str,
+        final_feedback_long: str,
+        final_feedback_short: str,
+        avg_pronunciation_score: float,
+        avg_accuracy_score: float,
+        avg_fluency_score: float,
+    ) -> dict:
+        """
+        종합 피드백 저장 (scenario_feedback 테이블)
+
+        FastAPI에서 생성한 종합 피드백과 평균 점수를 Spring으로 전송하여 DB에 저장
+        (터미널에 출력되는 항목만 저장)
+        scenario_id는 세션에서 자동으로 가져옴
+
+        Args:
+            session_id: 세션 ID
+            final_feedback_long: 긴 피드백 텍스트 (7문장, 멘토 스타일)
+            final_feedback_short: 짧은 피드백 텍스트 (1-2문장)
+            avg_pronunciation_score: 평균 발음 점수
+            avg_accuracy_score: 평균 정확도 점수 (문법)
+            avg_fluency_score: 평균 유창성 점수 (적합성)
+
+        Returns:
+            API 응답 ({"success": true, "feedback_id": "...", ...})
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = f"/internal/sessions/{session_id}/final-feedback"
+
+        payload = {
+            "final_feedback_long": final_feedback_long,
+            "final_feedback_short": final_feedback_short,
+            "avg_pronunciation_score": avg_pronunciation_score,
+            "avg_accuracy_score": avg_accuracy_score,
+            "avg_fluency_score": avg_fluency_score,
+        }
+
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"Final feedback saved: session={session_id}, scenario={scenario_id}"
+            )
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to save final feedback: session={session_id}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Final feedback save error: {e}", exc_info=True)
+            raise
+
     async def get_session_feedbacks(self, session_id: int) -> list[dict]:
         """
         세션의 모든 턴 피드백 조회

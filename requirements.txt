@@ -81,16 +81,6 @@ mypy>=1.5.0  # 타입 체킹
 flake8>=6.1.0  # 린팅
 
 # ========================================
-# RAG & Vector DB (에이전트1)
-# ========================================
-pymupdf>=1.23.0  # PDF 파싱 (PyMuPDF/fitz)
-qdrant-client>=1.7.0  # Qdrant 벡터 DB
-tiktoken>=0.5.0  # 토큰 카운팅
-langchain>=0.1.0  # LangChain 코어
-langchain-text-splitters>=0.0.1  # 텍스트 분할
-langchain-openai>=0.0.5  # OpenAI 임베딩
-
-# ========================================
 # Production
 # ========================================
 gunicorn>=21.2.0  # WSGI 서버 (프로덕션)

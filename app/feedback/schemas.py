@@ -177,5 +177,6 @@ class BatchAudioFeedbackResponse(BaseModel):
     avg_pronunciation: ScoreDetail = Field(..., description="평균 발음")
     overall_score: float = Field(default=0.0, description="종합 점수 (4가지 평균)")
 
-    # 최종 종합 피드백 (5줄)
-    final_feedback: str = Field(default="", description="세션 전체에 대한 최종 종합 피드백 (5줄)")
+    # 최종 종합 피드백 (짧은 버전 + 긴 버전)
+    final_feedback_short: str = Field(default="", description="짧은 피드백 (1-2문장)")
+    final_feedback_long: str = Field(default="", description="긴 피드백 (7문장)")
