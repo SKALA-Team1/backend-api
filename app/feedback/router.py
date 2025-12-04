@@ -204,10 +204,15 @@ async def create_batch_feedback_from_audio(
         avg_completeness = ScoreDetail(score=avg_completeness_score, level=score_to_level(avg_completeness_score))
         avg_pronunciation = ScoreDetail(score=avg_pronunciation_score, level=score_to_level(avg_pronunciation_score))
 
-        # 최종 종합 피드백 생성 (5줄)
+        # 최종 종합 피드백 생성 (모든 세션의 모든 피드백 통합)
         final_feedback = ""
         if successful_results:
             try:
+                # 모든 세션의 모든 피드백 가져오기 (세션 구분 없이)
+                turn_feedbacks = await service.get_all_feedbacks()
+                logger.info(f"Retrieved {len(turn_feedbacks)} turn feedbacks from ALL sessions (integrated)")
+
+                # OpenAI로 멘토 스타일 종합 피드백 생성 (슬랙 메시지 톤)
                 openai_service = get_openai_feedback_service()
                 avg_scores = {
                     "avg_accuracy": avg_accuracy_score,
@@ -216,24 +221,7 @@ async def create_batch_feedback_from_audio(
                     "avg_pronunciation": avg_pronunciation_score,
                     "overall_score": overall_score
                 }
-                # 주석처리: suggested_sentence, grammar_notes 제외
-                # turn_summaries = [
-                #     {
-                #         "turn_number": r.turn_number,
-                #         "user_message": r.user_message,
-                #         "suggested_sentence": r.suggested_sentence,
-                #         "grammar_notes": r.grammar_notes
-                #     }
-                #     for r in successful_results
-                # ]
-                turn_summaries = [
-                    {
-                        "turn_number": r.turn_number,
-                        "user_message": r.user_message
-                    }
-                    for r in successful_results
-                ]
-                final_feedback = openai_service.generate_final_feedback(avg_scores, turn_summaries)
+                final_feedback = openai_service.generate_final_feedback(avg_scores, turn_feedbacks)
                 logger.info("Final feedback generated successfully")
             except Exception as e:
                 logger.error(f"Failed to generate final feedback: {e}")

@@ -325,22 +325,20 @@ class FeedbackService:
             "total_turns": total_turns
         }
 
-        # 전체 요약 코멘트 생성 (LLM 사용)
-        turn_summaries = []
-        for tf in spring_feedbacks:
-            turn_summaries.append({
-                "turn_number": tf.get("turnNumber", 0),
-                "user_message": tf.get("userMessage", ""),
-                "suggested_sentence": tf.get("suggestedSentence", ""),
-                "grammar_notes": tf.get("grammarNotes", [])
-            })
+        # 모든 세션의 모든 피드백 가져오기 (세션 구분 없이 통합)
+        try:
+            turn_feedbacks = await self.get_all_feedbacks()
+            logger.info(f"Retrieved {len(turn_feedbacks)} turn feedbacks from ALL sessions (integrated)")
+        except Exception as e:
+            logger.error(f"Failed to get all feedbacks: {e}")
+            turn_feedbacks = []
 
-        # OpenAI로 상세한 종합 피드백 생성
+        # OpenAI로 멘토 스타일 종합 피드백 생성 (슬랙 메시지 톤)
         try:
             openai_service = self._get_openai_service()
             summary_comment = openai_service.generate_final_feedback(
                 avg_scores=avg_scores,
-                turn_summaries=turn_summaries
+                turn_feedbacks=turn_feedbacks  # feedback_sections 포함
             )
             logger.info(f"Final feedback generated via LLM for session {session_id}")
         except Exception as e:
@@ -405,6 +403,80 @@ class FeedbackService:
         except Exception as e:
             logger.error(f"Failed to get session messages: {e}")
             raise
+
+    async def get_all_feedbacks(self) -> list[dict]:
+        """
+        모든 세션의 모든 피드백 조회 (세션 구분 없이 통합)
+
+        scenario_message 테이블에서 feedback_sections가 있는 모든 user 메시지를 가져옵니다.
+        FastAPI는 READ-ONLY이므로 직접 DB에서 읽어옵니다.
+
+        Returns:
+            list[dict]: 피드백 목록
+                - turn_index: 턴 인덱스
+                - message_text: 메시지 내용
+                - feedback_sections: 피드백 섹션들
+                - grammar_score, relevance_score, overall_score
+        """
+        import pymysql
+        import json
+
+        try:
+            # DATABASE_URL 파싱: mysql+pymysql://root:9799@localhost:3306/skuseme_db_2
+            db_url = settings.DATABASE_URL
+            # 'mysql+pymysql://' 제거
+            db_url = db_url.replace('mysql+pymysql://', '')
+            # 'root:9799@localhost:3306/skuseme_db_2' 형태
+            user_pass, host_db = db_url.split('@')
+            user, password = user_pass.split(':')
+            host_port, database = host_db.split('/')
+            host, port = host_port.split(':')
+
+            # DB 연결
+            conn = pymysql.connect(
+                host=host,
+                user=user,
+                password=password,
+                database=database,
+                port=int(port)
+            )
+
+            cursor = conn.cursor()
+
+            # scenario_message에서 feedback_sections가 있는 모든 user 메시지 조회
+            cursor.execute('''
+                SELECT
+                    turn_index, message_text,
+                    pronunciation_score, grammar_score, relevance_score, overall_score,
+                    feedback_sections
+                FROM scenario_message
+                WHERE speaker = 'user' AND feedback_sections IS NOT NULL
+                ORDER BY created_at, turn_index
+            ''')
+
+            results = cursor.fetchall()
+
+            feedbacks = []
+            for row in results:
+                feedback_sections = json.loads(row[6]) if row[6] else []
+                feedbacks.append({
+                    'turn_index': row[0],
+                    'message_text': row[1],
+                    'pronunciation_score': row[2],
+                    'grammar_score': row[3],
+                    'relevance_score': row[4],
+                    'overall_score': row[5],
+                    'feedback_sections': feedback_sections
+                })
+
+            conn.close()
+
+            logger.info(f"All feedbacks retrieved from DB (READ-ONLY): count={len(feedbacks)}")
+            return feedbacks
+
+        except Exception as e:
+            logger.error(f"Failed to get all feedbacks from DB: {e}")
+            return []
 
 
 def get_feedback_service() -> FeedbackService:

@@ -41,7 +41,7 @@ class OpenAIFeedbackService:
             raise ValueError("OPENAI_API_KEY is not configured")
 
         self.client = OpenAI(api_key=settings.openai_api_key)
-        self.model = "gpt-3.5-turbo"
+        self.model = "gpt-4.1"
 
     def generate_feedback(
         self,
@@ -193,10 +193,10 @@ Return ONLY the JSON object, no additional text."""
     def generate_final_feedback(
         self,
         avg_scores: dict,
-        turn_summaries: list[dict]
+        turn_feedbacks: list[dict]
     ) -> str:
         """
-        세션 전체에 대한 최종 종합 피드백 생성 (교육학적 구조 + IT 업무 특화)
+        세션 전체에 대한 최종 종합 피드백 생성 (친근한 멘토 톤, 슬랙 메시지 스타일)
 
         Args:
             avg_scores: {
@@ -206,107 +206,79 @@ Return ONLY the JSON object, no additional text."""
                 "avg_pronunciation": float,
                 "overall_score": float
             }
-            turn_summaries: [{
-                "turn_number": int,
-                "user_message": str,
-                "suggested_sentence": str,
-                "grammar_notes": list[str]
+            turn_feedbacks: [{
+                "turn_index": int,
+                "message_text": str,
+                "feedback_sections": [
+                    {"type": "pronunciation", "score": int, "feedback_en": str},
+                    {"type": "grammar", "score": int, "feedback_en": str},
+                    {"type": "relevance", "score": int, "feedback_en": str}
+                ],
+                "grammar_score": int,
+                "relevance_score": int,
+                "overall_score": int
             }]
 
         Returns:
-            str: 교육학적으로 구조화된 종합 피드백
+            str: 친근한 구어체 종합 피드백 (400자 내외)
         """
-        # 턴별 피드백 정리
-        turn_feedbacks_text = ""
-        for t in turn_summaries:
-            turn_num = t.get('turn_number', 0)
-            user_msg = t.get('user_message', '')
-            suggested = t.get('suggested_sentence', '')
-            grammar = t.get('grammar_notes', [])
+        # 모든 feedback_sections를 LLM에 전달 (필터링 없이)
+        # LLM이 멘토 관점에서 반복되는 핵심 패턴을 파악하여 친근하게 조언하도록 함
+        all_feedback_data = []
 
-            feedback_lines = [f"Turn {turn_num}:"]
-            feedback_lines.append(f"  학습자 발화: \"{user_msg}\"")
-            if suggested:
-                feedback_lines.append(f"  개선 제안: \"{suggested}\"")
-            if grammar:
-                feedback_lines.append(f"  문법 노트: {', '.join(grammar)}")
+        for fb in turn_feedbacks:
+            turn_data = {
+                'turn_index': fb.get('turn_index'),
+                'message_text': fb.get('message_text', ''),
+                'feedback_sections': fb.get('feedback_sections', [])
+            }
+            all_feedback_data.append(turn_data)
 
-            turn_feedbacks_text += "\n".join(feedback_lines) + "\n\n"
-
-        # 점수 분석
-        scores = {
-            "정확도": avg_scores.get('avg_accuracy', 0),
-            "유창성": avg_scores.get('avg_fluency', 0),
-            "완성도": avg_scores.get('avg_completeness', 0),
-            "발음": avg_scores.get('avg_pronunciation', 0)
-        }
-        best_category = max(scores, key=scores.get)
-        worst_category = min(scores, key=scores.get)
+        # 평균 점수 계산
+        pronunciation_avg = avg_scores.get('avg_pronunciation', 0)
+        grammar_avg = avg_scores.get('avg_accuracy', 0)
+        relevance_avg = avg_scores.get('avg_fluency', 0)
         overall = avg_scores.get('overall_score', 0)
 
-        prompt = f"""You are an English education expert evaluating a Korean employee's business English performance in an IT company meeting with a Vietnamese colleague.
+        # feedback_sections를 JSON 형태로 포맷팅
+        import json
+        feedback_sections_str = json.dumps(all_feedback_data, ensure_ascii=False, indent=2)
 
-## Context
-- Scenario: Business meeting between Korean employee (learner) and Vietnamese colleague
-- Focus: Real workplace communication effectiveness, not just grammar checking
-- Evaluation perspective: Educational expert analyzing practical business English skills
-- Task: Synthesize individual turn-by-turn feedback into comprehensive final feedback
+        # IT 커뮤니케이션 멘토 스타일 프롬프트 (친근한 사수 톤)
+        prompt = f"""# 1. 역할 정의 (Persona)
+당신은 실리콘밸리 기업에서 10년 이상 근무한 'IT 커뮤니케이션 멘토'입니다.
+딱딱한 선생님이 아니라, 사용자의 성장을 진심으로 응원하는 **친절하고 스마트한 '사수(Senior)'의 톤**으로 말해야 합니다.
 
-## Performance Data
-- Overall Score: {overall:.0f}/100
-- Pronunciation: {scores['발음']:.0f}/100 - Clarity and accuracy
-- Fluency: {scores['유창성']:.0f}/100 - Natural flow and smoothness
-- Completeness: {scores['완성도']:.0f}/100 - Sentence completion
-- Accuracy: {scores['정확도']:.0f}/100 - Grammar and vocabulary precision
-- Strength Area: {best_category}
-- Needs Improvement: {worst_category}
+# 2. 입력 데이터 (Input)
+## 평균 점수
+- 발음 (Pronunciation): {pronunciation_avg:.0f}/100
+- 문법 (Grammar): {grammar_avg:.0f}/100
+- 적합성 (Relevance): {relevance_avg:.0f}/100
 
-## Turn-by-Turn Feedback (Individual evaluations already completed)
-{turn_feedbacks_text}
+## 개별 피드백 (Turn Feedback)
+아래는 사용자가 말할 때마다 발생했던 문법/표현 교정 내용입니다:
 
-**Note:** Each turn has already been individually evaluated. Your job is to analyze these individual feedbacks and synthesize them into comprehensive final feedback.
+{feedback_sections_str}
 
-## Your Task: Synthesize Individual Feedbacks
+# 3. 작업 목표 (Objective)
+사용자의 회의 롤플레잉 기록을 분석하여, **1:1 채팅을 보내듯** 자연스럽게 피드백을 제공하세요.
+- 절대 번호(1, 2, 3...)를 매겨서 보고서처럼 쓰지 마세요.
+- 개별 문법 오류를 나열하지 말고, **"개발자로서 더 프로페셔널해 보이는 법"** 위주로 조언하세요.
 
-Based on the turn-by-turn feedback above, provide comprehensive final feedback by:
-1. Identifying **common patterns** across multiple turns
-2. Highlighting **recurring strengths** and **repeated mistakes**
-3. Providing **actionable next steps** for improvement
+# 4. 출력 흐름 및 작성 지침 (Output Flow)
+다음 흐름에 따라 **자연스러운 구어체(해요체)**로 연결해서 작성하세요.
 
-## Output Format (in Korean)
+1.  **👋 오프닝 (격려):** "오늘 회의 고생하셨어요!" 같은 인사로 시작하며, 전반적인 수행을 칭찬하세요.
+2.  **👍 좋았던 점 (Strengths):** 구체적으로 어떤 기술 용어 사용이나 태도가 좋았는지 콕 집어 언급하세요.
+3.  **🚀 아쉬운 점 & 팁 (Coaching):** 문법 지적보다는 비즈니스 리스크를 언급하세요.
+    - *나쁜 예:* "주어를 빼먹으셨네요."
+    - *좋은 예:* "주어 없이 말하면 책임 소재가 모호해져서 나중에 곤란할 수 있어요. `We`나 `I`를 명확히 써주세요!"
+4.  **✨ 이 문장만은 꼭! (One-Point Lesson):** 아까 대화 중 가장 아쉬웠던 문장 하나를 골라, "이건 이렇게 말하는 게 훨씬 자연스러워요"라며 **원어민급 표현**을 알려주세요.
 
-### 📊 전반적 평가
-[Overall assessment based on {overall:.0f} score and turn-by-turn patterns]
-- 90+: 글로벌 프로젝트를 주도할 수 있는 수준
-- 75-89: 해외 팀과 원활하게 협업 가능한 수준
-- 60-74: 기본적인 업무 소통이 가능한 수준
-- 60 미만: 기초 비즈니스 표현 학습이 필요한 수준
-
-### 🎯 반복된 패턴 분석
-[Analyze patterns that appeared across multiple turns]
-- 자주 나타난 강점 (예: 특정 표현을 잘 사용함)
-- 반복적으로 나타난 약점 (예: 같은 문법 실수가 여러 턴에서 발생)
-
-### 💼 실무 커뮤니케이션 효과
-[How well did the learner communicate with Vietnamese colleague in business context?]
-- 베트남 동료가 이해하기 쉬웠는지
-- 업무 맥락에 적절했는지
-- 더 전문적으로 개선할 부분
-
-### 📈 우선순위 개선 사항
-[Based on {worst_category} and repeated issues in turn feedbacks]
-- 가장 먼저 고쳐야 할 습관 (턴별 피드백에서 반복된 것)
-- 다음 회의에서 시도할 구체적 표현
-
-### 💪 격려
-[Positive reinforcement with specific growth points]
-
-## Guidelines
-- Write in Korean (한국어)
-- Focus on **patterns** across turns, not individual turns
-- Be specific: reference actual examples from turn feedbacks
-- Actionable: what should learner do differently next time?
-- Length: 8-12 lines total, each section 1-2 lines"""
+# 5. 제약 사항
+- **말투:** "~했습니다" 보다는 "~했어요", "~인 것 같아요" 처럼 부드러운 대화체 사용.
+- **길이:** 슬랙(Slack) 메시지 하나에 들어갈 정도로(공백 포함 400자 내외) 간결하게.
+- **언어:** 한글로 작성하되, IT 용어(Deploy, Root Cause 등)는 영어 원문 유지."""
 
         try:
             response = self.client.chat.completions.create(
@@ -314,12 +286,12 @@ Based on the turn-by-turn feedback above, provide comprehensive final feedback b
                 messages=[
                     {
                         "role": "system",
-                        "content": "당신은 IT 업무 영어 전문 교육 코치입니다. 개별 턴별 피드백들을 분석하여 반복된 패턴을 찾고, 이를 바탕으로 종합적인 최종 피드백을 한국어로 제공합니다. 턴별 피드백에서 반복적으로 나타난 강점과 약점을 중심으로 실무에 적용 가능한 구체적인 조언을 제공하세요."
+                        "content": "당신은 실리콘밸리 10년 경력의 IT 커뮤니케이션 멘토입니다. 친절한 사수처럼 구어체(해요체)로 피드백을 주세요. 슬랙 메시지처럼 자연스럽게 작성하며(400자 내외), 번호 없이 흐름에 따라 작성하세요: 👋 오프닝(격려) → 👍 좋았던 점 → 🚀 아쉬운 점 & 팁 → ✨ 이 문장만은 꼭! 비즈니스 리스크와 연결해서 조언하되, 딱딱하지 않게 대화하듯 작성하세요."
                     },
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=800
+                max_tokens=400  # 슬랙 메시지 스타일 (400자 내외)
             )
 
             content = response.choices[0].message.content.strip()
@@ -332,78 +304,23 @@ Based on the turn-by-turn feedback above, provide comprehensive final feedback b
             return self._generate_default_final_feedback(avg_scores)
 
     def _generate_default_final_feedback(self, avg_scores: dict) -> str:
-        """기본 최종 피드백 생성 (API 오류 시 사용) - IT 업무 특화"""
+        """기본 최종 피드백 생성 (API 오류 시 사용) - 멘토 톤"""
         overall = avg_scores.get('overall_score', 0)
 
-        # 강점/약점 분석
-        scores = {
-            "정확도": avg_scores.get('avg_accuracy', 0),
-            "유창성": avg_scores.get('avg_fluency', 0),
-            "완성도": avg_scores.get('avg_completeness', 0),
-            "발음": avg_scores.get('avg_pronunciation', 0)
-        }
-        best = max(scores, key=scores.get)
-        worst = min(scores, key=scores.get)
-
         if overall >= 90:
-            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 글로벌 프로젝트 리드 가능 수준
-특히 {best} 영역에서 뛰어난 역량을 보여주셨습니다.
-
-🎯 **학습 목표 달성도**: 영어로 복잡한 기술적 내용도 명확하게 전달할 수 있는 수준입니다.
-
-💼 **IT 실무 적용**: 해외 클라이언트와의 미팅, 기술 프레젠테이션, 글로벌 팀 리딩에 자신감을 가지세요.
-
-📈 **다음 단계**: 고급 비즈니스 협상 표현이나 기술 논문 발표 영어에 도전해보세요.
-
-💪 글로벌 IT 리더로서의 역량이 충분합니다. 계속해서 성장해 나가세요!"""
+            return "👋 와, 정말 잘하셨어요! 90점 넘는 건 쉽지 않은데 대단해요. 👍 문법이나 유창성 모두 훌륭하고, 글로벌 팀과 일해도 전혀 문제없을 실력이에요. 🚀 이 정도면 고급 표현들만 좀 더 익히면 완벽할 것 같아요. 계속 이대로만 유지하세요! ✨ 멋져요!"
 
         elif overall >= 75:
-            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 해외 팀과 원활한 협업 가능
-{best} 영역이 특히 우수합니다.
-
-🎯 **학습 목표 달성도**: 업무 관련 영어 소통에 큰 무리가 없는 수준입니다.
-
-💼 **IT 실무 적용**: 영어 이메일 작성, 화상 미팅, 코드 리뷰 코멘트 작성에 활용하세요.
-
-📈 **다음 단계**: {worst} 영역을 보완하면 글로벌 프로젝트 리더로 성장할 수 있습니다. 영어 기술 팟캐스트 청취를 추천드립니다.
-
-💪 꾸준한 성장이 돋보입니다. 조금만 더 노력하면 상급 레벨에 도달할 수 있어요!"""
+            return "👋 수고하셨어요! 전반적으로 업무 소통은 잘 되는 수준이에요. 👍 문장 구조도 탄탄하고, 해외 팀과 협업하기에 충분한 실력이에요. 🚀 다만 몇 가지 표현을 좀 더 정확하게 다듬으면 더 프로페셔널해 보일 거예요. 영어 기술 팟캐스트 들으면서 자연스러운 표현 익혀보세요. ✨ 조금만 더 힘내면 상급 레벨이에요!"
 
         elif overall >= 60:
-            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 기본적인 업무 소통 가능
-{best} 영역에서 강점을 보여주셨습니다.
-
-🎯 **학습 목표 달성도**: 간단한 업무 대화와 이메일 소통이 가능한 수준입니다.
-
-💼 **IT 실무 적용**: 정형화된 이메일 템플릿과 기본 회의 표현부터 실무에 적용해보세요.
-
-📈 **다음 단계**: {worst} 부분을 집중 연습하세요. 매일 IT 관련 영어 기사를 소리 내어 읽는 연습을 추천드립니다.
-
-💪 좋은 기반을 다지고 계십니다. 꾸준히 연습하면 분명 더 성장할 수 있어요!"""
+            return "👋 오늘도 고생하셨어요! 기본적인 업무 대화는 잘하고 계세요. 👍 간단한 소통은 문제없이 잘 해내고 있어요. 🚀 문법이랑 어휘를 좀 더 정확하게 쓰는 연습이 필요할 것 같아요. IT 영어 기사 매일 소리 내서 읽어보면 도움 될 거예요. ✨ 꾸준히만 하면 분명 늘어요!"
 
         elif overall >= 40:
-            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 기초 표현 학습 단계
-{best} 영역에서 가능성이 보입니다.
-
-🎯 **학습 목표 달성도**: 기본적인 인사와 간단한 표현 사용이 가능합니다.
-
-💼 **IT 실무 적용**: "Could you please...", "I'd like to..." 같은 기본 업무 표현부터 익혀보세요.
-
-📈 **다음 단계**: IT 업무에서 자주 쓰는 기본 문장 패턴 20개를 암기하는 것부터 시작해보세요.
-
-💪 모든 전문가도 처음엔 초보였습니다. 꾸준히 도전하면 반드시 성장합니다!"""
+            return "👋 도전하는 자세가 좋아요! 👍 의사소통하려는 의지가 보여요. 🚀 아직 기초 단계라 문법이랑 단어 선택을 좀 더 다져야 할 것 같아요. 'Could you please...', 'I'd like to...' 같은 기본 표현부터 확실히 익혀보세요. ✨ 포기하지 말고 계속하면 반드시 성장해요!"
 
         else:
-            return f"""📊 **학습 성취도**: 종합 {overall:.0f}점 - 영어 학습 시작 단계
-도전하는 자세가 정말 멋집니다!
-
-🎯 **학습 목표 달성도**: 영어 학습의 첫 걸음을 내딛으셨습니다.
-
-💼 **IT 실무 적용**: 먼저 "Hello", "Thank you", "I understand" 같은 기본 표현에 익숙해지세요.
-
-📈 **다음 단계**: 짧은 자기소개와 간단한 인사말부터 연습해보세요. 매일 10분씩 꾸준히 하는 것이 중요합니다.
-
-💪 시작이 반입니다! 매일 조금씩 연습하면 분명 실력이 늘 거예요. 응원합니다!"""
+            return "👋 영어 학습 시작하신 거 축하해요! 👍 도전하는 자세가 정말 멋져요. 🚀 지금은 기본 인사랑 간단한 표현부터 천천히 익혀나가면 돼요. 매일 10분씩만이라도 꾸준히 연습해보세요. ✨ 시작이 반이에요! 응원할게요!"
 
 
 # 싱글톤 인스턴스
