@@ -100,10 +100,11 @@ class GrammarEvaluatorImpl:
 
             response = await self.llm.invoke(prompt)
             response_text = response if isinstance(response, str) else str(response)
-            logger.debug(f"🔍 [문법 평가 LLM 응답] {response_text[:200]}...")
+            logger.info(f"🔍 [문법 평가 LLM 응답] {response_text[:200]}...")
 
             # JSON 객체 추출 시도
             result = extract_json_from_response(response_text)
+            logger.info(f"📌 [JSON 추출 결과] {result}")  # ← 직접 추출 결과 로깅
             if result:
                 score = normalize_score(result.get("score"))
                 feedback = result.get("feedback", "")
@@ -111,10 +112,12 @@ class GrammarEvaluatorImpl:
                     logger.warning("Grammar evaluation returned no score")
                     return None
                 logger.info(f"✅ [문법 평가 완료] {score}점 | feedback: {feedback[:50] if feedback else '(없음)'}")
-                return {
+                return_value = {
                     "score": score,
                     "feedback": feedback
                 }
+                logger.info(f"📤 [문법 평가 반환값] {return_value}")  # ← 반환값 로깅
+                return return_value
             else:
                 # 점수만 추출 시도
                 score = normalize_score_from_string(response_text)
@@ -204,10 +207,11 @@ class RelevanceEvaluatorImpl:
 
             response = await self.llm.invoke(prompt)
             response_text = response if isinstance(response, str) else str(response)
-            logger.debug(f"🔍 [맥락 평가 LLM 응답] {response_text[:200]}...")
+            logger.info(f"🔍 [맥락 평가 LLM 응답] {response_text[:200]}...")
 
             # JSON 객체 추출 시도
             result = extract_json_from_response(response_text)
+            logger.info(f"📌 [JSON 추출 결과] {result}")  # ← 직접 추출 결과 로깅
             if result:
                 score = normalize_score(result.get("score"))
                 feedback = result.get("feedback", "")
@@ -215,10 +219,12 @@ class RelevanceEvaluatorImpl:
                     logger.warning("Relevance evaluation returned no score")
                     return None
                 logger.info(f"✅ [맥락 평가 완료] {score}점 | feedback: {feedback[:50] if feedback else '(없음)'}")
-                return {
+                return_value = {
                     "score": score,
                     "feedback": feedback
                 }
+                logger.info(f"📤 [맥락 평가 반환값] {return_value}")  # ← 반환값 로깅
+                return return_value
             else:
                 # 점수만 추출 시도
                 score = normalize_score_from_string(response_text)
