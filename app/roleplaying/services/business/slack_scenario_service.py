@@ -31,7 +31,6 @@ from app.roleplaying.services.service_interfaces import (
     MessageSummarizer,
     FixedQuestionBuilder
 )
-from app.roleplaying.services.utils.scenario_title_utils import compact_title
 from app.roleplaying.services.utils.service_utils import normalize_questions
 from app.roleplaying.api.api_schemas import (
     AnalysisRequestDto,
@@ -60,6 +59,7 @@ class SlackScenarioService:
         generator: ScenarioGenerator 구현체 (시나리오 생성)
         summarizer: MessageSummarizer 구현체 (메시지 요약)
         question_builder: FixedQuestionBuilder 구현체 (질문 생성)
+        title_generator: ScenarioTitleGenerator 구현체 (제목 생성)
     """
 
     def __init__(
@@ -67,7 +67,8 @@ class SlackScenarioService:
         analyzer: ConversationAnalyzer,
         generator: ScenarioGenerator,
         summarizer: MessageSummarizer,
-        question_builder: FixedQuestionBuilder
+        question_builder: FixedQuestionBuilder,
+        title_generator=None  # Optional LLM-based title generator
     ):
         """
         Args:
@@ -75,11 +76,13 @@ class SlackScenarioService:
             generator: ScenarioGenerator 구현체
             summarizer: MessageSummarizer 구현체
             question_builder: FixedQuestionBuilder 구현체
+            title_generator: ScenarioTitleGenerator 구현체 (LLM 기반 제목 생성)
         """
         self.analyzer = analyzer
         self.generator = generator
         self.summarizer = summarizer
         self.question_builder = question_builder
+        self.title_generator = title_generator
 
     async def analyze_and_generate(
         self,
@@ -203,12 +206,8 @@ class SlackScenarioService:
             fallback_questions=base_questions
         )
 
-        formatted_title = self._format_title(
-            title=scenario_data.get("title"),
-            ai_role=ai_role,
-            topic_type=topic_type,
-            my_role=my_role
-        )
+        # LLM으로 제목 생성 (상황 설명 기반)
+        formatted_title = await self._generate_title(situation)
 
         return ScenarioInfoDto(
             aiRole=ai_role,
@@ -330,19 +329,61 @@ class SlackScenarioService:
             "How would you like your counterpart to support you next?"
         ]
 
-    def _format_title(self, *, title: str, ai_role: str, topic_type: str, my_role: str) -> str:
-        """Normalize scenario titles to exclude explicit role names and keep them short."""
-        fallback = "Focused Overview" if topic_type == "overview" else "Focused Detail"
-        banned_phrases = [
-            ai_role,
-            my_role,
-            "Project Manager",
-            "Tech Lead",
-            "QA Engineer"
-        ]
-        return compact_title(
-            raw_title=title,
-            banned_phrases=banned_phrases,
-            fallback=fallback,
-            max_length=50
-        )
+    async def _generate_title(self, situation: str) -> str:
+        """
+        LLM을 사용하여 상황 설명으로부터 완전한 제목을 생성합니다.
+
+        Args:
+            situation: 시나리오 상황 설명
+
+        Returns:
+            생성된 제목 (완전한 문장, 최대 80자)
+        """
+        if not self.title_generator:
+            # title_generator가 없으면 상황의 첫 문장 반환
+            logger.warning("Title generator not available, using fallback title")
+            return self._extract_first_sentence(situation)
+
+        try:
+            logger.info(f"📝 [시나리오 제목 생성] 시작")
+            logger.info(f"   상황 설명: {situation[:100]}...")
+            logger.info(f"   상황 길이: {len(situation)}자")
+
+            title = await self.title_generator.generate_title(situation)
+
+            logger.info(f"✅ [시나리오 제목 생성 완료]")
+            logger.info(f"   생성된 제목: {title}")
+            logger.info(f"   제목 길이: {len(title)}자 (제한: 80자)")
+
+            return title
+        except Exception as e:
+            logger.error(f"Failed to generate title: {e}", exc_info=True)
+            # 실패 시 폴백: 상황의 첫 문장 사용
+            return self._extract_first_sentence(situation)
+
+    @staticmethod
+    def _extract_first_sentence(text: str) -> str:
+        """
+        텍스트에서 첫 번째 완전한 문장을 추출합니다.
+
+        Args:
+            text: 원본 텍스트
+
+        Returns:
+            첫 번째 문장 (없으면 원본 텍스트, 최대 80자)
+        """
+        if not text:
+            return "Scenario Discussion"
+
+        # 문장 부호 위치 찾기
+        for punct in ["。", ".", "!", "?"]:
+            pos = text.find(punct)
+            if pos > 0:
+                sentence = text[:pos + 1]
+                if len(sentence) <= 80:
+                    return sentence
+
+        # 문장 부호가 없으면 원본 텍스트 반환 (80자 제한)
+        if len(text) > 80:
+            return text[:80].rstrip() + "."
+        return text + "." if not text.endswith((".", "!", "?")) else text

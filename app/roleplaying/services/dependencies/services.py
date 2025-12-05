@@ -42,6 +42,7 @@ from app.roleplaying.services.dependencies.llm import (
     get_message_summarizer,
     get_fixed_question_builder,
     get_scenario_enhancer,
+    get_scenario_title_generator,
 )
 from app.roleplaying.services.dependencies.repositories import (
     get_session_repository,
@@ -100,7 +101,8 @@ def get_slack_scenario_service(
     analyzer: "ConversationAnalyzer" = Depends(get_conversation_analyzer),
     generator: "ScenarioGenerator" = Depends(get_scenario_generator),
     summarizer: "MessageSummarizer" = Depends(get_message_summarizer),
-    question_builder: "FixedQuestionBuilder" = Depends(get_fixed_question_builder)
+    question_builder: "FixedQuestionBuilder" = Depends(get_fixed_question_builder),
+    title_generator=Depends(get_scenario_title_generator)
 ):
     """Slack 시나리오 생성 서비스 의존성 주입
 
@@ -108,6 +110,7 @@ def get_slack_scenario_service(
         - Slack 스레드 분석 및 주요 토론 내용 추출
         - 토론 내용에서 역할극 시나리오 자동 생성
         - 고정 질문 3개 생성
+        - LLM으로 제목 생성
 
     Returns:
         SlackScenarioService 인스턴스 (Request-scoped)
@@ -118,6 +121,7 @@ def get_slack_scenario_service(
         - ScenarioGenerator: 시나리오 생성
         - MessageSummarizer: 대화 요약
         - FixedQuestionBuilder: 고정 질문 생성
+        - ScenarioTitleGenerator: LLM 기반 제목 생성
 
     Example:
         @router.post("/scenarios/from-slack")
@@ -137,7 +141,8 @@ def get_slack_scenario_service(
         analyzer=analyzer,
         generator=generator,
         summarizer=summarizer,
-        question_builder=question_builder
+        question_builder=question_builder,
+        title_generator=title_generator
     )
 
 

@@ -16,7 +16,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from fastapi import WebSocket
+from fastapi import WebSocket, status
 
 from app.config import settings
 from app.roleplaying.core.session_state_manager import (
@@ -33,7 +33,6 @@ from app.roleplaying.handlers._common import (
     _generate_and_stream_ai_response,
     _save_utterance_with_feedback,
     _handle_task_error,
-    _schedule_spring2_save,
     _save_question_with_keywords,
 )
 from app.roleplaying.handlers.session_validators import ErrorHandler
