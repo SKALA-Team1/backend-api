@@ -376,23 +376,34 @@ async def _save_utterance_with_feedback(
 
         # ✅ Conditionally include feedback fields
         if feedback_result:
+            logger.info(f"📝 [Spring2 저장] feedback_result 확인: keys={list(feedback_result.keys())}")
+
             needs_correction = feedback_result.get("needs_correction", False)
             # needs_correction이 True일 때만 retry_count 유지, False면 0
             retry_count = session_state.current_question_retry_count if (session_state and needs_correction) else 0
 
+            # ✅ scores가 있는지 확인
+            scores = feedback_result.get("scores", {})
+            if not scores:
+                logger.warning(f"⚠️  [Spring2 저장] feedback_result에 scores가 없음: {feedback_result}")
+
+            feedback_sections = feedback_result.get("feedback_sections")
+            logger.info(f"📝 [Spring2 저장] feedback_sections 확인: {feedback_sections}")
+
             save_kwargs.update({
-                "pronunciation_score": feedback_result["scores"].get("pronunciation_score"),
-                "grammar_score": feedback_result["scores"].get("grammar_score"),
-                "relevance_score": feedback_result["scores"].get("relevance_score"),
-                "overall_score": feedback_result["scores"].get("overall_score"),
+                "pronunciation_score": scores.get("pronunciation_score"),
+                "grammar_score": scores.get("grammar_score"),
+                "relevance_score": scores.get("relevance_score"),
+                "overall_score": scores.get("overall_score"),
                 "needs_correction": needs_correction,  # Boolean (변환은 spring2_client에서)
                 "retry_count": retry_count,
                 "primary_issue": feedback_result.get("primary_issue", "none"),
-                "feedback_sections": feedback_result.get("feedback_sections"),  # 구조화된 피드백 (영문 + 한글)
+                "feedback_sections": feedback_sections,  # ✅ 구조화된 피드백 (영문 + 한글)
             })
         else:
             # No feedback data - explicitly set fields
             # needs_correction should be False (not None) when no feedback
+            logger.info(f"📝 [Spring2 저장] feedback_result가 None - 피드백 없음")
             save_kwargs.update({
                 "pronunciation_score": None,
                 "grammar_score": None,
@@ -404,12 +415,15 @@ async def _save_utterance_with_feedback(
                 "feedback_sections": None,
             })
 
+        logger.info(f"📤 [Spring2 저장] save_utterance 호출 중: session={session_id}, index={utterance_index}")
+        logger.debug(f"📤 [Spring2 저장] save_kwargs: {save_kwargs}")
+
         result = await spring2_client.save_utterance(**save_kwargs)
-        logger.info(f"Utterance saved to Spring 2: session={session_id}, index={utterance_index}")
+        logger.info(f"✅ [Spring2 저장] 성공: session={session_id}, index={utterance_index}, result={result}")
         return result
 
     except Exception as e:
-        logger.error(f"Failed to save utterance: session={session_id}, error={e}", exc_info=True)
+        logger.error(f"❌ [Spring2 저장] 실패: session={session_id}, error={e}", exc_info=True)
         return None
 
 
