@@ -30,6 +30,7 @@ from app.roleplaying.handlers._common import (
     _evaluate_feedback_with_agent,
     _send_feedback_messages,
     _generate_and_stream_ai_response,
+    _generate_and_stream_ai_response_bilingual,
     _save_utterance_with_feedback,
     _handle_task_error,
     _save_question_with_keywords,
@@ -225,10 +226,10 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             session_manager.cleanup(session_id)
             return
 
-        # Step 8: AI 응답 생성 (정상 응답일 때만)
+        # Step 8: AI 응답 생성 (정상 응답일 때만) - 영문 토큰 + 한글 섹션 스트리밍
         await websocket.send_json(AiTypingMessage().model_dump())
 
-        full_ai_response, is_fixed_question = await _generate_and_stream_ai_response(
+        full_ai_response, is_fixed_question = await _generate_and_stream_ai_response_bilingual(
             websocket=websocket,
             session_id=session_id,
             session_state=session_state,
