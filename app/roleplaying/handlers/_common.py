@@ -132,20 +132,30 @@ async def _evaluate_feedback(
             f"audio={audio_data is not None}, azure={can_use_azure}"
         )
 
+        conversation_history = session_state.history if session_state else []
+        scenario_context = {
+            "my_role": session_state.my_role if session_state else "",
+            "ai_role": session_state.ai_role if session_state else "",
+            "current_question": session_state.current_question_text if session_state else ""
+        }
+
         feedback_result = await asyncio.wait_for(
             feedback_orchestrator.evaluate_response_fast(
                 user_text=user_text,
                 audio_data=audio_data if can_use_azure else None,
-                conversation_history=session_state.history if session_state else [],
-                scenario_context={
-                    "my_role": session_state.my_role if session_state else "",
-                    "ai_role": session_state.ai_role if session_state else "",
-                    "current_question": session_state.current_question_text if session_state else ""
-                },
+                conversation_history=conversation_history,
+                scenario_context=scenario_context,
                 retry_count=session_state.current_question_retry_count if session_state else 0
             ),
             timeout=60.0
         )
+
+        # ✅ 스트리밍에 필요한 추가 정보를 feedback_result에 추가
+        if feedback_result:
+            feedback_result["user_text"] = user_text
+            feedback_result["conversation_history"] = conversation_history
+            feedback_result["scenario_context"] = scenario_context
+            feedback_result["audio_data"] = audio_data if can_use_azure else None
 
         if feedback_result and (audio_data is None or not can_use_azure):
             scores = feedback_result.get("scores", {})
@@ -284,15 +294,25 @@ async def _send_feedback_messages(
         grammar_score = feedback_result.get("grammar_score")
         relevance_score = feedback_result.get("relevance_score")
 
+        # 스트리밍에 필요한 추가 정보
+        user_text = feedback_result.get("user_text", "")
+        conversation_history = feedback_result.get("conversation_history", [])
+        scenario_context = feedback_result.get("scenario_context", {})
+        audio_data = feedback_result.get("audio_data")
+
         # 피드백 섹션 스트리밍 생성 (영문 토큰 + 한글 섹션)
         section_count = 0
         async for item in feedback_orchestrator._build_feedback_sections_stream(
+            user_text=user_text,
+            conversation_history=conversation_history,
+            scenario_context=scenario_context,
             pronunciation=pronunciation,
             grammar=grammar,
             relevance=relevance,
             pronunciation_score=pronunciation_score,
             grammar_score=grammar_score,
-            relevance_score=relevance_score
+            relevance_score=relevance_score,
+            audio_data=audio_data
         ):
             if item["type"] == "feedback_token":
                 # 영문 토큰 즉시 전송
@@ -485,6 +505,13 @@ async def _evaluate_feedback_with_agent(
             f"text_length={len(user_text)}, audio={audio_data is not None}, azure={can_use_azure}"
         )
 
+        conversation_history = session_state.history if session_state else []
+        scenario_context = {
+            "my_role": session_state.my_role if session_state else "",
+            "ai_role": session_state.ai_role if session_state else "",
+            "current_question": session_state.current_question_text if session_state else ""
+        }
+
         # ReAct Agent 실행
         agent_decision = await agent.decide_feedback_or_question(
             session_state=session_state,
@@ -497,6 +524,14 @@ async def _evaluate_feedback_with_agent(
         if agent_decision is None:
             logger.warning(f"❌ [ReAct] Agent returned None for session={session_id}")
             return None
+
+        # ✅ 스트리밍에 필요한 추가 정보를 feedback_result에 추가
+        feedback_result = agent_decision.get("feedback_result")
+        if feedback_result:
+            feedback_result["user_text"] = user_text
+            feedback_result["conversation_history"] = conversation_history
+            feedback_result["scenario_context"] = scenario_context
+            feedback_result["audio_data"] = audio_data if can_use_azure else None
 
         logger.info(
             f"✅ [ReAct] Agent decision: action={agent_decision.get('action')}, "

@@ -50,7 +50,6 @@ class GrammarEvaluatorImpl:
 
     def __init__(
         self,
-        provider: str = None,
         api_key: str = None,
         model_name: str = None,
         temperature: float = 0.3
@@ -59,25 +58,22 @@ class GrammarEvaluatorImpl:
         문법 평가기 초기화
 
         Args:
-            provider: LLM 프로바이더 ("openai" 또는 "ollama")
-            api_key: OpenAI API 키 (OpenAI 사용 시)
+            api_key: OpenAI API 키
             model_name: 모델명
             temperature: 창의성 레벨 (낮을수록 일관성 있음)
         """
-        self.provider = provider or settings.FEEDBACK_LLM_PROVIDER
         self.api_key = api_key or settings.openai_api_key
         self.model_name = model_name or settings.OPENAI_MODEL_FEEDBACK
         self.temperature = temperature
 
         self.llm = create_llm_provider(
-            provider_type="openai" if self.provider == "openai" else "ollama",
-            api_key=self.api_key if self.provider == "openai" else None,
+            provider_type="openai",
+            api_key=self.api_key,
             model_name=self.model_name,
-            base_url=settings.OLLAMA_BASE_URL if self.provider != "openai" else None,
             temperature=self.temperature
         )
 
-        logger.info(f"GrammarEvaluatorImpl initialized with {self.provider} provider")
+        logger.info(f"GrammarEvaluatorImpl initialized with OpenAI provider")
 
     async def evaluate_grammar(self, user_text: str) -> Optional[Dict[str, Any]]:
         """
@@ -169,7 +165,6 @@ class RelevanceEvaluatorImpl:
 
     def __init__(
         self,
-        provider: str = None,
         api_key: str = None,
         model_name: str = None,
         temperature: float = 0.3
@@ -178,25 +173,22 @@ class RelevanceEvaluatorImpl:
         맥락 평가기 초기화
 
         Args:
-            provider: LLM 프로바이더
-            api_key: OpenAI API 키 (OpenAI 사용 시)
+            api_key: OpenAI API 키
             model_name: 모델명
             temperature: 창의성 레벨
         """
-        self.provider = provider or settings.FEEDBACK_LLM_PROVIDER
         self.api_key = api_key or settings.openai_api_key
         self.model_name = model_name or settings.OPENAI_MODEL_FEEDBACK
         self.temperature = temperature
 
         self.llm = create_llm_provider(
-            provider_type="openai" if self.provider == "openai" else "ollama",
-            api_key=self.api_key if self.provider == "openai" else None,
+            provider_type="openai",
+            api_key=self.api_key,
             model_name=self.model_name,
-            base_url=settings.OLLAMA_BASE_URL if self.provider != "openai" else None,
             temperature=self.temperature
         )
 
-        logger.info(f"RelevanceEvaluatorImpl initialized with {self.provider} provider")
+        logger.info(f"RelevanceEvaluatorImpl initialized with OpenAI provider")
 
     async def evaluate_relevance(
         self,
@@ -337,7 +329,6 @@ class PronunciationEvaluatorImpl:
     def __init__(
         self,
         azure_service,
-        provider: str = None,
         api_key: str = None,
         model_name: str = None,
         temperature: float = 0.3
@@ -347,26 +338,23 @@ class PronunciationEvaluatorImpl:
 
         Args:
             azure_service: Azure Speech Service 인스턴스
-            provider: LLM 프로바이더 ("openai" 또는 "ollama")
-            api_key: OpenAI API 키 (OpenAI 사용 시)
+            api_key: OpenAI API 키
             model_name: 모델명
             temperature: 창의성 레벨 (낮을수록 일관성)
         """
         self.azure_service = azure_service
-        self.provider = provider or settings.FEEDBACK_LLM_PROVIDER
         self.api_key = api_key or settings.openai_api_key
         self.model_name = model_name or settings.OPENAI_MODEL_FEEDBACK
         self.temperature = temperature
 
         self.llm = create_llm_provider(
-            provider_type="openai" if self.provider == "openai" else "ollama",
-            api_key=self.api_key if self.provider == "openai" else None,
+            provider_type="openai",
+            api_key=self.api_key,
             model_name=self.model_name,
-            base_url=settings.OLLAMA_BASE_URL if self.provider != "openai" else None,
             temperature=self.temperature
         )
 
-        logger.info(f"PronunciationEvaluatorImpl initialized with {self.provider} provider")
+        logger.info(f"PronunciationEvaluatorImpl initialized with OpenAI provider")
 
     async def evaluate_pronunciation(
         self,
@@ -834,18 +822,34 @@ class FeedbackOrchestratorImpl:
 
     async def _build_feedback_sections_stream(
         self,
+        user_text: str,
+        conversation_history: list,
+        scenario_context: dict,
         pronunciation: Optional[Dict],
         grammar: Optional[Dict],
         relevance: Optional[Dict],
         pronunciation_score: Optional[int],
         grammar_score: Optional[int],
         relevance_score: Optional[int],
+        audio_data: Optional[bytes] = None,
     ):
         """
         피드백 섹션(영문 토큰 + 한글 섹션) 스트리밍 생성
 
-        ✅ 영문: 토큰 단위로 즉시 전송 (실시간 느낌)
-        ✅ 한글: 섹션 완성 후 한 번에 전송 (품질 유지)
+        ✅ 영문: 실시간 LLM 스트리밍으로 토큰 단위 전송
+        ✅ 한글: 섹션 완성 후 한 번에 번역하여 전송
+
+        Args:
+            user_text: 사용자 발화 텍스트 (평가기에 전달)
+            conversation_history: 대화 히스토리 (relevance 평가용)
+            scenario_context: 시나리오 컨텍스트 (relevance 평가용)
+            pronunciation: 발음 평가 결과
+            grammar: 문법 평가 결과
+            relevance: 맥락 평가 결과
+            pronunciation_score: 발음 점수
+            grammar_score: 문법 점수
+            relevance_score: 맥락 점수
+            audio_data: 오디오 데이터 (발음 평가용)
 
         Yields:
             영문 토큰: {
@@ -867,21 +871,33 @@ class FeedbackOrchestratorImpl:
                 "evaluation": pronunciation,
                 "score": pronunciation_score,
                 "fallback": "Pronunciation feedback is unavailable.",
-                "evaluator": self.pronunciation_evaluator
+                "evaluator": self.pronunciation_evaluator,
+                "user_text": user_text,
+                "audio_data": audio_data,
+                "conversation_history": None,
+                "scenario_context": None,
             },
             {
                 "section_type": "grammar",
                 "evaluation": grammar,
                 "score": grammar_score,
                 "fallback": "Grammar feedback is unavailable.",
-                "evaluator": self.grammar_evaluator
+                "evaluator": self.grammar_evaluator,
+                "user_text": user_text,
+                "audio_data": None,
+                "conversation_history": None,
+                "scenario_context": None,
             },
             {
                 "section_type": "relevance",
                 "evaluation": relevance,
                 "score": relevance_score,
                 "fallback": "Relevance feedback is unavailable.",
-                "evaluator": self.relevance_evaluator
+                "evaluator": self.relevance_evaluator,
+                "user_text": user_text,
+                "audio_data": None,
+                "conversation_history": conversation_history,
+                "scenario_context": scenario_context,
             },
         ]
 
@@ -889,9 +905,9 @@ class FeedbackOrchestratorImpl:
             # 각 섹션 순차 처리
             for config in section_configs:
                 section_type = config["section_type"]
-                logger.info(f"🟢 [{section_type}] 영문 피드백 스트리밍 중...")
+                logger.info(f"🟢 [{section_type}] 영문 피드백 실시간 스트리밍 중...")
 
-                # Step 1: 영문 피드백을 토큰 단위로 생성하며 즉시 전송
+                # Step 1: 실시간 LLM 스트리밍으로 영문 피드백 생성
                 english_tokens = []
                 async for token in self._stream_section_feedback_en(config):
                     english_tokens.append(token)
@@ -930,7 +946,11 @@ class FeedbackOrchestratorImpl:
 
     async def _stream_section_feedback_en(self, config: Dict):
         """
-        각 섹션의 영문 피드백을 토큰 단위로 생성
+        각 섹션의 영문 피드백을 실시간 LLM 스트리밍으로 생성
+
+        ✅ 변경사항:
+        - 이미 평가된 피드백을 재사용하지 않고
+        - evaluator의 스트리밍 메서드를 직접 호출하여 실시간 토큰 생성
 
         Args:
             config: 섹션 설정 (section_type, evaluation, score, evaluator 포함)
@@ -939,20 +959,44 @@ class FeedbackOrchestratorImpl:
             각 토큰 문자열
         """
         section_type = config["section_type"]
+        evaluator = config["evaluator"]
+        user_text = config.get("user_text", "")
 
-        # 이미 평가 완료된 경우 (feedback이 있는 경우)
-        if config["evaluation"] and isinstance(config["evaluation"], dict):
-            feedback_text = config["evaluation"].get("feedback", "")
-            if feedback_text and feedback_text.strip():
-                # 기존 피드백을 토큰으로 분할
-                for token in feedback_text.split():
-                    yield token + " "
-                return
+        try:
+            logger.info(f"🟢 [{section_type}] evaluator 스트리밍 메서드 호출...")
 
-        # Fallback 사용
-        fallback = config["fallback"]
-        for token in fallback.split():
-            yield token + " "
+            # 각 섹션별로 evaluator의 스트리밍 메서드 직접 호출
+            if section_type == "pronunciation":
+                audio_data = config.get("audio_data")
+                if not audio_data:
+                    logger.debug(f"No audio data for pronunciation, using fallback")
+                    for token in config["fallback"].split():
+                        yield token + " "
+                    return
+
+                async for token in evaluator.evaluate_pronunciation_stream(audio_data, user_text):
+                    if token:
+                        yield token
+
+            elif section_type == "grammar":
+                async for token in evaluator.evaluate_grammar_stream(user_text):
+                    if token:
+                        yield token
+
+            elif section_type == "relevance":
+                conversation_history = config.get("conversation_history", [])
+                scenario_context = config.get("scenario_context", {})
+                async for token in evaluator.evaluate_relevance_stream(
+                    user_text, conversation_history, scenario_context
+                ):
+                    if token:
+                        yield token
+
+        except Exception as e:
+            logger.error(f"Failed to stream {section_type} feedback: {e}", exc_info=True)
+            # Fallback: 오류 발생 시 fallback 텍스트 사용
+            for token in config["fallback"].split():
+                yield token + " "
 
     async def _translate_feedback(self, feedback_en: str) -> Optional[str]:
         """LLM을 사용하여 영문 피드백을 한글로 번역"""
