@@ -1,20 +1,20 @@
 """
 LLM Prompt Constants
-===================
-모든 LLM 프롬프트 상수를 중앙에서 관리합니다.
+====================
+Centralized management of all LLM prompt templates.
 
-분류:
-- 질문 생성 프롬프트
-- 평가/피드백 프롬프트
-- 시나리오 생성 프롬프트
-- 기타 생성 프롬프트
+Categories:
+- Question generation prompts
+- Evaluation and feedback prompts
+- Scenario generation prompts
+- Other generation prompts
+- ReAct agent prompts (feedback decision)
+- Translation prompts (bilingual support)
+- Recommendation prompts (learning guidance)
+- Scenario title generation prompts
 """
 
-# ============================================
-# 질문 생성 프롬프트
-# ============================================
-
-FOLLOWUP_QUESTION_PROMPT = """You are an AI roleplaying partner acting as a {role} in a professional, IT-focused English conversation training session. 
+FOLLOWUP_QUESTION_PROMPT = """You are an AI roleplaying partner acting as a {role} in a professional, IT-focused English conversation training session.
 Your job is to ask the user a contextually appropriate follow-up question based on the scenario and the conversation so far.
 
 ----------------------------------------
@@ -37,35 +37,35 @@ YOUR TASK
 ----------------------------------------
 Generate ONE follow-up question that meets ALL of the following requirements:
 
-1. **Context relevance**  
-   - The question must directly relate to what the user just said.  
-   - It must reflect understanding of the user’s previous statements, concerns, or updates.
+1. **Context relevance**
+   - The question must directly relate to what the user just said.
+   - It must reflect understanding of the user's previous statements, concerns, or updates.
 
-2. **Professional IT domain alignment**  
+2. **Professional IT domain alignment**
    The question should be framed as if you are participating in a real IT collaboration scenario, such as:
-   - software development planning  
-   - debugging or incident handling  
-   - project management / sprint updates  
-   - system architecture discussions  
-   - code reviews  
-   - cross-team collaboration  
-   - requirement clarification  
-   - deployment, CI/CD, or DevOps workflows  
-   - communication with stakeholders  
+   - software development planning
+   - debugging or incident handling
+   - project management / sprint updates
+   - system architecture discussions
+   - code reviews
+   - cross-team collaboration
+   - requirement clarification
+   - deployment, CI/CD, or DevOps workflows
+   - communication with stakeholders
 
-3. **Role consistency**  
-   - Stay fully in character as a {role}.  
-   - Your tone, vocabulary, and question style should match the responsibilities and communication style of that role  
+3. **Role consistency**
+   - Stay fully in character as a {role}.
+   - Your tone, vocabulary, and question style should match the responsibilities and communication style of that role
      (e.g., engineer, PM, QA, tech lead, client stakeholder).
 
-4. **Language learning value**  
-   - Encourage the user to speak in detailed, full-sentence, professional English.  
-   - Avoid yes/no questions.  
+4. **Language learning value**
+   - Encourage the user to speak in detailed, full-sentence, professional English.
+   - Avoid yes/no questions.
    - Encourage elaboration, clarification, or explanation.
 
-5. **Natural and conversational tone**  
-   - Sound like a real professional at work.  
-   - Ask only **one** question.  
+5. **Natural and conversational tone**
+   - Sound like a real professional at work.
+   - Ask only **one** question.
    - Do NOT add disclaimers, notes, or extra commentary.
 
 ----------------------------------------
@@ -79,7 +79,7 @@ FIXED_QUESTIONS_PROMPT = """
 You are an assistant refining follow-up questions for English conversation practice in an IT collaboration environment.
 
 [Context]
-This prompt is used *after analyzing real Slack messages*.  
+This prompt is used *after analyzing real Slack messages*.
 You will receive two summaries:
 - The user's message history
 - The counterpart's message history
@@ -97,19 +97,19 @@ Based on these summaries, your job is to generate three highly specific follow-u
 Task:
 Generate exactly three follow-up questions in English that:
 
-1. Clearly connect to the issues, decisions, blockers, or goals shown in the summaries.  
-2. Encourage detailed, professional IT explanations (never yes/no).  
-3. Reflect realistic IT communication patterns (engineering, PM, QA, DevOps, cross-team alignment, etc.).  
-4. Each question should address a different angle of the conversation, such as:  
-   - Root cause or background  
-   - Decision rationale  
-   - Risks and concerns  
-   - Collaboration or coordination  
-   - Next steps or actions  
+1. Clearly connect to the issues, decisions, blockers, or goals shown in the summaries.
+2. Encourage detailed, professional IT explanations (never yes/no).
+3. Reflect realistic IT communication patterns (engineering, PM, QA, DevOps, cross-team alignment, etc.).
+4. Each question should address a different angle of the conversation, such as:
+   - Root cause or background
+   - Decision rationale
+   - Risks and concerns
+   - Collaboration or coordination
+   - Next steps or actions
 
 Additional Requirements:
-- Questions must be grounded in the Slack summary content (NOT generic).  
-- Avoid assumptions not supported by the summaries.  
+- Questions must be grounded in the Slack summary content (NOT generic).
+- Avoid assumptions not supported by the summaries.
 - Produce only the JSON output below.
 
 Output Format (strict):
@@ -117,11 +117,6 @@ Output Format (strict):
 
 Return valid JSON only.
 """
-
-
-# ============================================
-# 평가/피드백 프롬프트
-# ============================================
 
 GRAMMAR_EVALUATION_PROMPT = """
 Grammar Evaluation Target: "{user_text}"
@@ -203,10 +198,6 @@ Strict JSON format:
 {{"score": int (0-100), "feedback": "specific issues only OR 'Pronunciation is clear and professional. Well done!'"}}
 """
 
-# ============================================
-# 시나리오/상황 생성 프롬프트
-# ============================================
-
 CONVERSATION_ANALYSIS_PROMPT = """
 Conversation to Analyze:
 {conversation_text}
@@ -234,20 +225,16 @@ Return only the JSON output.
 """
 
 SITUATION_ENHANCEMENT_PROMPT = """
-사용자 역할: {my_role}
-AI 역할: {ai_role}
+User Role: {my_role}
+AI Role: {ai_role}
 
-사용자 입력: {situation}
+User Input: {situation}
 
 {context_text}
 
-위 정보를 바탕으로 더 구체적인 롤플레이 상황을 만들어주세요.
-2-3문장으로 자연스럽고 실무적인 상황을 작성해주세요.
+Based on the information above, create a more specific role-play scenario.
+Write a natural and practical situation in 2-3 sentences.
 """
-
-# ============================================
-# 기타 생성 프롬프트
-# ============================================
 
 AI_RESPONSE_PROMPT = """
 Role Settings:
@@ -280,10 +267,6 @@ AI Role: {ai_role}
 Create a short title (5–10 words) that captures the core of the situation.
 Output only the title and include no additional explanation.
 """
-
-# ============================================
-# ReAct Agent Prompts (Feedback Decision)
-# ============================================
 
 FEEDBACK_DECISION_AGENT_SYSTEM_PROMPT = """You are a ReAct agent responsible for evaluating English learners' responses and deciding whether to provide corrective feedback or proceed to the next question.
 
@@ -340,10 +323,6 @@ Respond in valid JSON format ONLY:
 Do not include any other text, explanations, or commentary.
 """
 
-# ============================================
-# Translation Prompts (Bilingual Support)
-# ============================================
-
 KOREAN_TRANSLATION_PROMPT = """
 Translate the following English text to Korean.
 
@@ -398,10 +377,6 @@ Provide the response in JSON format ONLY:
 Do not include explanations or other text.
 """
 
-# ============================================
-# Recommendation Prompts (Learning Guidance)
-# ============================================
-
 RECOMMENDED_KEYWORDS_PROMPT = """
 Analyze the Slack message context and AI question to generate highly specific, actionable keywords for the user's response.
 
@@ -453,34 +428,30 @@ Provide the response in JSON format ONLY:
 Return valid JSON only.
 """
 
-# ============================================
-# 시나리오 제목 생성 프롬프트
-# ============================================
-
 SCENARIO_TITLE_GENERATION_PROMPT = """
-당신은 IT 영어 대화 연습 시나리오의 제목을 생성하는 어시스턴트입니다.
+You are an assistant that generates titles for IT English conversation practice scenarios.
 
-주어진 상황 설명으로부터 완전하고 설명적인 제목을 생성해야 합니다.
+You should create a complete and descriptive title from the given situation description.
 
-[상황 설명]
+[Situation Description]
 {situation}
 
-[작업 요구사항]
-다음 조건을 모두 만족하는 제목을 생성하세요:
+[Task Requirements]
+Generate a title that satisfies ALL of the following conditions:
 
-1. **완전한 문장**: 문법적으로 완벽하고 중간에 끝나지 않아야 합니다.
-   - "회사의 결제 서비스가 데이터베이스 오류로 인해 중단된 상황" → "회사의 결제 서비스가 데이터베이스 오류로 인해 중단되었을 때 대응하는 방법."
-   - 절대 "회사의 결제 서비스가" 처럼 끝나면 안 됩니다.
+1. **Complete sentence**: Grammatically perfect and must not end abruptly.
+   - Example: "How to respond when a company's payment service is interrupted due to a database error" (complete)
+   - NOT like: "A company's payment service that..." (incomplete)
 
-2. **설명적**: 상황의 핵심을 명확하게 드러냅니다.
-   - 일반적인 제목은 피하세요 (예: "Focused Detail", "Discussion Scenario")
-   - 상황의 구체적인 내용을 반영해야 합니다.
+2. **Descriptive**: Clearly reveals the core of the situation.
+   - Avoid generic titles (e.g., "Focused Detail", "Discussion Scenario")
+   - Should reflect specific content of the situation.
 
-3. **길이**: 최대 80자 이내입니다.
-   - 너무 짧거나 길지 않으면서도 간결해야 합니다.
+3. **Length**: Maximum 80 characters.
+   - Concise while capturing essential information.
 
-4. **언어**: 한국어로 작성합니다.
+4. **Language**: Write in English.
 
-[출력 형식]
-제목 텍스트만 출력하세요. 설명이나 추가 내용은 없어야 합니다.
+[Output Format]
+Output only the title text. No explanation or additional content.
 """
