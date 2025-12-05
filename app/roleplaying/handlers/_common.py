@@ -132,20 +132,30 @@ async def _evaluate_feedback(
             f"audio={audio_data is not None}, azure={can_use_azure}"
         )
 
+        conversation_history = session_state.history if session_state else []
+        scenario_context = {
+            "my_role": session_state.my_role if session_state else "",
+            "ai_role": session_state.ai_role if session_state else "",
+            "current_question": session_state.current_question_text if session_state else ""
+        }
+
         feedback_result = await asyncio.wait_for(
             feedback_orchestrator.evaluate_response_fast(
                 user_text=user_text,
                 audio_data=audio_data if can_use_azure else None,
-                conversation_history=session_state.history if session_state else [],
-                scenario_context={
-                    "my_role": session_state.my_role if session_state else "",
-                    "ai_role": session_state.ai_role if session_state else "",
-                    "current_question": session_state.current_question_text if session_state else ""
-                },
+                conversation_history=conversation_history,
+                scenario_context=scenario_context,
                 retry_count=session_state.current_question_retry_count if session_state else 0
             ),
             timeout=60.0
         )
+
+        # ✅ 스트리밍에 필요한 추가 정보를 feedback_result에 추가
+        if feedback_result:
+            feedback_result["user_text"] = user_text
+            feedback_result["conversation_history"] = conversation_history
+            feedback_result["scenario_context"] = scenario_context
+            feedback_result["audio_data"] = audio_data if can_use_azure else None
 
         if feedback_result and (audio_data is None or not can_use_azure):
             scores = feedback_result.get("scores", {})
@@ -269,7 +279,8 @@ async def _send_feedback_messages(
     await websocket.send_json(feedback_msg.model_dump())
     logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
-    # Step 2: ✅ 구조화된 피드백 섹션 스트리밍 (NEW - 각 섹션이 준비되면 즉시 전송)
+    # Step 2: ✅ 구조화된 피드백 섹션 스트리밍 (영문 토큰 + 한글 섹션)
+    feedback_sections_list = []
     try:
         from app.roleplaying.services.dependencies.feedback import get_feedback_orchestrator
 
@@ -283,23 +294,73 @@ async def _send_feedback_messages(
         grammar_score = feedback_result.get("grammar_score")
         relevance_score = feedback_result.get("relevance_score")
 
-        # 피드백 섹션을 스트리밍으로 생성 및 전송
+        # 🔍 점수 확인 로깅
+        logger.info(
+            f"📊 [점수 추출] pronunciation={pronunciation_score}, "
+            f"grammar={grammar_score}, relevance={relevance_score}"
+        )
+
+        # 스트리밍에 필요한 추가 정보
+        user_text = feedback_result.get("user_text", "")
+        conversation_history = feedback_result.get("conversation_history", [])
+        scenario_context = feedback_result.get("scenario_context", {})
+        audio_data = feedback_result.get("audio_data")
+
+        # 피드백 섹션 스트리밍 생성 (영문 토큰 + 한글 섹션)
         section_count = 0
-        async for section in feedback_orchestrator._build_feedback_sections_stream(
+        async for item in feedback_orchestrator._build_feedback_sections_stream(
+            user_text=user_text,
+            conversation_history=conversation_history,
+            scenario_context=scenario_context,
             pronunciation=pronunciation,
             grammar=grammar,
             relevance=relevance,
             pronunciation_score=pronunciation_score,
             grammar_score=grammar_score,
-            relevance_score=relevance_score
+            relevance_score=relevance_score,
+            audio_data=audio_data
         ):
-            # 각 섹션이 완성되면 즉시 WebSocket으로 전송
-            sections_msg = FeedbackSectionsMessage(sections=[section])
-            await websocket.send_json(sections_msg.model_dump())
-            section_count += 1
-            logger.info(f"✅ [피드백 섹션 실시간 전송] {section['type']} ({section_count}/3)")
+            if item["type"] == "feedback_token":
+                # 영문 토큰 즉시 전송
+                token_msg = FeedbackStreamingMessage(
+                    chunk=item["token"]
+                )
+                await websocket.send_json(token_msg.model_dump())
+                logger.debug(f"📤 [피드백 토큰 전송] {item['section_type']}: {repr(item['token'])}")
+
+            elif item["type"] == "feedback_section":
+                # 한글 섹션 완성 후 한 번에 전송
+                section_score = item["score"]
+                logger.info(
+                    f"📤 [피드백 섹션 전송] {item['section_type']}: "
+                    f"score={section_score} (type={type(section_score).__name__})"
+                )
+
+                sections_msg = FeedbackSectionsMessage(sections=[{
+                    "type": item["section_type"],
+                    "feedback_en": item["feedback_en"],
+                    "feedback_ko": item["feedback_ko"],
+                    "score": section_score
+                }])
+                await websocket.send_json(sections_msg.model_dump())
+                logger.debug(f"✅ 메시지 전송 완료: {sections_msg.model_dump()}")
+
+                # ✅ 생성된 섹션을 리스트에 저장 (Spring 2 저장용)
+                feedback_sections_list.append({
+                    "type": item["section_type"],
+                    "feedback_en": item["feedback_en"],
+                    "feedback_ko": item["feedback_ko"],
+                    "score": section_score
+                })
+                section_count += 1
+                logger.info(f"✅ [피드백 섹션 완성] {item['section_type']} ({section_count}/3)")
 
         logger.info(f"All {section_count} feedback sections streamed")
+
+        # ✅ feedback_result에 생성된 feedback_sections 저장 (Spring 2에 저장하기 위해)
+        if feedback_sections_list:
+            feedback_result["feedback_sections"] = feedback_sections_list
+            logger.info(f"✅ feedback_sections saved to feedback_result: {len(feedback_sections_list)} sections")
 
     except Exception as e:
         logger.error(f"Failed to stream feedback sections: {e}", exc_info=True)
@@ -368,23 +429,34 @@ async def _save_utterance_with_feedback(
 
         # ✅ Conditionally include feedback fields
         if feedback_result:
+            logger.info(f"📝 [Spring2 저장] feedback_result 확인: keys={list(feedback_result.keys())}")
+
             needs_correction = feedback_result.get("needs_correction", False)
             # needs_correction이 True일 때만 retry_count 유지, False면 0
             retry_count = session_state.current_question_retry_count if (session_state and needs_correction) else 0
 
+            # ✅ scores가 있는지 확인
+            scores = feedback_result.get("scores", {})
+            if not scores:
+                logger.warning(f"⚠️  [Spring2 저장] feedback_result에 scores가 없음: {feedback_result}")
+
+            feedback_sections = feedback_result.get("feedback_sections")
+            logger.info(f"📝 [Spring2 저장] feedback_sections 확인: {feedback_sections}")
+
             save_kwargs.update({
-                "pronunciation_score": feedback_result["scores"].get("pronunciation_score"),
-                "grammar_score": feedback_result["scores"].get("grammar_score"),
-                "relevance_score": feedback_result["scores"].get("relevance_score"),
-                "overall_score": feedback_result["scores"].get("overall_score"),
+                "pronunciation_score": scores.get("pronunciation_score"),
+                "grammar_score": scores.get("grammar_score"),
+                "relevance_score": scores.get("relevance_score"),
+                "overall_score": scores.get("overall_score"),
                 "needs_correction": needs_correction,  # Boolean (변환은 spring2_client에서)
                 "retry_count": retry_count,
                 "primary_issue": feedback_result.get("primary_issue", "none"),
-                "feedback_sections": feedback_result.get("feedback_sections"),  # 구조화된 피드백 (영문 + 한글)
+                "feedback_sections": feedback_sections,  # ✅ 구조화된 피드백 (영문 + 한글)
             })
         else:
             # No feedback data - explicitly set fields
             # needs_correction should be False (not None) when no feedback
+            logger.info(f"📝 [Spring2 저장] feedback_result가 None - 피드백 없음")
             save_kwargs.update({
                 "pronunciation_score": None,
                 "grammar_score": None,
@@ -396,12 +468,15 @@ async def _save_utterance_with_feedback(
                 "feedback_sections": None,
             })
 
+        logger.info(f"📤 [Spring2 저장] save_utterance 호출 중: session={session_id}, index={utterance_index}")
+        logger.debug(f"📤 [Spring2 저장] save_kwargs: {save_kwargs}")
+
         result = await spring2_client.save_utterance(**save_kwargs)
-        logger.info(f"Utterance saved to Spring 2: session={session_id}, index={utterance_index}")
+        logger.info(f"✅ [Spring2 저장] 성공: session={session_id}, index={utterance_index}, result={result}")
         return result
 
     except Exception as e:
-        logger.error(f"Failed to save utterance: session={session_id}, error={e}", exc_info=True)
+        logger.error(f"❌ [Spring2 저장] 실패: session={session_id}, error={e}", exc_info=True)
         return None
 
 
@@ -444,6 +519,13 @@ async def _evaluate_feedback_with_agent(
             f"text_length={len(user_text)}, audio={audio_data is not None}, azure={can_use_azure}"
         )
 
+        conversation_history = session_state.history if session_state else []
+        scenario_context = {
+            "my_role": session_state.my_role if session_state else "",
+            "ai_role": session_state.ai_role if session_state else "",
+            "current_question": session_state.current_question_text if session_state else ""
+        }
+
         # ReAct Agent 실행
         agent_decision = await agent.decide_feedback_or_question(
             session_state=session_state,
@@ -456,6 +538,14 @@ async def _evaluate_feedback_with_agent(
         if agent_decision is None:
             logger.warning(f"❌ [ReAct] Agent returned None for session={session_id}")
             return None
+
+        # ✅ 스트리밍에 필요한 추가 정보를 feedback_result에 추가
+        feedback_result = agent_decision.get("feedback_result")
+        if feedback_result:
+            feedback_result["user_text"] = user_text
+            feedback_result["conversation_history"] = conversation_history
+            feedback_result["scenario_context"] = scenario_context
+            feedback_result["audio_data"] = audio_data if can_use_azure else None
 
         logger.info(
             f"✅ [ReAct] Agent decision: action={agent_decision.get('action')}, "

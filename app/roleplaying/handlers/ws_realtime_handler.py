@@ -311,16 +311,6 @@ async def _validate_session(session_id: str) -> Optional[dict]:
 async def _cleanup_session(session_id: str, reason: str) -> None:
     """세션 정리 (연결 끊김 또는 에러 시)"""
     try:
-        # STT 스트리밍 세션 강제 정리 (최종 결과 대기 없이)
-        from app.roleplaying.services.stt.speech_to_text_service import stt_service
-        try:
-            # ✅ cleanup() 사용: finalize_streaming()과 달리 최종 결과를 기다리지 않음
-            # 이는 예상치 못한 클라이언트 연결 해제 시 리소스 누수를 방지합니다
-            await stt_service.cleanup(session_id)
-            logger.debug(f"STT streaming session cleaned up: {session_id}")
-        except Exception as e:
-            logger.debug(f"STT streaming cleanup failed (non-fatal): {e}")
-
         session_state = session_manager.get_session(session_id)
         if session_state and session_state.status == SessionStatus.ACTIVE:
             session_manager.end_session(session_id, reason)

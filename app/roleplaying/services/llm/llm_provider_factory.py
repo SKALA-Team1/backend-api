@@ -14,12 +14,10 @@ OCP 준수:
 - 새로운 프로바이더 추가 가능 (Open for extension)
 """
 
-import asyncio
 import logging
-from typing import Any, Protocol
+from typing import Protocol
 
 from langchain_openai import ChatOpenAI
-from langchain_ollama import OllamaLLM
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +37,18 @@ class LLMProvider(Protocol):
 
         Returns:
             LLM의 응답
+        """
+        ...
+
+    async def stream(self, prompt: str):
+        """
+        프롬프트를 LLM에 전달하고 토큰을 스트리밍으로 반환합니다.
+
+        Args:
+            prompt: 입력 프롬프트
+
+        Yields:
+            각 토큰 문자열
         """
         ...
 
@@ -74,63 +84,42 @@ class OpenAIProvider:
     async def invoke(self, prompt: str) -> str:
         """
         OpenAI API를 호출하여 응답을 생성합니다.
-
-        동기 API를 비동기로 래핑하여 이벤트 루프를 블로킹하지 않습니다.
         """
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, self.llm.invoke, prompt)
+        response = await self.llm.ainvoke(prompt)
 
         # LangChain 응답 객체에서 텍스트 추출
         if hasattr(response, 'content'):
             return response.content
         return str(response)
 
-
-class OllamaProvider:
-    """Ollama 로컬 LLM 프로바이더
-
-    로컬에서 실행되는 오픈소스 LLM을 사용합니다.
-    """
-
-    def __init__(
-        self,
-        model_name: str,
-        base_url: str,
-        temperature: float = 0.7
-    ):
+    async def stream(self, prompt: str):
         """
-        Ollama 프로바이더 초기화
+        OpenAI API를 호출하여 토큰을 스트리밍으로 생성합니다.
+
+        ✅ astream() 사용:
+        - 비동기 제너레이터로 진정한 스트리밍
+        - 전체 응답 로드 대기 없음
+        - 이벤트 루프 블로킹 없음
+        - 메모리 효율적
 
         Args:
-            model_name: 모델명 (예: "llama2", "mistral", "neural-chat")
-            base_url: Ollama 서버 URL (예: "http://localhost:11434")
-            temperature: 창의성 레벨
-        """
-        self.llm = OllamaLLM(
-            model=model_name,
-            base_url=base_url,
-            temperature=temperature
-        )
-        self.model_name = model_name
-        logger.info(f"✅ OllamaProvider initialized: model={model_name}, url={base_url}")
+            prompt: 입력 프롬프트
 
-    async def invoke(self, prompt: str) -> str:
+        Yields:
+            각 토큰 문자열
         """
-        Ollama API를 호출하여 응답을 생성합니다.
-        """
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, self.llm.invoke, prompt)
-
-        if hasattr(response, 'content'):
-            return response.content
-        return str(response)
+        # ✅ ChatOpenAI.astream() - 진정한 비동기 스트리밍
+        async for chunk in self.llm.astream(prompt):
+            if hasattr(chunk, 'content'):
+                yield chunk.content
+            else:
+                yield str(chunk)
 
 
 def create_llm_provider(
     provider_type: str,
     api_key: str = None,
     model_name: str = None,
-    base_url: str = None,
     temperature: float = 0.7
 ) -> LLMProvider:
     """
@@ -140,10 +129,9 @@ def create_llm_provider(
     새로운 프로바이더 추가 시 이 함수만 수정하면 됩니다.
 
     Args:
-        provider_type: 프로바이더 타입 ("openai" 또는 "ollama")
-        api_key: OpenAI API 키 (OpenAI 사용 시 필수)
-        model_name: 모델명
-        base_url: Ollama 서버 URL (Ollama 사용 시 필수)
+        provider_type: 프로바이더 타입 ("openai")
+        api_key: OpenAI API 키 (필수)
+        model_name: 모델명 (필수)
         temperature: 창의성 레벨
 
     Returns:
@@ -160,13 +148,6 @@ def create_llm_provider(
             model_name="gpt-4.1",
             temperature=0.3
         )
-
-        # Ollama 프로바이더 생성
-        provider = create_llm_provider(
-            provider_type="ollama",
-            model_name="mistral",
-            base_url="http://localhost:11434"
-        )
     """
     if provider_type == "openai":
         if not api_key:
@@ -181,23 +162,10 @@ def create_llm_provider(
             temperature=temperature
         )
 
-    elif provider_type == "ollama":
-        if not model_name:
-            raise ValueError("Ollama requires 'model_name' parameter")
-        if not base_url:
-            raise ValueError("Ollama requires 'base_url' parameter")
-
-        logger.info(f"Creating Ollama provider: {model_name} at {base_url}")
-        return OllamaProvider(
-            model_name=model_name,
-            base_url=base_url,
-            temperature=temperature
-        )
-
     else:
         raise ValueError(
             f"Unsupported LLM provider: {provider_type}. "
-            f"Supported: 'openai', 'ollama'"
+            f"Supported: 'openai'"
         )
 
 
@@ -205,5 +173,4 @@ def create_llm_provider(
 # 새로운 프로바이더를 추가할 때 여기에 등록하면 됨
 PROVIDER_REGISTRY = {
     "openai": OpenAIProvider,
-    "ollama": OllamaProvider,
 }

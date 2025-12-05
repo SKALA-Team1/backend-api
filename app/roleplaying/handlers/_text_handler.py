@@ -93,6 +93,11 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         feedback_orchestrator = get_feedback_orchestrator()
         feedback_decision_agent = get_feedback_decision_agent()
 
+        # 🔑 마지막 턴 확인 (Turn 7 = 마지막 질문)
+        next_ai_turn = session_state.get_ai_turn_number() if session_state else 1
+        is_last_turn = next_ai_turn > 7
+        logger.info(f"🔑 [턴 정보] next_ai_turn={next_ai_turn}, is_last_turn={is_last_turn}")
+
         # ========================================
         # Step 2a: ReAct Agent를 통한 피드백 판단
         # ========================================
@@ -112,11 +117,27 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
                 f"🤖 [Agent Decision] FEEDBACK - reasoning: {agent_decision.get('reasoning')}"
             )
         elif agent_decision and agent_decision.get("action") == "NEXT_QUESTION":
-            # Agent가 다음 질문 결정
-            feedback_result = None
-            logger.info(
-                f"🤖 [Agent Decision] NEXT_QUESTION - reasoning: {agent_decision.get('reasoning')}"
-            )
+            # 🔑 마지막 턴은 항상 피드백 제공 (다음 질문이 없으므로)
+            if is_last_turn:
+                logger.info(
+                    f"🔑 [마지막 턴 피드백 강제] Agent said NEXT_QUESTION but this is turn 7 (last), "
+                    f"forcing feedback evaluation"
+                )
+                feedback_result = await _evaluate_feedback(
+                    feedback_orchestrator=feedback_orchestrator,
+                    websocket=websocket,
+                    session_id=session_id,
+                    user_text=user_text,
+                    audio_data=None,  # Text mode - no audio
+                    session_state=session_state,
+                    can_use_azure=False,  # Text mode - no Azure pronunciation
+                )
+            else:
+                # Agent가 다음 질문 결정 (일반 턴)
+                feedback_result = None
+                logger.info(
+                    f"🤖 [Agent Decision] NEXT_QUESTION - reasoning: {agent_decision.get('reasoning')}"
+                )
         else:
             # Agent 실패 시 Fallback: 기존 평가 로직 사용
             logger.info("⏮️  [Fallback] Using traditional feedback evaluation")
@@ -135,7 +156,15 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         utterance_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
         logger.info(f"🔼 After increment: session={session_id}, index={utterance_index}")
 
-        # Step 4: 사용자 메시지 DB에 저장 (항상 저장)
+        # ✅ Step 4a: 피드백 메시지 전송 및 재시도 확인 (feedback_sections 생성 먼저!)
+        needs_retry = await _send_feedback_messages(
+            websocket=websocket,
+            session_id=session_id,
+            session_state=session_state,
+            feedback_result=feedback_result,
+        )
+
+        # ✅ Step 4b: 사용자 메시지 DB에 저장 (피드백 섹션이 생성된 후)
         try:
             result = await _save_utterance_with_feedback(
                 session_id=session_id,
@@ -156,14 +185,6 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
 
         await websocket.send_json(
             UtteranceSavedMessage(index=utterance_index).model_dump()
-        )
-
-        # Step 5: 피드백 메시지 전송 및 재시도 확인
-        needs_retry = await _send_feedback_messages(
-            websocket=websocket,
-            session_id=session_id,
-            session_state=session_state,
-            feedback_result=feedback_result,
         )
 
         # Step 6: Retry일 때는 조기 종료 (AI 응답 생성 안 함)
