@@ -154,6 +154,11 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
             # 메시지 수신
             raw_data = await websocket.receive()
 
+            # Disconnect 메시지 처리
+            if raw_data.get("type") == "websocket.disconnect":
+                logger.info(f"Disconnect message received: {session_id}")
+                break
+
             # Binary 메시지 (오디오 청크)
             if "bytes" in raw_data:
                 if not await InitStateValidator.validate_for_message(

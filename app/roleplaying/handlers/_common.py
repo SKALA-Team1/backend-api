@@ -103,46 +103,6 @@ async def _check_turn_limit(
         return False
 
 
-async def _schedule_spring2_save(
-    session_id: str,
-    text: str,
-    utterance_index: int,
-    speaker: str,
-    played_turns: Optional[int] = None,
-    completed_all_turns: bool = False,
-    finish_reason: Optional[str] = None,
-    status: str = "IN_PROGRESS",
-) -> None:
-    """Spring 2 저장을 비동기로 수행하도록 스케줄합니다."""
-    async def _save():
-        try:
-            normalized_speaker = (speaker or "user").lower()
-            await spring2_client.save_utterance(
-                session_id=session_id,
-                stt_text=text,
-                utterance_index=utterance_index,
-                speaker=normalized_speaker,
-                text=text,
-                audio_data=None,
-                played_turns=played_turns,
-                completed_all_turns=completed_all_turns,
-                finish_reason=finish_reason,
-                status=status,
-            )
-            logger.info(
-                f"Text saved to Spring 2: session={session_id}, index={utterance_index}, speaker={normalized_speaker}"
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to save to Spring 2: session={session_id}, index={utterance_index}, error={e}",
-                exc_info=True
-            )
-
-    task = asyncio.create_task(_save())
-    context = f"spring2_save(session={session_id}, speaker={speaker}, index={utterance_index})"
-    task.add_done_callback(lambda t: _handle_task_error(t, context))
-
-
 # ========================================
 # 피드백 평가 (공통)
 # ========================================
