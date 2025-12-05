@@ -135,7 +135,15 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         utterance_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
         logger.info(f"🔼 After increment: session={session_id}, index={utterance_index}")
 
-        # Step 4: 사용자 메시지 DB에 저장 (항상 저장)
+        # ✅ Step 4a: 피드백 메시지 전송 및 재시도 확인 (feedback_sections 생성 먼저!)
+        needs_retry = await _send_feedback_messages(
+            websocket=websocket,
+            session_id=session_id,
+            session_state=session_state,
+            feedback_result=feedback_result,
+        )
+
+        # ✅ Step 4b: 사용자 메시지 DB에 저장 (피드백 섹션이 생성된 후)
         try:
             result = await _save_utterance_with_feedback(
                 session_id=session_id,
@@ -156,14 +164,6 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
 
         await websocket.send_json(
             UtteranceSavedMessage(index=utterance_index).model_dump()
-        )
-
-        # Step 5: 피드백 메시지 전송 및 재시도 확인
-        needs_retry = await _send_feedback_messages(
-            websocket=websocket,
-            session_id=session_id,
-            session_state=session_state,
-            feedback_result=feedback_result,
         )
 
         # Step 6: Retry일 때는 조기 종료 (AI 응답 생성 안 함)
