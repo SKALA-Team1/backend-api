@@ -190,6 +190,26 @@ def get_scenario_enhancer() -> "ScenarioEnhancer":
     )
 
 
+@lru_cache(maxsize=1)
+def get_scenario_title_generator():
+    """시나리오 제목 생성기 의존성 주입
+
+    📝 역할:
+        - 상황 설명으로부터 완전하고 설명적인 제목 생성
+        - Spring 2와의 제목 생성 연동
+
+    Returns:
+        ScenarioTitleGeneratorImpl 인스턴스 (싱글톤)
+    """
+    from app.roleplaying.services.llm.llm_title_generator import ScenarioTitleGeneratorImpl
+
+    return ScenarioTitleGeneratorImpl(
+        api_key=settings.openai_api_key,
+        model_name=settings.OPENAI_MODEL_QUESTION_GENERATION,
+        temperature=0.3
+    )
+
+
 # ============================================
 # Type Aliases for FastAPI Depends
 # ============================================
@@ -236,6 +256,12 @@ ScenarioEnhancerDep = Annotated[
 ]
 """시나리오 강화기 의존성 타입 - 시나리오 구체화/제목/질문 생성용"""
 
+ScenarioTitleGeneratorDep = Annotated[
+    "ScenarioTitleGeneratorImpl",
+    Depends(get_scenario_title_generator)
+]
+"""시나리오 제목 생성기 의존성 타입 - 상황 설명으로부터 제목 생성용"""
+
 __all__ = [
     "get_conversation_analyzer",
     "get_scenario_generator",
@@ -244,6 +270,7 @@ __all__ = [
     "get_message_summarizer",
     "get_fixed_question_builder",
     "get_scenario_enhancer",
+    "get_scenario_title_generator",
     "ConversationAnalyzerDep",
     "ScenarioGeneratorDep",
     "QuestionGeneratorDep",
@@ -251,4 +278,5 @@ __all__ = [
     "MessageSummarizerDep",
     "FixedQuestionBuilderDep",
     "ScenarioEnhancerDep",
+    "ScenarioTitleGeneratorDep",
 ]

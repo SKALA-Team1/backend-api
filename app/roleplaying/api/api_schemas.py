@@ -158,8 +158,8 @@ class ScenarioInfoDto(BaseModel):
     aiRole: str = Field(..., description="AI 역할 (Project Manager, Tech Lead, QA Engineer)")
     # 시나리오의 깊이 또는 범위 (overview = 전체 상황 개요, detail = 특정 역할별 상세 시나리오)
     topicType: str = Field(..., description="토픽 타입 (overview, detail)")
-    # 사용자가 시나리오 선택 시 보게 될 제목 (최대 50자, 역할과 상황을 함축적으로 표현)
-    title: str = Field(..., max_length=50, description="시나리오 제목")
+    # 사용자가 시나리오 선택 시 보게 될 제목 (최대 80자, 역할과 상황을 함축적으로 표현)
+    title: str = Field(..., max_length=80, description="시나리오 제목")
     # 롤플레이 중에 고정으로 나올 3개의 질문
     # - 질문 1 (Turn 1): 대화 시작 (Conversation Starter)
     # - 질문 2 (Turn 4): 심화 및 전환 (Deepening & Transition)
@@ -203,8 +203,8 @@ class ScenarioDetail(BaseModel):
     myRole: str = Field(..., description="사용자 역할")
     # AI가 담당할 대상 역할
     aiRole: str = Field(..., description="AI 역할")
-    # 시나리오 제목 (사용자가 선택한 시나리오의 이름)
-    title: str = Field(..., description="시나리오 제목")
+    # 시나리오 제목 (사용자가 선택한 시나리오의 이름, 최대 80자)
+    title: str = Field(..., max_length=80, description="시나리오 제목")
     # 시나리오 범위 (overview 또는 detail)
     topicType: str = Field(..., description="토픽 타입 (overview, detail)")
     # 롤플레이 중 나올 고정 질문들 (정확히 3개)

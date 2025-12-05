@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 from typing import Any, AsyncIterator, Dict, Optional
+from deepgram.clients.listen import LiveOptions
 
 from deepgram import DeepgramClient
 
@@ -168,9 +169,8 @@ class StreamingSTTManager:
             Exception: 세션 생성 실패 시
         """
         try:
-            # ✅ SDK 3.11.0: listen.websocket.v()는 async context manager 반환
-            # (버전 메서드는 .v()이고, v1() 아님)
-            connection = await self.client.listen.websocket.v(
+            # :흰색_확인_표시: SDK 3.11.0: LiveOptions 객체 생성
+            options = LiveOptions(
                 model=settings.DEEPGRAM_MODEL,
                 language=settings.DEEPGRAM_LANGUAGE,
                 smart_format=settings.DEEPGRAM_SMART_FORMAT,
@@ -178,18 +178,20 @@ class StreamingSTTManager:
                 sample_rate=settings.DEEPGRAM_SAMPLE_RATE,
                 interim_results=settings.DEEPGRAM_INTERIM_RESULTS,
             )
-
+            # ✅ WebSocket 연결 생성 (asyncwebsocket 사용 - async start() 필요)
+            connection = self.client.listen.asyncwebsocket.v("1")
+            # ✅ 비동기로 연결 시작
+            success = await connection.start(options)
+            if not success:
+                raise Exception("Failed to start WebSocket connection")
             # 연결 저장 (cleanup 시 필요)
             self._connections[session_id] = connection
-
             session = StreamingSTTSession(connection)
             self._sessions[session_id] = session
-
             logger.info(f"Streaming STT session created: {session_id}")
             return session
-
         except Exception as e:
-            logger.error(f"Failed to create streaming session: {e}", exc_info=True)
+            logger.error(f"Failed to create streaming session: {e}", exc_info = True)
             raise
 
     async def process_chunk(
@@ -250,7 +252,9 @@ class StreamingSTTManager:
             # 연결 정리
             if connection:
                 try:
-                    await connection.aclose()
+                    # AsyncListenWebSocketClient는 aclose() 대신 finish() 사용
+                    # 하지만 finalize()에서 이미 finish() 호출했으므로 참조만 제거
+                    pass
                 except Exception as e:
                     logger.warning(f"Error closing connection: {e}")
 
@@ -261,12 +265,17 @@ class StreamingSTTManager:
         Args:
             session_id: 세션 ID
         """
-        session = self._sessions.pop(session_id, None)
+        self._sessions.pop(session_id, None)
         connection = self._connections.pop(session_id, None)
 
         if connection:
             try:
-                await connection.aclose()
-                logger.info(f"Connection closed: {session_id}")
+                # AsyncListenWebSocketClient는 finish()로 정리 (한 번만 호출)
+                # finalize()에서 호출되지 않았을 경우 here에서 호출
+                try:
+                    await connection.finish()
+                except Exception:
+                    pass  # 이미 종료된 연결일 수 있음
+                logger.info(f"Connection cleaned up: {session_id}")
             except Exception as e:
-                logger.warning(f"Error closing connection: {e}")
+                logger.warning(f"Error cleaning up connection: {e}")
