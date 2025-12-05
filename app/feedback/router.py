@@ -228,22 +228,22 @@ async def create_batch_feedback_from_audio(
                 logger.info("Final feedback (short & long) generated successfully")
 
                 # Spring2로 종합 피드백 전송하여 scenario_feedback 테이블에 저장
-                # (터미널 출력 항목만: 발음, 문법, 적합성, 종합피드백 텍스트)
-                # DB에는 짧은 버전과 긴 버전 모두 저장
-                # scenario_id는 세션에서 자동으로 가져옴
+                # 저장 데이터: 발음/문법/적합성 평균 점수 + 종합 피드백(짧은/긴 버전)
                 try:
-                    from app.integrations.clients.spring2_client import spring2_client
-                    await spring2_client.save_final_feedback(
+                    from app.adapters.spring_client import SpringAPIClient
+                    spring_client = SpringAPIClient()
+                    await spring_client.save_feedback(
                         session_id=session_id,
-                        final_feedback_long=final_feedback_long,
+                        scenario_id=scenario_id,
+                        total_pronunciation=avg_pronunciation_score,
+                        total_grammar=avg_accuracy_score,
+                        total_diversity=avg_completeness_score,
                         final_feedback_short=final_feedback_short,
-                        avg_pronunciation_score=avg_pronunciation_score,
-                        avg_accuracy_score=avg_accuracy_score,
-                        avg_fluency_score=avg_fluency_score,
+                        final_feedback_long=final_feedback_long,
                     )
-                    logger.info(f"Final feedback (short & long) saved to DB via Spring2: session={session_id}")
+                    logger.info(f"Feedback saved to DB via Spring2: session={session_id}")
                 except Exception as save_error:
-                    logger.error(f"Failed to save final feedback to DB: {save_error}")
+                    logger.error(f"Failed to save feedback to DB: {save_error}")
                     # DB 저장 실패해도 사용자에게는 피드백 응답 반환
 
             except Exception as e:
