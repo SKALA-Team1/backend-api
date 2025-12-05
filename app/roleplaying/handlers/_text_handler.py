@@ -93,6 +93,11 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         feedback_orchestrator = get_feedback_orchestrator()
         feedback_decision_agent = get_feedback_decision_agent()
 
+        # 🔑 마지막 턴 확인 (Turn 7 = 마지막 질문)
+        next_ai_turn = session_state.get_ai_turn_number() if session_state else 1
+        is_last_turn = next_ai_turn > 7
+        logger.info(f"🔑 [턴 정보] next_ai_turn={next_ai_turn}, is_last_turn={is_last_turn}")
+
         # ========================================
         # Step 2a: ReAct Agent를 통한 피드백 판단
         # ========================================
@@ -112,11 +117,27 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
                 f"🤖 [Agent Decision] FEEDBACK - reasoning: {agent_decision.get('reasoning')}"
             )
         elif agent_decision and agent_decision.get("action") == "NEXT_QUESTION":
-            # Agent가 다음 질문 결정
-            feedback_result = None
-            logger.info(
-                f"🤖 [Agent Decision] NEXT_QUESTION - reasoning: {agent_decision.get('reasoning')}"
-            )
+            # 🔑 마지막 턴은 항상 피드백 제공 (다음 질문이 없으므로)
+            if is_last_turn:
+                logger.info(
+                    f"🔑 [마지막 턴 피드백 강제] Agent said NEXT_QUESTION but this is turn 7 (last), "
+                    f"forcing feedback evaluation"
+                )
+                feedback_result = await _evaluate_feedback(
+                    feedback_orchestrator=feedback_orchestrator,
+                    websocket=websocket,
+                    session_id=session_id,
+                    user_text=user_text,
+                    audio_data=None,  # Text mode - no audio
+                    session_state=session_state,
+                    can_use_azure=False,  # Text mode - no Azure pronunciation
+                )
+            else:
+                # Agent가 다음 질문 결정 (일반 턴)
+                feedback_result = None
+                logger.info(
+                    f"🤖 [Agent Decision] NEXT_QUESTION - reasoning: {agent_decision.get('reasoning')}"
+                )
         else:
             # Agent 실패 시 Fallback: 기존 평가 로직 사용
             logger.info("⏮️  [Fallback] Using traditional feedback evaluation")
