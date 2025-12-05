@@ -186,12 +186,22 @@ class FeedbackDecisionAgentImpl:
                     primary_issue
                 )
 
+                # 점수 추출 (최상위 레벨에도 추가 필요)
+                pronunciation_score = evaluation_result.get("pronunciation_score")
+                grammar_score = evaluation_result.get("grammar_score")
+                relevance_score = evaluation_result.get("relevance_score")
+                overall_score = evaluation_result.get("overall_score")
+
                 parsed_decision["feedback_result"] = {
+                    # 🔑 최상위 레벨에도 점수 추가 (_send_feedback_messages에서 필요)
+                    "pronunciation_score": pronunciation_score,
+                    "grammar_score": grammar_score,
+                    "relevance_score": relevance_score,
                     "scores": {
-                        "pronunciation_score": evaluation_result.get("pronunciation_score"),
-                        "grammar_score": evaluation_result.get("grammar_score"),
-                        "relevance_score": evaluation_result.get("relevance_score"),
-                        "overall_score": evaluation_result.get("overall_score"),
+                        "pronunciation_score": pronunciation_score,
+                        "grammar_score": grammar_score,
+                        "relevance_score": relevance_score,
+                        "overall_score": overall_score,
                     },
                     "feedback_text": filtered_feedback,
                     "needs_correction": evaluation_result.get("needs_correction", False),
@@ -203,6 +213,13 @@ class FeedbackDecisionAgentImpl:
                     "grammar": evaluation_result.get("grammar"),
                     "relevance": evaluation_result.get("relevance"),
                 }
+
+                logger.info(
+                    f"🔢 [Agent] Feedback result scores: "
+                    f"pronunciation={pronunciation_score}, "
+                    f"grammar={grammar_score}, "
+                    f"relevance={relevance_score}"
+                )
 
             logger.info(
                 f"✅ [ReAct] Final decision: action={parsed_decision['action']}, "

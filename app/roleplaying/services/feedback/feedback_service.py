@@ -933,12 +933,15 @@ class FeedbackOrchestratorImpl:
                 logger.info(f"✅ [{section_type}] 한글 완료: {korean_feedback[:60]}...")
 
                 # Step 3: 완성된 섹션 (영문 + 한글) 한 번에 yield
+                section_score = config["score"]
+                logger.info(f"🔢 [{section_type}] 점수 확인: {section_score} (type={type(section_score).__name__})")
+
                 yield {
                     "type": "feedback_section",
                     "section_type": section_type,
                     "feedback_en": english_feedback,
                     "feedback_ko": korean_feedback,
-                    "score": config["score"]
+                    "score": section_score
                 }
 
         except Exception as e:

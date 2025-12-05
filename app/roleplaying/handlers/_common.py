@@ -294,6 +294,12 @@ async def _send_feedback_messages(
         grammar_score = feedback_result.get("grammar_score")
         relevance_score = feedback_result.get("relevance_score")
 
+        # 🔍 점수 확인 로깅
+        logger.info(
+            f"📊 [점수 추출] pronunciation={pronunciation_score}, "
+            f"grammar={grammar_score}, relevance={relevance_score}"
+        )
+
         # 스트리밍에 필요한 추가 정보
         user_text = feedback_result.get("user_text", "")
         conversation_history = feedback_result.get("conversation_history", [])
@@ -324,19 +330,27 @@ async def _send_feedback_messages(
 
             elif item["type"] == "feedback_section":
                 # 한글 섹션 완성 후 한 번에 전송
+                section_score = item["score"]
+                logger.info(
+                    f"📤 [피드백 섹션 전송] {item['section_type']}: "
+                    f"score={section_score} (type={type(section_score).__name__})"
+                )
+
                 sections_msg = FeedbackSectionsMessage(sections=[{
                     "type": item["section_type"],
                     "feedback_en": item["feedback_en"],
                     "feedback_ko": item["feedback_ko"],
-                    "score": item["score"]
+                    "score": section_score
                 }])
                 await websocket.send_json(sections_msg.model_dump())
+                logger.debug(f"✅ 메시지 전송 완료: {sections_msg.model_dump()}")
+
                 # ✅ 생성된 섹션을 리스트에 저장 (Spring 2 저장용)
                 feedback_sections_list.append({
                     "type": item["section_type"],
                     "feedback_en": item["feedback_en"],
                     "feedback_ko": item["feedback_ko"],
-                    "score": item["score"]
+                    "score": section_score
                 })
                 section_count += 1
                 logger.info(f"✅ [피드백 섹션 완성] {item['section_type']} ({section_count}/3)")
