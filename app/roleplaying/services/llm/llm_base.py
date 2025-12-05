@@ -35,7 +35,6 @@ class LLMServiceBase(ABC):
         api_key: str = None,
         model_name: str = None,
         temperature: float = 0.7,
-        base_url: str = None,
     ):
         """
         LLM 서비스 초기화
@@ -44,30 +43,23 @@ class LLMServiceBase(ABC):
             api_key: OpenAI API 키 (None이면 settings에서 로드)
             model_name: 모델명 (None이면 settings에서 로드)
             temperature: 창의성 레벨 (기본값: 0.7)
-            base_url: Ollama 등 로컬 LLM의 베이스 URL
         """
         # API 키 및 모델명 설정
         self.api_key = api_key or settings.openai_api_key
         self.model_name = model_name or settings.OPENAI_MODEL
         self.temperature = temperature
-        self.base_url = base_url or settings.OLLAMA_BASE_URL
 
-        # LLM 프로바이더 결정
-        # OpenAI API 키가 있으면 OpenAI 사용, 없으면 Ollama 사용
-        provider_type = "openai" if self.api_key else "ollama"
-
-        # LLM 클라이언트 생성
+        # LLM 클라이언트 생성 (OpenAI만 지원)
         self.llm = create_llm_provider(
-            provider_type=provider_type,
+            provider_type="openai",
             api_key=self.api_key,
             model_name=self.model_name,
-            base_url=self.base_url,
             temperature=self.temperature,
         )
 
         # 초기화 로그
         logger.info(
             f"{self.__class__.__name__} initialized: "
-            f"provider={provider_type}, model={self.model_name}, "
+            f"provider=openai, model={self.model_name}, "
             f"temperature={self.temperature}"
         )
