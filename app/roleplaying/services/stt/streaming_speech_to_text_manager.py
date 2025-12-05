@@ -169,7 +169,7 @@ class StreamingSTTManager:
             Exception: 세션 생성 실패 시
         """
         try:
-            # :흰색_확인_표시: SDK 3.11.0: LiveOptions 객체 생성
+            # ✅ SDK 3.11.0: LiveOptions 객체 생성
             options = LiveOptions(
                 model=settings.DEEPGRAM_MODEL,
                 language=settings.DEEPGRAM_LANGUAGE,
@@ -177,21 +177,26 @@ class StreamingSTTManager:
                 encoding=settings.DEEPGRAM_ENCODING,
                 sample_rate=settings.DEEPGRAM_SAMPLE_RATE,
                 interim_results=settings.DEEPGRAM_INTERIM_RESULTS,
+                # ✅ 타임아웃 설정: Deepgram init 후 5초 내에 오디오 필요
+                utterance_end_ms=5000,
+                # ✅ no_delay: 지연 없이 즉시 응답 (스트리밍 최적화)
+                no_delay=True,
             )
-            # ✅ WebSocket 연결 생성 (asyncwebsocket 사용 - async start() 필요)
+            # ✅ WebSocket 연결 생성 (asyncwebsocket 사용 - async start() 필수)
             connection = self.client.listen.asyncwebsocket.v("1")
             # ✅ 비동기로 연결 시작
             success = await connection.start(options)
             if not success:
                 raise Exception("Failed to start WebSocket connection")
+
             # 연결 저장 (cleanup 시 필요)
             self._connections[session_id] = connection
             session = StreamingSTTSession(connection)
             self._sessions[session_id] = session
-            logger.info(f"Streaming STT session created: {session_id}")
+            logger.info(f"✅ Streaming STT session created: {session_id}")
             return session
         except Exception as e:
-            logger.error(f"Failed to create streaming session: {e}", exc_info = True)
+            logger.error(f"❌ Failed to create streaming session: {e}", exc_info=True)
             raise
 
     async def process_chunk(

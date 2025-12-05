@@ -74,14 +74,6 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
             expires_at=expires_at,
         )
 
-        # STT 스트리밍 세션 생성
-        from app.roleplaying.services.stt.speech_to_text_service import stt_service
-        try:
-            await stt_service.create_streaming_session(session_id)
-            logger.info(f"STT streaming session created: {session_id}")
-        except Exception as e:
-            logger.warning(f"Failed to create STT streaming session: {e}")
-
         logger.info(
             f"Session initialized: {session_id}, "
             f"role={init_msg.myRole} → {init_msg.aiRole}"
