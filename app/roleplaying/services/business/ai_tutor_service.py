@@ -20,12 +20,16 @@ AI Tutor Service
 """
 
 import logging
+import re
+import json
 from typing import AsyncGenerator, Tuple, Optional
 
 from app.roleplaying.core.session_state_manager import SessionState
 from app.roleplaying.services.service_interfaces import QuestionGenerator
-from app.roleplaying.prompts.constants import FOLLOWUP_QUESTION_PROMPT
+from app.roleplaying.prompts.constants import FOLLOWUP_QUESTION_PROMPT, QUESTION_BILINGUAL_PROMPT
 from app.roleplaying.services.utils.service_utils import format_conversation_history
+from app.roleplaying.services.llm.llm_base import LLMServiceBase
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +138,128 @@ class AITutorService:
             # Fallback: 기본 질문 반환
             fallback_question = "Could you tell me more about that?"
             yield (fallback_question, False)
+
+    async def generate_reply_bilingual_stream(
+        self,
+        session_state: SessionState,
+        user_text: str
+    ) -> AsyncGenerator[Tuple[str, str, bool, str], None]:
+        """
+        사용자 발화에 대한 AI 응답을 영문 토큰 + 한글 섹션으로 생성
+
+        Args:
+            session_state: 세션 상태 (대화 히스토리, 시나리오 정보 포함)
+            user_text: 사용자 발화 텍스트
+
+        Yields:
+            (message_type: str, content: str, is_fixed_question: bool, language: str)
+            - message_type: "token" (영문 토큰) 또는 "section" (한글 섹션)
+            - content: 메시지 내용
+            - is_fixed_question: 고정 질문 여부
+            - language: "en" 또는 "ko"
+        """
+        try:
+            next_turn = session_state.get_ai_turn_number()
+            logger.info(
+                f"Generating bilingual AI reply: session={session_state.session_id}, "
+                f"turn={next_turn}, user_text='{user_text[:30]}...'"
+            )
+
+            # Step 1: 고정 질문 처리 (턴 1, 4, 7)
+            if session_state.should_use_fixed_question():
+                fixed_index = session_state.get_fixed_question_index()
+                if fixed_index is not None and fixed_index < len(session_state.fixed_questions):
+                    fixed_question = session_state.fixed_questions[fixed_index]
+                    logger.info(
+                        f"Using fixed question (turn {next_turn}): {fixed_question[:50]}..."
+                    )
+
+                    # 고정 질문도 영어 토큰으로 스트리밍
+                    for token in fixed_question.split():
+                        yield ("token", token + " ", True, "en")
+
+                    # 고정 질문 한글 번역
+                    korean_question = await self._translate_question(fixed_question)
+                    yield ("section", f"{fixed_question}|||{korean_question}", True, "ko")
+                    return
+
+            # Step 2: 동적 질문 생성 (영문 토큰 스트리밍)
+            logger.debug(f"Starting dynamic bilingual question stream (turn {next_turn})")
+
+            english_tokens = []
+            async for chunk in self._generate_dynamic_question_stream(
+                session_state=session_state,
+                user_text=user_text
+            ):
+                english_tokens.append(chunk)
+                # 영문 토큰 즉시 yield
+                yield ("token", chunk, False, "en")
+
+            # Step 3: 영문 질문 완성 후 한글 번역
+            full_english_question = "".join(english_tokens).strip()
+            if full_english_question:
+                korean_question = await self._translate_question(full_english_question)
+                logger.info(f"Question translated: {full_english_question[:50]}... → {korean_question[:50]}...")
+                yield ("section", f"{full_english_question}|||{korean_question}", False, "ko")
+            else:
+                logger.warning("Empty English question, skipping translation")
+
+            logger.info(f"Bilingual question stream completed (turn {next_turn})")
+
+        except Exception as e:
+            logger.error(f"Failed to generate bilingual AI reply: {e}", exc_info=True)
+            fallback_en = "Could you tell me more about that?"
+            fallback_ko = "더 자세히 설명해 주시겠습니까?"
+            yield ("token", fallback_en + " ", False, "en")
+            yield ("section", f"{fallback_en}|||{fallback_ko}", False, "ko")
+
+    async def _translate_question(self, english_question: str) -> str:
+        """
+        영문 질문을 한글로 번역
+
+        Args:
+            english_question: 영문 질문
+
+        Returns:
+            한글 번역
+        """
+        try:
+            llm = LLMServiceBase(
+                api_key=settings.openai_api_key,
+                model_name=settings.OPENAI_MODEL,
+                temperature=0.3
+            ).llm
+
+            prompt = QUESTION_BILINGUAL_PROMPT.format(
+                english_question=english_question
+            )
+
+            response = await llm.invoke(prompt)
+
+            # JSON에서 korean_question 추출 시도
+            try:
+                json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', response, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group(0))
+                    korean_question = parsed.get("korean_question")
+                    if korean_question and korean_question.strip():
+                        logger.debug(f"✅ Question translated: {english_question[:30]}... → {korean_question[:30]}...")
+                        return korean_question
+            except Exception as e:
+                logger.warning(f"Failed to parse Korean translation JSON: {e}")
+
+            # JSON 파싱 실패 시 전체 응답 사용 (간단한 번역 결과일 수 있음)
+            if response and response.strip():
+                logger.debug(f"Using response directly as translation: {response[:50]}...")
+                return response.strip()
+
+            # 번역 실패 시 영문 그대로 반환
+            logger.warning(f"Failed to translate question, returning English")
+            return english_question
+
+        except Exception as e:
+            logger.error(f"Translation error: {e}", exc_info=True)
+            return english_question
 
     async def _generate_dynamic_question_stream(
         self,

@@ -27,7 +27,7 @@ from app.roleplaying.core.session_message_handler import SessionMessageHandler
 from app.roleplaying.handlers.ws_message_models import (
     AiTextMessage, AiTextStreamingMessage, AiTypingMessage,
     ErrorMessage, FeedbackMessage, FeedbackSectionsMessage, FeedbackStreamingMessage,
-    RetryRequiredMessage, UtteranceSavedMessage
+    RetryRequiredMessage, UtteranceSavedMessage, AiQuestionStreamingMessage, AiQuestionSectionMessage
 )
 
 logger = logging.getLogger(__name__)
@@ -228,6 +228,85 @@ async def _generate_and_stream_ai_response(
         is_fixed_question = False
         await websocket.send_json(
             AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
+        )
+
+    # 히스토리와 세션 상태 업데이트
+    await SessionMessageHandler.append_message_async(
+        session_id=session_id,
+        speaker="ai",
+        text=full_ai_response,
+        is_fixed_question=is_fixed_question,
+    )
+
+    if session_state:
+        session_state.current_question_text = full_ai_response
+        session_state.reset_retry_count()
+
+    return full_ai_response, is_fixed_question
+
+
+async def _generate_and_stream_ai_response_bilingual(
+    websocket: WebSocket,
+    session_id: str,
+    session_state,
+    user_text: str,
+) -> Tuple[str, bool]:
+    """
+    AI 응답을 영문 토큰 + 한글 섹션으로 생성 및 스트리밍 전송
+
+    Returns:
+        (full_ai_response, is_fixed_question)
+    """
+    from app.roleplaying.services.business.ai_tutor_service import ai_tutor_service
+
+    full_ai_response = ""
+    is_fixed_question = False
+
+    try:
+        async for message_type, content, is_fixed, language in ai_tutor_service.generate_reply_bilingual_stream(
+            session_state, user_text
+        ):
+            if message_type == "token":
+                # 영문 토큰 스트리밍
+                if content and content.strip():
+                    full_ai_response += content
+                    is_fixed_question = is_fixed
+                    await websocket.send_json(
+                        AiQuestionStreamingMessage(chunk=content).model_dump()
+                    )
+            elif message_type == "section":
+                # 한글 섹션 전송
+                # content 형식: "english_question|||korean_question"
+                parts = content.split("|||")
+                if len(parts) == 2:
+                    en_question = parts[0].strip()
+                    ko_question = parts[1].strip()
+                    await websocket.send_json(
+                        AiQuestionSectionMessage(
+                            question_en=en_question,
+                            question_ko=ko_question,
+                            is_fixed_question=is_fixed
+                        ).model_dump()
+                    )
+                    logger.info(f"✅ [AI 질문 완성] EN: {en_question[:50]}... → KO: {ko_question[:50]}...")
+
+    except Exception as e:
+        logger.error(f"Error during bilingual AI streaming: {e}", exc_info=True)
+        fallback_en = "Could you tell me more about that?"
+        fallback_ko = "더 자세히 설명해 주시겠습니까?"
+        full_ai_response = fallback_en
+        is_fixed_question = False
+
+        # Fallback 메시지 전송
+        await websocket.send_json(
+            AiQuestionStreamingMessage(chunk=fallback_en + " ").model_dump()
+        )
+        await websocket.send_json(
+            AiQuestionSectionMessage(
+                question_en=fallback_en,
+                question_ko=fallback_ko,
+                is_fixed_question=False
+            ).model_dump()
         )
 
     # 히스토리와 세션 상태 업데이트

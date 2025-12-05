@@ -357,6 +357,47 @@ class RetryRequiredMessage(BaseModel):
     max_retries: int = Field(..., ge=1, description="최대 재시도 횟수")
 
 
+class AiQuestionStreamingMessage(BaseModel):
+    """
+    AI 질문 영문 토큰 스트리밍 메시지
+
+    AI 질문을 영어로 토큰 단위로 실시간 전송.
+    한글 번역은 별도로 섹션으로 전송됨.
+
+    사용:
+    - 동적 질문과 고정 질문 모두 토큰 스트리밍
+    - 사용자가 실시간으로 텍스트 표시
+    - 한글 번역은 섹션으로 따로 전송
+    """
+
+    type: Literal["AI_QUESTION_STREAMING"] = "AI_QUESTION_STREAMING"
+    chunk: str = Field(..., description="질문 텍스트 토큰 (한 단어 또는 여러 단어)")
+
+
+class AiQuestionSectionMessage(BaseModel):
+    """
+    AI 질문 한글 번역 섹션 메시지
+
+    영어 질문이 완성된 후 한글 번역을 한 번에 전송.
+    클라이언트는 영문과 한글을 함께 표시할 수 있음.
+
+    예시:
+    {
+        "type": "AI_QUESTION_SECTION",
+        "question_en": "Based on your experience, what are the main challenges?",
+        "question_ko": "당신의 경험을 바탕으로 주요 도전 과제는 무엇입니까?",
+        "is_fixed_question": false
+    }
+    """
+
+    type: Literal["AI_QUESTION_SECTION"] = "AI_QUESTION_SECTION"
+    question_en: str = Field(..., description="완성된 영어 질문")
+    question_ko: str = Field(..., description="한글 번역 질문")
+    is_fixed_question: bool = Field(
+        default=False, description="고정 질문 여부 (턴 1, 4, 7)"
+    )
+
+
 class SessionEndedMessage(BaseModel):
     """
     세션 종료 메시지
@@ -394,6 +435,8 @@ OutboundMessage = (
     AckMessage
     | AiTextMessage
     | AiTextStreamingMessage
+    | AiQuestionStreamingMessage
+    | AiQuestionSectionMessage
     | SttPartialMessage
     | SttFinalMessage
     | UtteranceSavedMessage
