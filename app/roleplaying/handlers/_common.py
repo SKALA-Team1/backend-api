@@ -270,6 +270,7 @@ async def _send_feedback_messages(
     logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
     # Step 2: ✅ 구조화된 피드백 섹션 스트리밍 (NEW - 각 섹션이 준비되면 즉시 전송)
+    feedback_sections_list = []
     try:
         from app.roleplaying.services.dependencies.feedback import get_feedback_orchestrator
 
@@ -296,10 +297,17 @@ async def _send_feedback_messages(
             # 각 섹션이 완성되면 즉시 WebSocket으로 전송
             sections_msg = FeedbackSectionsMessage(sections=[section])
             await websocket.send_json(sections_msg.model_dump())
+            # ✅ 생성된 섹션을 리스트에 저장 (Spring 2 저장용)
+            feedback_sections_list.append(section)
             section_count += 1
             logger.info(f"✅ [피드백 섹션 실시간 전송] {section['type']} ({section_count}/3)")
 
         logger.info(f"All {section_count} feedback sections streamed")
+
+        # ✅ feedback_result에 생성된 feedback_sections 저장 (Spring 2에 저장하기 위해)
+        if feedback_sections_list:
+            feedback_result["feedback_sections"] = feedback_sections_list
+            logger.info(f"✅ feedback_sections saved to feedback_result: {len(feedback_sections_list)} sections")
 
     except Exception as e:
         logger.error(f"Failed to stream feedback sections: {e}", exc_info=True)
