@@ -297,8 +297,7 @@ async def _send_feedback_messages(
             if item["type"] == "feedback_token":
                 # 영문 토큰 즉시 전송
                 token_msg = FeedbackStreamingMessage(
-                    section_type=item["section_type"],
-                    token=item["token"]
+                    chunk=item["token"]
                 )
                 await websocket.send_json(token_msg.model_dump())
                 logger.debug(f"📤 [피드백 토큰 전송] {item['section_type']}: {repr(item['token'])}")
