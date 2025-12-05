@@ -225,96 +225,131 @@ class FeedbackService:
 
     async def get_session_feedback(
         self,
-        session_id: int,
+        session_id: str,
         scenario_id: int
     ) -> SessionFeedbackResponse:
         """
-        세션 전체 피드백 조회 (Spring API를 통해)
+        세션 전체 피드백 조회 및 생성
+
+        scenario_message 테이블에서 메시지를 가져와서 평균 점수 계산 후 종합 피드백 생성
 
         Args:
-            session_id: 세션 ID
+            session_id: 세션 ID (UUID 문자열)
             scenario_id: 시나리오 ID
 
         Returns:
             SessionFeedbackResponse: 세션 전체 피드백
         """
-        # Spring에서 턴 피드백 조회
+        # Spring2에서 사용자 메시지만 조회 (scenario_message 테이블, speaker="user" 필터링)
         try:
-            spring_feedbacks = await spring2_client.get_session_feedbacks(session_id)
+            user_messages = await spring2_client.get_session_messages(session_id, speaker="user")
+            logger.info(f"Retrieved {len(user_messages)} user messages for session {session_id}")
         except Exception as e:
-            logger.error(f"Failed to get feedbacks from Spring: {e}")
-            spring_feedbacks = []
+            logger.error(f"Failed to get messages from Spring: {e}")
+            user_messages = []
 
-        # 턴별 응답 생성
+        # 턴별 응답 생성 (scenario_message의 점수 필드 사용)
         turn_responses = []
         total_accuracy = 0.0
         total_fluency = 0.0
         total_completeness = 0.0
         total_pronunciation = 0.0
 
-        for tf in spring_feedbacks:
-            accuracy_data = tf.get("accuracy", {})
-            fluency_data = tf.get("fluency", {})
-            completeness_data = tf.get("completeness", {})
-            pronunciation_data = tf.get("pronunciation", {})
+        # 점수가 있는 메시지만 필터링해서 평균 계산
+        scored_count = 0
 
-            accuracy_score = float(accuracy_data.get("score", 0))
-            fluency_score = float(fluency_data.get("score", 0))
-            completeness_score = float(completeness_data.get("score", 0))
-            pronunciation_score = float(pronunciation_data.get("score", 0))
+        for msg in user_messages:
+            # scenario_message의 점수 필드 (NULL 처리)
+            pronunciation_raw = msg.get("pronunciation_score")
+            grammar_raw = msg.get("grammar_score")
+            relevance_raw = msg.get("relevance_score")
 
-            total_accuracy += accuracy_score
-            total_fluency += fluency_score
-            total_completeness += completeness_score
-            total_pronunciation += pronunciation_score
+            # NULL이 아닌 값만 사용 (0은 유효한 점수)
+            pronunciation_score = float(pronunciation_raw) if pronunciation_raw is not None else 0.0
+            grammar_score = float(grammar_raw) if grammar_raw is not None else 0.0
+            relevance_score = float(relevance_raw) if relevance_raw is not None else 0.0
 
-            vocab_suggestions = [
-                VocabularySuggestion(
-                    original=v.get("original", ""),
-                    suggested=v.get("suggested", ""),
-                    reason=v.get("reason", "")
-                )
-                for v in tf.get("vocabularySuggestions", [])
-            ]
+            # 점수가 하나라도 있으면 카운트
+            if pronunciation_raw is not None or grammar_raw is not None or relevance_raw is not None:
+                scored_count += 1
+
+                # Azure 4가지 평가 항목으로 매핑
+                accuracy_score = grammar_score  # 문법 = 정확도
+                fluency_score = relevance_score  # 적합성 = 유창성 (근사값)
+                completeness_score = relevance_score  # 적합성 = 완성도
+
+                total_accuracy += accuracy_score
+                total_fluency += fluency_score
+                total_completeness += completeness_score
+                total_pronunciation += pronunciation_score
+            else:
+                # 점수가 없으면 기본값 사용
+                accuracy_score = 0.0
+                fluency_score = 0.0
+                completeness_score = 0.0
+                pronunciation_score = 0.0
+
+            # feedback_sections에서 상세 피드백 추출 (있으면)
+            feedback_sections = msg.get("feedback_sections", [])
+            overall_feedback = ""
+            if feedback_sections and isinstance(feedback_sections, list):
+                # 피드백 섹션들을 하나의 문자열로 결합
+                feedback_texts = [f.get("feedback_en", "") for f in feedback_sections if isinstance(f, dict)]
+                overall_feedback = " ".join([t for t in feedback_texts if t])
+
+            # 점수를 레벨로 변환
+            def score_to_level(score: float) -> str:
+                if score >= 90:
+                    return "Excellent"
+                elif score >= 75:
+                    return "Good"
+                elif score >= 60:
+                    return "Fair"
+                elif score >= 40:
+                    return "Poor"
+                else:
+                    return "VeryPoor"
 
             turn_responses.append(TurnFeedbackResponse(
-                turn_feedback_id=tf.get("turnFeedbackId", 0),
-                turn_number=tf.get("turnNumber", 0),
+                turn_feedback_id=msg.get("message_id", 0),
+                turn_number=msg.get("turn_index", 0),
                 accuracy=ScoreDetail(
                     score=accuracy_score,
-                    level=accuracy_data.get("level", "N/A")
+                    level=score_to_level(accuracy_score)
                 ),
                 fluency=ScoreDetail(
                     score=fluency_score,
-                    level=fluency_data.get("level", "N/A")
+                    level=score_to_level(fluency_score)
                 ),
                 completeness=ScoreDetail(
                     score=completeness_score,
-                    level=completeness_data.get("level", "N/A")
+                    level=score_to_level(completeness_score)
                 ),
                 pronunciation=ScoreDetail(
                     score=pronunciation_score,
-                    level=pronunciation_data.get("level", "N/A")
+                    level=score_to_level(pronunciation_score)
                 ),
-                overall_feedback=tf.get("overallFeedback", ""),
-                suggested_sentence=tf.get("suggestedSentence", ""),
-                user_message=tf.get("userMessage", ""),
-                system_message=tf.get("systemMessage", ""),
-                grammar_notes=tf.get("grammarNotes", []),
-                vocabulary_suggestions=vocab_suggestions,
-                created_at=datetime.fromisoformat(tf["createdAt"].replace("Z", "+00:00")) if tf.get("createdAt") else datetime.utcnow()
+                overall_feedback=overall_feedback or "No feedback available",
+                suggested_sentence="",  # scenario_message에는 suggested_sentence 없음
+                user_message=msg.get("message_text", ""),
+                system_message="",  # AI 메시지는 별도 조회 필요
+                grammar_notes=[],
+                vocabulary_suggestions=[],
+                created_at=datetime.fromisoformat(msg["created_at"].replace("Z", "+00:00")) if msg.get("created_at") else datetime.utcnow()
             ))
 
-        # 평균 점수 계산
-        total_turns = len(spring_feedbacks)
-        if total_turns > 0:
-            avg_accuracy = round(total_accuracy / total_turns, 2)
-            avg_fluency = round(total_fluency / total_turns, 2)
-            avg_completeness = round(total_completeness / total_turns, 2)
-            avg_pronunciation = round(total_pronunciation / total_turns, 2)
+        # 평균 점수 계산 (점수가 있는 메시지만)
+        total_turns = len(user_messages)
+        if scored_count > 0:
+            avg_accuracy = round(total_accuracy / scored_count, 2)
+            avg_fluency = round(total_fluency / scored_count, 2)
+            avg_completeness = round(total_completeness / scored_count, 2)
+            avg_pronunciation = round(total_pronunciation / scored_count, 2)
             overall_score = round((avg_accuracy + avg_fluency + avg_completeness + avg_pronunciation) / 4, 2)
+            logger.info(f"Calculated averages from {scored_count} scored messages out of {total_turns} total messages")
         else:
             avg_accuracy = avg_fluency = avg_completeness = avg_pronunciation = overall_score = 0.0
+            logger.warning(f"No scored messages found in {total_turns} total messages")
 
         avg_scores = {
             "avg_accuracy": avg_accuracy,
@@ -325,26 +360,36 @@ class FeedbackService:
             "total_turns": total_turns
         }
 
-        # 모든 세션의 모든 피드백 가져오기 (세션 구분 없이 통합)
-        try:
-            turn_feedbacks = await self.get_all_feedbacks()
-            logger.info(f"Retrieved {len(turn_feedbacks)} turn feedbacks from ALL sessions (integrated)")
-        except Exception as e:
-            logger.error(f"Failed to get all feedbacks: {e}")
-            turn_feedbacks = []
+        # 현재 세션의 feedback_sections만 사용
+        turn_feedbacks = []
+        for msg in user_messages:
+            feedback_sections = msg.get("feedback_sections", [])
+            if feedback_sections:
+                turn_feedbacks.append({
+                    "turn_index": msg.get("turn_index", 0),
+                    "message_text": msg.get("content", ""),
+                    "feedback_sections": feedback_sections
+                })
+        logger.info(f"Using {len(turn_feedbacks)} feedback_sections from current session {session_id}")
 
         # OpenAI로 멘토 스타일 종합 피드백 생성 (슬랙 메시지 톤)
         try:
             openai_service = self._get_openai_service()
-            summary_comment = openai_service.generate_final_feedback(
+            feedback_dict = openai_service.generate_final_feedback(
                 avg_scores=avg_scores,
-                turn_feedbacks=turn_feedbacks  # feedback_sections 포함
+                turn_feedbacks=turn_feedbacks  # 현재 세션의 feedback_sections만
             )
+            # 짧은 버전과 긴 버전 모두 추출
+            final_feedback_short = feedback_dict.get("short", "")
+            final_feedback_long = feedback_dict.get("long", "")
+            summary_comment = final_feedback_short  # summary_comment는 짧은 버전 사용
             logger.info(f"Final feedback generated via LLM for session {session_id}")
         except Exception as e:
             logger.error(f"Failed to generate LLM final feedback: {e}")
             # LLM 실패 시 기본 코멘트 사용
             summary_comment = self._generate_summary_comment(avg_scores)
+            final_feedback_short = summary_comment
+            final_feedback_long = ""
 
         return SessionFeedbackResponse(
             session_id=session_id,
@@ -357,6 +402,8 @@ class FeedbackService:
             overall_score=overall_score,
             turn_feedbacks=turn_responses,
             summary_comment=summary_comment,
+            final_feedback_short=final_feedback_short,
+            final_feedback_long=final_feedback_long,
             created_at=datetime.utcnow()
         )
 

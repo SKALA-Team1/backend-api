@@ -104,7 +104,7 @@ class TurnFeedbackResponse(BaseModel):
 
 class SessionFeedbackResponse(BaseModel):
     """세션 전체 피드백 응답"""
-    session_id: int = Field(..., description="세션 ID")
+    session_id: str = Field(..., description="세션 ID (UUID 문자열)")
     scenario_id: int = Field(..., description="시나리오 ID")
     total_turns: int = Field(..., description="총 평가된 턴 수")
 
@@ -120,6 +120,10 @@ class SessionFeedbackResponse(BaseModel):
 
     # 전체 코멘트
     summary_comment: str = Field(..., description="전체 요약 코멘트")
+
+    # 종합 피드백 (짧은 버전 + 긴 버전)
+    final_feedback_short: str = Field(default="", description="짧은 피드백 (1-2문장)")
+    final_feedback_long: str = Field(default="", description="긴 피드백 (7문장)")
 
     created_at: datetime = Field(..., description="생성 시간")
 

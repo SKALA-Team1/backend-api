@@ -612,14 +612,15 @@ class Spring2Client:
             logger.error(f"Session feedbacks retrieval error: {e}", exc_info=True)
             raise
 
-    async def get_session_messages(self, session_id: str) -> list[dict]:
+    async def get_session_messages(self, session_id: str, speaker: str = None) -> list[dict]:
         """
-        세션의 모든 메시지 조회
+        세션의 메시지 조회 (speaker 필터링 가능)
 
         scenario_message 테이블에서 해당 세션의 메시지를 가져옵니다.
 
         Args:
             session_id: 세션 ID (UUID 문자열)
+            speaker: 스피커 필터 (optional: "user", "ai", None=전체)
 
         Returns:
             메시지 목록 (turn_index 순 정렬)
@@ -628,14 +629,17 @@ class Spring2Client:
             - speaker: 발화자 (user/ai)
         """
         url = f"/internal/sessions/{session_id}/messages"
+        params = {}
+        if speaker:
+            params["speaker"] = speaker
 
         try:
             client = await self._get_client()
-            response = await client.get(url)
+            response = await client.get(url, params=params)
             response.raise_for_status()
 
             result = response.json()
-            logger.info(f"Session messages retrieved: session={session_id}, count={len(result)}")
+            logger.info(f"Session messages retrieved: session={session_id}, speaker={speaker}, count={len(result)}")
             return result
 
         except httpx.HTTPStatusError as e:

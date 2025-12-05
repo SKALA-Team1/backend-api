@@ -43,7 +43,7 @@ async def ping():
 
 @router.get("/session/{session_id}", response_model=SessionFeedbackResponse)
 async def get_session_feedback(
-    session_id: int,
+    session_id: str,
     scenario_id: int,
 ):
     """
