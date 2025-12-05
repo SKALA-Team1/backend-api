@@ -62,8 +62,7 @@ def get_pronunciation_evaluator() -> "PronunciationEvaluator":
 
     return PronunciationEvaluatorImpl(
         azure_service=azure_service,
-        provider=settings.FEEDBACK_LLM_PROVIDER,
-        api_key=settings.openai_api_key if settings.FEEDBACK_LLM_PROVIDER == "openai" else None,
+        api_key=settings.openai_api_key,
         model_name=settings.OPENAI_MODEL_FEEDBACK,
         temperature=0.3
     )
@@ -87,8 +86,7 @@ def get_grammar_evaluator() -> "GrammarEvaluator":
     from app.roleplaying.services.feedback.feedback_service import GrammarEvaluatorImpl
 
     return GrammarEvaluatorImpl(
-        provider=settings.FEEDBACK_LLM_PROVIDER,
-        api_key=settings.openai_api_key if settings.FEEDBACK_LLM_PROVIDER == "openai" else None,
+        api_key=settings.openai_api_key,
         model_name=settings.OPENAI_MODEL_FEEDBACK,
         temperature=0.3
     )
@@ -111,8 +109,7 @@ def get_relevance_evaluator() -> "RelevanceEvaluator":
     from app.roleplaying.services.feedback.feedback_service import RelevanceEvaluatorImpl
 
     return RelevanceEvaluatorImpl(
-        provider=settings.FEEDBACK_LLM_PROVIDER,
-        api_key=settings.openai_api_key if settings.FEEDBACK_LLM_PROVIDER == "openai" else None,
+        api_key=settings.openai_api_key,
         model_name=settings.OPENAI_MODEL_FEEDBACK,
         temperature=0.3
     )
