@@ -269,7 +269,7 @@ async def _send_feedback_messages(
     await websocket.send_json(feedback_msg.model_dump())
     logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
-    # Step 2: ✅ 구조화된 피드백 섹션 스트리밍 (NEW - 각 섹션이 준비되면 즉시 전송)
+    # Step 2: ✅ 구조화된 피드백 섹션 스트리밍 (영문 토큰 + 한글 섹션)
     feedback_sections_list = []
     try:
         from app.roleplaying.services.dependencies.feedback import get_feedback_orchestrator
@@ -284,9 +284,9 @@ async def _send_feedback_messages(
         grammar_score = feedback_result.get("grammar_score")
         relevance_score = feedback_result.get("relevance_score")
 
-        # 피드백 섹션을 스트리밍으로 생성 및 전송
+        # 피드백 섹션 스트리밍 생성 (영문 토큰 + 한글 섹션)
         section_count = 0
-        async for section in feedback_orchestrator._build_feedback_sections_stream(
+        async for item in feedback_orchestrator._build_feedback_sections_stream(
             pronunciation=pronunciation,
             grammar=grammar,
             relevance=relevance,
@@ -294,13 +294,33 @@ async def _send_feedback_messages(
             grammar_score=grammar_score,
             relevance_score=relevance_score
         ):
-            # 각 섹션이 완성되면 즉시 WebSocket으로 전송
-            sections_msg = FeedbackSectionsMessage(sections=[section])
-            await websocket.send_json(sections_msg.model_dump())
-            # ✅ 생성된 섹션을 리스트에 저장 (Spring 2 저장용)
-            feedback_sections_list.append(section)
-            section_count += 1
-            logger.info(f"✅ [피드백 섹션 실시간 전송] {section['type']} ({section_count}/3)")
+            if item["type"] == "feedback_token":
+                # 영문 토큰 즉시 전송
+                token_msg = FeedbackStreamingMessage(
+                    section_type=item["section_type"],
+                    token=item["token"]
+                )
+                await websocket.send_json(token_msg.model_dump())
+                logger.debug(f"📤 [피드백 토큰 전송] {item['section_type']}: {repr(item['token'])}")
+
+            elif item["type"] == "feedback_section":
+                # 한글 섹션 완성 후 한 번에 전송
+                sections_msg = FeedbackSectionsMessage(sections=[{
+                    "type": item["section_type"],
+                    "feedback_en": item["feedback_en"],
+                    "feedback_ko": item["feedback_ko"],
+                    "score": item["score"]
+                }])
+                await websocket.send_json(sections_msg.model_dump())
+                # ✅ 생성된 섹션을 리스트에 저장 (Spring 2 저장용)
+                feedback_sections_list.append({
+                    "type": item["section_type"],
+                    "feedback_en": item["feedback_en"],
+                    "feedback_ko": item["feedback_ko"],
+                    "score": item["score"]
+                })
+                section_count += 1
+                logger.info(f"✅ [피드백 섹션 완성] {item['section_type']} ({section_count}/3)")
 
         logger.info(f"All {section_count} feedback sections streamed")
 

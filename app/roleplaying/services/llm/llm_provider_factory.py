@@ -42,6 +42,18 @@ class LLMProvider(Protocol):
         """
         ...
 
+    async def stream(self, prompt: str):
+        """
+        프롬프트를 LLM에 전달하고 토큰을 스트리밍으로 반환합니다.
+
+        Args:
+            prompt: 입력 프롬프트
+
+        Yields:
+            각 토큰 문자열
+        """
+        ...
+
 
 class OpenAIProvider:
     """OpenAI GPT 프로바이더
@@ -85,6 +97,29 @@ class OpenAIProvider:
             return response.content
         return str(response)
 
+    async def stream(self, prompt: str):
+        """
+        OpenAI API를 호출하여 토큰을 스트리밍으로 생성합니다.
+
+        Args:
+            prompt: 입력 프롬프트
+
+        Yields:
+            각 토큰 문자열
+        """
+        loop = asyncio.get_event_loop()
+
+        def _stream():
+            for chunk in self.llm.stream(prompt):
+                if hasattr(chunk, 'content'):
+                    yield chunk.content
+                else:
+                    yield str(chunk)
+
+        # 스트리밍을 비동기로 처리
+        for token in await loop.run_in_executor(None, lambda: list(_stream())):
+            yield token
+
 
 class OllamaProvider:
     """Ollama 로컬 LLM 프로바이더
@@ -124,6 +159,29 @@ class OllamaProvider:
         if hasattr(response, 'content'):
             return response.content
         return str(response)
+
+    async def stream(self, prompt: str):
+        """
+        Ollama API를 호출하여 토큰을 스트리밍으로 생성합니다.
+
+        Args:
+            prompt: 입력 프롬프트
+
+        Yields:
+            각 토큰 문자열
+        """
+        loop = asyncio.get_event_loop()
+
+        def _stream():
+            for chunk in self.llm.stream(prompt):
+                if hasattr(chunk, 'content'):
+                    yield chunk.content
+                else:
+                    yield str(chunk)
+
+        # 스트리밍을 비동기로 처리
+        for token in await loop.run_in_executor(None, lambda: list(_stream())):
+            yield token
 
 
 def create_llm_provider(

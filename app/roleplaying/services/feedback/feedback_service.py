@@ -131,6 +131,30 @@ class GrammarEvaluatorImpl:
             logger.error(f"Grammar evaluation failed: {e}")
             return None
 
+    async def evaluate_grammar_stream(self, user_text: str):
+        """
+        문법 평가 (토큰 단위 스트리밍)
+
+        Args:
+            user_text: 사용자 발화 텍스트
+
+        Yields:
+            각 토큰 문자열
+        """
+        prompt = GRAMMAR_EVALUATION_PROMPT.format(user_text=user_text)
+
+        try:
+            logger.info("🟢 [문법 평가 스트리밍] LLM 스트리밍 중...")
+
+            async for token in self.llm.stream(prompt):
+                if token:  # 빈 토큰 제외
+                    yield token
+                    logger.debug(f"📤 [문법 평가 토큰] {repr(token)}")
+
+        except Exception as e:
+            logger.error(f"Grammar evaluation streaming failed: {e}")
+            yield ""  # Fallback: 빈 응답
+
 
 # ============================================
 # RelevanceEvaluatorImpl
@@ -237,6 +261,42 @@ class RelevanceEvaluatorImpl:
         except Exception as e:
             logger.error(f"Relevance evaluation failed: {e}")
             return None
+
+    async def evaluate_relevance_stream(
+        self,
+        user_text: str,
+        conversation_history: list,
+        scenario_context: dict
+    ):
+        """
+        맥락 평가 (토큰 단위 스트리밍)
+
+        Args:
+            user_text: 사용자 발화 텍스트
+            conversation_history: 대화 히스토리
+            scenario_context: 시나리오 컨텍스트
+
+        Yields:
+            각 토큰 문자열
+        """
+        context = self._build_conversation_context(conversation_history, scenario_context)
+
+        prompt = RELEVANCE_EVALUATION_PROMPT.format(
+            context=context,
+            user_text=user_text
+        )
+
+        try:
+            logger.info("🔴 [맥락 평가 스트리밍] LLM 스트리밍 중...")
+
+            async for token in self.llm.stream(prompt):
+                if token:  # 빈 토큰 제외
+                    yield token
+                    logger.debug(f"📤 [맥락 평가 토큰] {repr(token)}")
+
+        except Exception as e:
+            logger.error(f"Relevance evaluation streaming failed: {e}")
+            yield ""  # Fallback: 빈 응답
 
     def _build_conversation_context(self, history: list, scenario: dict) -> str:
         """대화 컨텍스트 구성"""
@@ -420,6 +480,77 @@ class PronunciationEvaluatorImpl:
         except Exception as e:
             logger.error(f"Pronunciation evaluation failed: {e}", exc_info=True)
             return None
+
+    async def evaluate_pronunciation_stream(
+        self,
+        audio_data: Optional[bytes],
+        user_text: str
+    ):
+        """
+        발음 평가 피드백 생성 (토큰 단위 스트리밍, Azure 점수 포함)
+
+        Args:
+            audio_data: WAV 형식 오디오 데이터
+            user_text: 사용자 발화 텍스트
+
+        Yields:
+            각 토큰 문자열
+        """
+        if not audio_data:
+            logger.warning("No audio data provided for pronunciation evaluation streaming")
+            yield ""
+            return
+
+        try:
+            logger.info("🔵 [발음 평가 스트리밍] Azure Speech 호출 중...")
+
+            # Step 1: Azure에서 점수 수집
+            azure_result = await self.azure_service.assess_pronunciation(
+                audio_data=audio_data,
+                reference_text=user_text,
+                language="en-US"
+            )
+
+            if not azure_result or not azure_result.get("success"):
+                logger.warning(f"Azure pronunciation assessment failed: {azure_result.get('error_message')}")
+                yield ""
+                return
+
+            pronunciation_score = azure_result.get("pronunciation_score", 0)
+            accuracy_score = azure_result.get("accuracy_score", 0)
+            fluency_score = azure_result.get("fluency_score", 0)
+            completeness_score = azure_result.get("completeness_score", 0)
+            words = azure_result.get("words", [])
+
+            logger.info(f"✅ [Azure 발음 평가 완료] 점수: {pronunciation_score}")
+
+            # Step 2: LLM으로 피드백 생성 (스트리밍)
+            error_words = [
+                w.get("word", "")
+                for w in words
+                if w.get("error_type") and w.get("accuracy_score", 100) < 80
+            ]
+            error_words_str = ", ".join(error_words[:5]) if error_words else "None"
+
+            prompt = PRONUNCIATION_FEEDBACK_PROMPT.format(
+                user_text=user_text,
+                pronunciation_score=pronunciation_score,
+                accuracy_score=accuracy_score,
+                fluency_score=fluency_score,
+                completeness_score=completeness_score,
+                error_words=error_words_str
+            )
+
+            logger.info("🔵 [발음 피드백 스트리밍] LLM 스트리밍 중...")
+
+            async for token in self.llm.stream(prompt):
+                if token:  # 빈 토큰 제외
+                    yield token
+                    logger.debug(f"📤 [발음 피드백 토큰] {repr(token)}")
+
+        except Exception as e:
+            logger.error(f"Pronunciation evaluation streaming failed: {e}", exc_info=True)
+            yield ""  # Fallback: 빈 응답
 
 
 # ============================================
@@ -711,50 +842,117 @@ class FeedbackOrchestratorImpl:
         relevance_score: Optional[int],
     ):
         """
-        피드백 섹션(영문 + 한글) 스트리밍 생성
+        피드백 섹션(영문 토큰 + 한글 섹션) 스트리밍 생성
 
-        각 섹션의 번역이 완료되면 즉시 yield함 (실시간 스트리밍)
+        ✅ 영문: 토큰 단위로 즉시 전송 (실시간 느낌)
+        ✅ 한글: 섹션 완성 후 한 번에 전송 (품질 유지)
+
+        Yields:
+            영문 토큰: {
+                "type": "feedback_token",
+                "section_type": "pronunciation|grammar|relevance",
+                "token": "The"
+            }
+            한글 섹션: {
+                "type": "feedback_section",
+                "section_type": "pronunciation|grammar|relevance",
+                "feedback_en": "The response...",
+                "feedback_ko": "응답이...",
+                "score": 75
+            }
         """
-        # Step 1: 각 섹션의 영문 피드백 생성 (동기)
-        section_en_data = [
-            self._build_single_section(
-                section_type="pronunciation",
-                evaluation=pronunciation,
-                score=pronunciation_score,
-                fallback="Pronunciation feedback is unavailable."
-            ),
-            self._build_single_section(
-                section_type="grammar",
-                evaluation=grammar,
-                score=grammar_score,
-                fallback="Grammar feedback is unavailable."
-            ),
-            self._build_single_section(
-                section_type="relevance",
-                evaluation=relevance,
-                score=relevance_score,
-                fallback="Relevance feedback is unavailable."
-            ),
+        section_configs = [
+            {
+                "section_type": "pronunciation",
+                "evaluation": pronunciation,
+                "score": pronunciation_score,
+                "fallback": "Pronunciation feedback is unavailable.",
+                "evaluator": self.pronunciation_evaluator
+            },
+            {
+                "section_type": "grammar",
+                "evaluation": grammar,
+                "score": grammar_score,
+                "fallback": "Grammar feedback is unavailable.",
+                "evaluator": self.grammar_evaluator
+            },
+            {
+                "section_type": "relevance",
+                "evaluation": relevance,
+                "score": relevance_score,
+                "fallback": "Relevance feedback is unavailable.",
+                "evaluator": self.relevance_evaluator
+            },
         ]
 
-        # Step 2: 각 섹션을 순차적으로 번역하고 즉시 yield
         try:
-            for section in section_en_data:
-                # 해당 섹션 번역 (한 번에 하나씩)
-                korean_feedback = await self._translate_feedback(section["feedback_en"])
-                section["feedback_ko"] = korean_feedback or section["feedback_en"]
+            # 각 섹션 순차 처리
+            for config in section_configs:
+                section_type = config["section_type"]
+                logger.info(f"🟢 [{section_type}] 영문 피드백 스트리밍 중...")
 
-                # 완성된 섹션 즉시 yield
-                yield section
-                logger.info(f"✅ [피드백 섹션 전송] {section['type']}: {section['feedback_en'][:40]}...")
+                # Step 1: 영문 피드백을 토큰 단위로 생성하며 즉시 전송
+                english_tokens = []
+                async for token in self._stream_section_feedback_en(config):
+                    english_tokens.append(token)
+                    # 영문 토큰 즉시 yield
+                    yield {
+                        "type": "feedback_token",
+                        "section_type": section_type,
+                        "token": token
+                    }
+
+                # 영문 전체 텍스트 조합
+                english_feedback = "".join(english_tokens).strip()
+                if not english_feedback:
+                    english_feedback = config["fallback"]
+
+                logger.info(f"✅ [{section_type}] 영문 완료: {english_feedback[:60]}...")
+
+                # Step 2: 영문이 완성되면 한글로 번역
+                logger.info(f"🟢 [{section_type}] 한글 번역 중...")
+                korean_feedback = await self._translate_feedback(english_feedback)
+                korean_feedback = korean_feedback or english_feedback
+
+                logger.info(f"✅ [{section_type}] 한글 완료: {korean_feedback[:60]}...")
+
+                # Step 3: 완성된 섹션 (영문 + 한글) 한 번에 yield
+                yield {
+                    "type": "feedback_section",
+                    "section_type": section_type,
+                    "feedback_en": english_feedback,
+                    "feedback_ko": korean_feedback,
+                    "score": config["score"]
+                }
 
         except Exception as e:
             logger.error(f"Failed to stream feedback sections: {e}", exc_info=True)
-            # Fallback: 영문만으로 기존 섹션들 yield
-            for section in section_en_data:
-                if not section.get("feedback_ko"):  # 아직 번역 안 된 섹션만
-                    section["feedback_ko"] = section["feedback_en"]
-                yield section
+
+    async def _stream_section_feedback_en(self, config: Dict):
+        """
+        각 섹션의 영문 피드백을 토큰 단위로 생성
+
+        Args:
+            config: 섹션 설정 (section_type, evaluation, score, evaluator 포함)
+
+        Yields:
+            각 토큰 문자열
+        """
+        section_type = config["section_type"]
+
+        # 이미 평가 완료된 경우 (feedback이 있는 경우)
+        if config["evaluation"] and isinstance(config["evaluation"], dict):
+            feedback_text = config["evaluation"].get("feedback", "")
+            if feedback_text and feedback_text.strip():
+                # 기존 피드백을 토큰으로 분할
+                for token in feedback_text.split():
+                    yield token + " "
+                return
+
+        # Fallback 사용
+        fallback = config["fallback"]
+        for token in fallback.split():
+            yield token + " "
 
     async def _translate_feedback(self, feedback_en: str) -> Optional[str]:
         """LLM을 사용하여 영문 피드백을 한글로 번역"""
