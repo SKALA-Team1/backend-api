@@ -12,7 +12,7 @@ handler 시그니처:
 - message_handlers.py (이 파일): INIT, END_SESSION 핸들러
 - _text_handler.py: USER_TEXT 핸들러
 - _audio_handler.py: UTTERANCE_END 핸들러
-- _common.py: 공통 유틸리티 및 공유 로직
+- session_handlers.py: 공통 유틸리티 및 공유 로직
 """
 
 import logging
@@ -24,7 +24,7 @@ from fastapi import WebSocket, status
 from app.config import settings
 from app.integrations.clients.spring2_client import spring2_client
 from app.roleplaying.core.session_state_manager import session_manager, SessionMessageHandler
-from app.roleplaying.handlers._common import _send_error
+from app.roleplaying.handlers.session_handlers import _send_error
 from app.roleplaying.handlers._text_handler import handle_user_text
 from app.roleplaying.handlers._audio_handler import handle_utterance_end
 from app.roleplaying.handlers.ws_message_models import (
@@ -103,7 +103,7 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
 
         # Spring 2 저장 (첫 질문은 고정 질문이므로 한글 + 키워드 포함해야 함)
         import asyncio
-        from app.roleplaying.handlers._common import _save_question_with_keywords
+        from app.roleplaying.handlers.session_handlers import _save_question_with_keywords
 
         try:
             await _save_question_with_keywords(

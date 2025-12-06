@@ -23,7 +23,7 @@ from app.roleplaying.core.session_state_manager import (
     session_manager,
     SessionMessageHandler,
 )
-from app.roleplaying.handlers._common import (
+from app.roleplaying.handlers.session_handlers import (
     _send_error,
     _check_turn_limit,
     _evaluate_feedback,
