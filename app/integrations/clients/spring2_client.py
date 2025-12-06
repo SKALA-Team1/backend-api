@@ -417,6 +417,45 @@ class Spring2Client:
             logger.error(f"Question save error: {e}", exc_info=True)
             raise
 
+    async def get_session_messages(
+        self,
+        session_id: str,
+        speaker: Optional[str] = None
+    ) -> list:
+        """
+        세션의 메시지 조회 (피드백 생성용)
+
+        Args:
+            session_id: 세션 ID
+            speaker: Optional speaker filter ("user", "ai", None=전체)
+
+        Returns:
+            메시지 리스트 (ScenarioMessage 엔티티 목록)
+        """
+        url = f"/internal/sessions/{session_id}/messages"
+        params = {"speaker": speaker} if speaker else {}
+
+        try:
+            logger.info(f"Fetching session messages: session={session_id}, speaker={speaker}")
+            client = await self._get_client()
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+
+            messages = response.json()
+            logger.info(f"✅ Fetched {len(messages)} messages for session {session_id}")
+            return messages
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to fetch session messages: session={session_id}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Session messages fetch error: {e}", exc_info=True)
+            raise
+
     async def save_final_feedback(
         self,
         session_id: str,

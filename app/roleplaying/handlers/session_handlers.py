@@ -32,6 +32,11 @@ from app.roleplaying.handlers.ws_message_models import (
 
 logger = logging.getLogger(__name__)
 
+# ========================================
+# 백그라운드 태스크 추적 (가비지 컬렉션 방지)
+# ========================================
+background_tasks: set = set()
+
 
 # ========================================
 # 기본 유틸리티
@@ -696,7 +701,7 @@ async def _handle_final_feedback_and_session_end(
     session_state,
 ) -> None:
     """
-    종합 피드백 생성 및 세션 종료
+    세션 종료 및 백그라운드 피드백 생성
 
     Args:
         websocket: WebSocket 연결
@@ -704,38 +709,48 @@ async def _handle_final_feedback_and_session_end(
         session_state: 세션 상태
 
     흐름:
-        1. 종합 피드백 생성
-        2. DB에 저장
-        3. WebSocket으로 전송
-        4. 세션 종료 메시지 전송
-        5. WebSocket 연결 종료
+        1. SESSION_ENDED 메시지 전송 (WebSocket)
+        2. WebSocket 종료 (WS_1000)
+        3. 백그라운드에서 피드백 생성/저장 (클라이언트는 로딩 화면 표시)
+        4. 클라이언트가 피드백 화면으로 전환
+        5. GET /api/feedback/{session_id} 호출 (HTTP) - 피드백 조회
     """
-    from app.feedback.services.feedback_service import get_feedback_service
-    from app.roleplaying.handlers.ws_message_models import FinalFeedbackMessage, SessionEndedMessage
+    from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
+    import asyncio
 
-    try:
-        feedback_service = get_feedback_service()
-        scenario_id = session_state.subject_id if session_state else 0
+    # Step 1: SESSION_ENDED 메시지 전송
+    await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
+    logger.info(f"📤 SESSION_ENDED sent: session={session_id}")
 
-        logger.info(f"Generating final feedback for session={session_id}, scenario_id={scenario_id}")
+    # Step 2: WebSocket 종료 (WS_1000)
+    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
+    logger.info(f"🔌 WebSocket closed (1000): session={session_id}")
 
-        # 종합 피드백 생성
-        session_feedback = await feedback_service.get_session_feedback(
-            session_id=session_id,
-            scenario_id=scenario_id
-        )
+    # Step 3: 백그라운드에서 피드백 생성 및 저장
+    async def _generate_and_save_feedback_background():
+        """백그라운드 태스크: 피드백 생성 및 DB 저장"""
+        from app.feedback.services.feedback_service import get_feedback_service
 
-        logger.info(
-            f"📊 [Final Feedback Generated] session={session_id}, "
-            f"avg_pronunciation={session_feedback.avg_pronunciation}, "
-            f"avg_accuracy={session_feedback.avg_accuracy}, "
-            f"avg_fluency={session_feedback.avg_fluency}, "
-            f"short_length={len(session_feedback.final_feedback_short)}, "
-            f"long_length={len(session_feedback.final_feedback_long)}"
-        )
-
-        # 종합 피드백 DB에 저장 (scenario_feedback 테이블)
         try:
+            feedback_service = get_feedback_service()
+            scenario_id = session_state.subject_id if session_state else 0
+
+            logger.info(f"🔄 [Background] Generating final feedback: session={session_id}, scenario_id={scenario_id}")
+
+            # 종합 피드백 생성
+            session_feedback = await feedback_service.get_session_feedback(
+                session_id=session_id,
+                scenario_id=scenario_id
+            )
+
+            logger.info(
+                f"📊 [Background] Final feedback generated: session={session_id}, "
+                f"avg_pronunciation={session_feedback.avg_pronunciation}, "
+                f"avg_accuracy={session_feedback.avg_accuracy}, "
+                f"avg_fluency={session_feedback.avg_fluency}"
+            )
+
+            # DB에 저장 (Spring 2 API)
             await spring2_client.save_final_feedback(
                 session_id=session_id,
                 final_feedback_long=session_feedback.final_feedback_long,
@@ -744,29 +759,19 @@ async def _handle_final_feedback_and_session_end(
                 avg_accuracy_score=session_feedback.avg_accuracy,
                 avg_fluency_score=session_feedback.avg_fluency,
             )
-            logger.info(f"✅ Final feedback saved to DB: session={session_id}")
-        except Exception as save_error:
-            logger.error(f"❌ Failed to save final feedback to DB: {save_error}", exc_info=True)
-            # DB 저장 실패해도 WebSocket으로는 전송
+            logger.info(f"✅ [Background] Final feedback saved to DB: session={session_id}")
 
-        # 종합 피드백 전송
-        final_feedback_msg = FinalFeedbackMessage(
-            total_turns=session_feedback.total_turns,
-            avg_accuracy=session_feedback.avg_accuracy,
-            avg_fluency=session_feedback.avg_fluency,
-            avg_completeness=session_feedback.avg_completeness,
-            avg_pronunciation=session_feedback.avg_pronunciation,
-            overall_score=session_feedback.overall_score,
-            final_feedback_short=session_feedback.final_feedback_short,
-            final_feedback_long=session_feedback.final_feedback_long
-        )
-        await websocket.send_json(final_feedback_msg.model_dump())
-        logger.info(f"✅ Final feedback sent via WebSocket: session={session_id}")
+        except Exception as e:
+            logger.error(
+                f"❌ [Background] Failed to generate/save final feedback: session={session_id}, error={e}",
+                exc_info=True
+            )
 
-    except Exception as e:
-        logger.error(f"❌ Failed to generate/send final feedback: {e}", exc_info=True)
-        # 종합 피드백 생성 실패해도 세션은 종료
+    # 백그라운드 태스크로 실행 (WebSocket 종료 후에도 계속 실행됨)
+    task = asyncio.create_task(_generate_and_save_feedback_background())
 
-    # 세션 종료
-    await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
-    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
+    # ✅ Task를 set에 추가하여 가비지 컬렉션 방지
+    background_tasks.add(task)
+    task.add_done_callback(lambda t: background_tasks.discard(t))
+
+    logger.info(f"🚀 [Background] Task created and tracked: session={session_id}, active_tasks={len(background_tasks)}")
