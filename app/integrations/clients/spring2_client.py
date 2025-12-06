@@ -550,22 +550,27 @@ class Spring2Client:
         """
         url = f"/internal/sessions/{session_id}/final-feedback"
 
+        # Spring은 camelCase 필드명을 기대함 (FinalFeedbackRequest.java 참고)
         payload = {
-            "final_feedback_long": final_feedback_long,
-            "final_feedback_short": final_feedback_short,
-            "avg_pronunciation_score": avg_pronunciation_score,
-            "avg_accuracy_score": avg_accuracy_score,
-            "avg_fluency_score": avg_fluency_score,
+            "finalFeedbackLong": final_feedback_long,
+            "finalFeedbackShort": final_feedback_short,
+            "avgPronunciationScore": avg_pronunciation_score,
+            "avgAccuracyScore": avg_accuracy_score,
+            "avgFluencyScore": avg_fluency_score,
         }
 
         try:
+            logger.info(
+                f"Saving final feedback to Spring2: session={session_id}, "
+                f"payload={payload}"
+            )
             client = await self._get_client()
             response = await client.post(url, json=payload)
             response.raise_for_status()
 
             result = response.json()
             logger.info(
-                f"Final feedback saved: session={session_id}, scenario={scenario_id}"
+                f"✅ Final feedback saved successfully: session={session_id}, response={result}"
             )
             return result
 

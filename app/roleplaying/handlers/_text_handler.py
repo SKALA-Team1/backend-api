@@ -195,7 +195,68 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         # Step 7: 🔑 다음 AI 질문이 8번째가 될 것인지 미리 확인 (생성 전)
         next_ai_turn = session_state.get_ai_turn_number() if session_state else 1
         if next_ai_turn > 7:
-            logger.info(f"Turn limit reached: next_ai_turn={next_ai_turn}, ending session")
+            logger.info(f"Turn limit reached: next_ai_turn={next_ai_turn}, generating final feedback and ending session")
+
+            # Step 7a: 종합 피드백 생성
+            try:
+                from app.feedback.services.feedback_service import get_feedback_service
+                from app.roleplaying.handlers.ws_message_models import FinalFeedbackMessage
+                from app.integrations.clients.spring2_client import spring2_client
+
+                feedback_service = get_feedback_service()
+                scenario_id = session_state.subject_id if session_state else 0
+
+                logger.info(f"Generating final feedback for session={session_id}, scenario_id={scenario_id}")
+
+                # 종합 피드백 생성
+                session_feedback = await feedback_service.get_session_feedback(
+                    session_id=session_id,
+                    scenario_id=scenario_id
+                )
+
+                logger.info(
+                    f"📊 [Final Feedback Generated] session={session_id}, "
+                    f"avg_pronunciation={session_feedback.avg_pronunciation}, "
+                    f"avg_accuracy={session_feedback.avg_accuracy}, "
+                    f"avg_fluency={session_feedback.avg_fluency}, "
+                    f"short_length={len(session_feedback.final_feedback_short)}, "
+                    f"long_length={len(session_feedback.final_feedback_long)}"
+                )
+
+                # 종합 피드백 DB에 저장 (scenario_feedback 테이블)
+                try:
+                    await spring2_client.save_final_feedback(
+                        session_id=session_id,
+                        final_feedback_long=session_feedback.final_feedback_long,
+                        final_feedback_short=session_feedback.final_feedback_short,
+                        avg_pronunciation_score=session_feedback.avg_pronunciation,
+                        avg_accuracy_score=session_feedback.avg_accuracy,
+                        avg_fluency_score=session_feedback.avg_fluency,
+                    )
+                    logger.info(f"✅ Final feedback saved to DB: session={session_id}")
+                except Exception as save_error:
+                    logger.error(f"❌ Failed to save final feedback to DB: {save_error}", exc_info=True)
+                    # DB 저장 실패해도 WebSocket으로는 전송
+
+                # 종합 피드백 전송
+                final_feedback_msg = FinalFeedbackMessage(
+                    total_turns=session_feedback.total_turns,
+                    avg_accuracy=session_feedback.avg_accuracy,
+                    avg_fluency=session_feedback.avg_fluency,
+                    avg_completeness=session_feedback.avg_completeness,
+                    avg_pronunciation=session_feedback.avg_pronunciation,
+                    overall_score=session_feedback.overall_score,
+                    final_feedback_short=session_feedback.final_feedback_short,
+                    final_feedback_long=session_feedback.final_feedback_long
+                )
+                await websocket.send_json(final_feedback_msg.model_dump())
+                logger.info(f"✅ Final feedback sent via WebSocket: session={session_id}")
+
+            except Exception as e:
+                logger.error(f"❌ Failed to generate/send final feedback: {e}", exc_info=True)
+                # 종합 피드백 생성 실패해도 세션은 종료
+
+            # Step 7b: 세션 종료
             from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
             await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
             await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
