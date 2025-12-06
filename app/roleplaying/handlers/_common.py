@@ -683,3 +683,90 @@ async def _save_question_with_keywords(
             exc_info=True
         )
         raise  # ✅ 에러를 호출자에게 전파
+
+
+# ========================================
+# 종합 피드백 및 세션 종료
+# ========================================
+
+
+async def _handle_final_feedback_and_session_end(
+    websocket: WebSocket,
+    session_id: str,
+    session_state,
+) -> None:
+    """
+    종합 피드백 생성 및 세션 종료
+
+    Args:
+        websocket: WebSocket 연결
+        session_id: 세션 ID
+        session_state: 세션 상태
+
+    흐름:
+        1. 종합 피드백 생성
+        2. DB에 저장
+        3. WebSocket으로 전송
+        4. 세션 종료 메시지 전송
+        5. WebSocket 연결 종료
+    """
+    from app.feedback.services.feedback_service import get_feedback_service
+    from app.roleplaying.handlers.ws_message_models import FinalFeedbackMessage, SessionEndedMessage
+
+    try:
+        feedback_service = get_feedback_service()
+        scenario_id = session_state.subject_id if session_state else 0
+
+        logger.info(f"Generating final feedback for session={session_id}, scenario_id={scenario_id}")
+
+        # 종합 피드백 생성
+        session_feedback = await feedback_service.get_session_feedback(
+            session_id=session_id,
+            scenario_id=scenario_id
+        )
+
+        logger.info(
+            f"📊 [Final Feedback Generated] session={session_id}, "
+            f"avg_pronunciation={session_feedback.avg_pronunciation}, "
+            f"avg_accuracy={session_feedback.avg_accuracy}, "
+            f"avg_fluency={session_feedback.avg_fluency}, "
+            f"short_length={len(session_feedback.final_feedback_short)}, "
+            f"long_length={len(session_feedback.final_feedback_long)}"
+        )
+
+        # 종합 피드백 DB에 저장 (scenario_feedback 테이블)
+        try:
+            await spring2_client.save_final_feedback(
+                session_id=session_id,
+                final_feedback_long=session_feedback.final_feedback_long,
+                final_feedback_short=session_feedback.final_feedback_short,
+                avg_pronunciation_score=session_feedback.avg_pronunciation,
+                avg_accuracy_score=session_feedback.avg_accuracy,
+                avg_fluency_score=session_feedback.avg_fluency,
+            )
+            logger.info(f"✅ Final feedback saved to DB: session={session_id}")
+        except Exception as save_error:
+            logger.error(f"❌ Failed to save final feedback to DB: {save_error}", exc_info=True)
+            # DB 저장 실패해도 WebSocket으로는 전송
+
+        # 종합 피드백 전송
+        final_feedback_msg = FinalFeedbackMessage(
+            total_turns=session_feedback.total_turns,
+            avg_accuracy=session_feedback.avg_accuracy,
+            avg_fluency=session_feedback.avg_fluency,
+            avg_completeness=session_feedback.avg_completeness,
+            avg_pronunciation=session_feedback.avg_pronunciation,
+            overall_score=session_feedback.overall_score,
+            final_feedback_short=session_feedback.final_feedback_short,
+            final_feedback_long=session_feedback.final_feedback_long
+        )
+        await websocket.send_json(final_feedback_msg.model_dump())
+        logger.info(f"✅ Final feedback sent via WebSocket: session={session_id}")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to generate/send final feedback: {e}", exc_info=True)
+        # 종합 피드백 생성 실패해도 세션은 종료
+
+    # 세션 종료
+    await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
+    await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
