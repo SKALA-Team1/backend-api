@@ -23,6 +23,7 @@ WebSocket 메시지 모델 (Pydantic 정의)
     - FEEDBACK: 피드백 점수 (발음, 문법, 맥락 0-100)
     - FEEDBACK_STREAMING: 피드백 텍스트 스트리밍
     - RETRY_REQUIRED: 재시도 요청
+    - FINAL_FEEDBACK: 종합 피드백 (세션 종료 시)
     - SESSION_ENDED: 세션 종료 완료
     - ERROR: 오류 메시지
 
@@ -39,6 +40,8 @@ WebSocket 메시지 모델 (Pydantic 정의)
         8. AI_TEXT 또는 AI_TEXT_STREAMING → AI 응답
         9. FEEDBACK + FEEDBACK_STREAMING → 피드백
         10. RETRY_REQUIRED (옵션) 또는 다음 턴으로...
+        11. (7번 턴 완료 시) FINAL_FEEDBACK → 종합 피드백
+        12. SESSION_ENDED → 세션 종료
 
     텍스트 모드:
         1. INIT → 세션 초기화
@@ -47,6 +50,8 @@ WebSocket 메시지 모델 (Pydantic 정의)
         4. AI_TYPING → 응답 생성 중
         5. AI_TEXT 또는 AI_TEXT_STREAMING → AI 응답
         6. FEEDBACK (발음 점수 0) + FEEDBACK_STREAMING
+        7. (7번 턴 완료 시) FINAL_FEEDBACK → 종합 피드백
+        8. SESSION_ENDED → 세션 종료
 
 🔐 고정 질문 (정확히 3개):
     - 턴 1 (AI 턴 1): 대화 시작 (fixedQuestions[0])
@@ -357,6 +362,25 @@ class RetryRequiredMessage(BaseModel):
     max_retries: int = Field(..., ge=1, description="최대 재시도 횟수")
 
 
+class FinalFeedbackMessage(BaseModel):
+    """
+    종합 피드백 메시지
+
+    세션 종료 시 전체 세션에 대한 종합 피드백을 전송.
+    평균 점수와 상세 피드백을 포함.
+    """
+
+    type: Literal["FINAL_FEEDBACK"] = "FINAL_FEEDBACK"
+    total_turns: int = Field(..., ge=0, description="전체 턴 수")
+    avg_accuracy: float = Field(..., ge=0, le=100, description="평균 정확도 점수")
+    avg_fluency: float = Field(..., ge=0, le=100, description="평균 유창성 점수")
+    avg_completeness: float = Field(..., ge=0, le=100, description="평균 완성도 점수")
+    avg_pronunciation: float = Field(..., ge=0, le=100, description="평균 발음 점수")
+    overall_score: float = Field(..., ge=0, le=100, description="종합 점수")
+    final_feedback_short: str = Field(..., description="짧은 버전 종합 피드백")
+    final_feedback_long: str = Field(..., description="긴 버전 종합 피드백")
+
+
 class SessionEndedMessage(BaseModel):
     """
     세션 종료 메시지
@@ -402,6 +426,7 @@ OutboundMessage = (
     | FeedbackSectionsMessage
     | FeedbackStreamingMessage
     | RetryRequiredMessage
+    | FinalFeedbackMessage
     | SessionEndedMessage
     | ErrorMessage
 )
