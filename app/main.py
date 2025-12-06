@@ -10,6 +10,8 @@ from app.core.logging import setup_logging
 from app.health.router import router as health_router
 from app.roleplaying.api.roleplaying_router import router as roleplaying_router
 from app.roleplaying.handlers.ws_realtime_handler import router as ws_realtime_router
+from app.it_explanation.api.practice_router import router as it_practice_router
+from app.it_explanation.api.chatbot_router import router as it_chatbot_router
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,8 @@ register_exception_handlers(app)
 app.include_router(health_router, tags=["health"])
 app.include_router(roleplaying_router, tags=["roleplaying"])
 app.include_router(ws_realtime_router, tags=["websocket"])
+app.include_router(it_practice_router, tags=["it-explanation"])
+app.include_router(it_chatbot_router, tags=["it-explanation"])
 
 
 @app.get("/")
