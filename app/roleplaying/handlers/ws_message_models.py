@@ -362,25 +362,6 @@ class RetryRequiredMessage(BaseModel):
     max_retries: int = Field(..., ge=1, description="최대 재시도 횟수")
 
 
-class FinalFeedbackMessage(BaseModel):
-    """
-    종합 피드백 메시지
-
-    세션 종료 시 전체 세션에 대한 종합 피드백을 전송.
-    평균 점수와 상세 피드백을 포함.
-    """
-
-    type: Literal["FINAL_FEEDBACK"] = "FINAL_FEEDBACK"
-    total_turns: int = Field(..., ge=0, description="전체 턴 수")
-    avg_accuracy: float = Field(..., ge=0, le=100, description="평균 정확도 점수")
-    avg_fluency: float = Field(..., ge=0, le=100, description="평균 유창성 점수")
-    avg_completeness: float = Field(..., ge=0, le=100, description="평균 완성도 점수")
-    avg_pronunciation: float = Field(..., ge=0, le=100, description="평균 발음 점수")
-    overall_score: float = Field(..., ge=0, le=100, description="종합 점수")
-    final_feedback_short: str = Field(..., description="짧은 버전 종합 피드백")
-    final_feedback_long: str = Field(..., description="긴 버전 종합 피드백")
-
-
 class SessionEndedMessage(BaseModel):
     """
     세션 종료 메시지
@@ -426,7 +407,6 @@ OutboundMessage = (
     | FeedbackSectionsMessage
     | FeedbackStreamingMessage
     | RetryRequiredMessage
-    | FinalFeedbackMessage
     | SessionEndedMessage
     | ErrorMessage
 )
