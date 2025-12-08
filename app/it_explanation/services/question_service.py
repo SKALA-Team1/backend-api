@@ -4,12 +4,14 @@ Question Service
 IT 질문 조회 서비스
 
 역할:
-- (현재) Mock 데이터로 질문 제공
-- (나중에) Spring 2 API를 통해 질문 조회
+- Spring 2 API를 통해 질문 조회
 """
 
 import logging
+import json
 from typing import Optional, Dict, Any, List
+import httpx
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,8 @@ class QuestionService:
 
     def __init__(self):
         """질문 서비스 초기화"""
-        logger.info("QuestionService initialized")
+        self.spring2_base_url = os.getenv("SPRING2_BASE_URL", "http://localhost:8081")
+        logger.info(f"QuestionService initialized (Spring2: {self.spring2_base_url})")
 
     async def get_random_question(self) -> Optional[Dict[str, Any]]:
         """
@@ -37,10 +40,33 @@ class QuestionService:
             }
             또는 None
         """
-        # TODO: Spring 2 API 호출로 대체
-        # GET /internal/it-questions/random
-        logger.info("🎲 [랜덤 질문 조회] Mock 데이터 반환")
-        return self._get_mock_question()
+        try:
+            url = f"{self.spring2_base_url}/internal/it-questions/random"
+            logger.info(f"🎲 [랜덤 질문 조회] Spring 2 API 호출: {url}")
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(url)
+
+                if response.status_code == 204:
+                    logger.warning("No questions available in database")
+                    return None
+
+                response.raise_for_status()
+                data = response.json()
+
+                # Spring 2가 이미 snake_case로 보냄 (@JsonProperty)
+                return {
+                    "question_id": data["question_id"],
+                    "question_text": data["question_text"],
+                    "question_text_ko": data.get("question_text_ko"),
+                    "category": data["category"],
+                    "difficulty": data["difficulty"],
+                    "key_keywords": data.get("key_keywords", []),
+                    "model_answer": data.get("model_answer", "")
+                }
+        except Exception as e:
+            logger.error(f"Failed to fetch random question from Spring 2: {e}")
+            return None
 
     async def get_question_by_id(self, question_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -52,40 +78,30 @@ class QuestionService:
         Returns:
             질문 데이터 또는 None
         """
-        # TODO: Spring 2 API 호출로 대체
-        # GET /internal/it-questions/{question_id}
-        logger.info(f"🔍 [질문 조회] question_id={question_id} (Mock)")
-        return self._get_mock_question()
+        try:
+            url = f"{self.spring2_base_url}/internal/it-questions/{question_id}"
+            logger.info(f"🔍 [질문 조회] Spring 2 API 호출: {url}")
 
-    def _get_mock_question(self) -> Dict[str, Any]:
-        """Mock 질문 데이터 반환"""
-        return {
-            "question_id": 1,
-            "question_text": "Explain the difference between monolithic and microservices architecture.",
-            "question_text_ko": "모놀리식과 마이크로서비스 아키텍처의 차이를 설명하세요.",
-            "category": "Architecture",
-            "difficulty": "MEDIUM",
-            "key_keywords": [
-                "scalability",
-                "deployment",
-                "independence",
-                "fault isolation",
-                "service boundary"
-            ],
-            "model_answer": (
-                "Monolithic architecture is a single unified application where all components "
-                "(UI, business logic, data access) are tightly coupled and deployed together. "
-                "In contrast, microservices architecture breaks the application into small, "
-                "independent services that can be developed, deployed, and scaled separately. "
-                "Microservices offer better scalability, fault isolation, and deployment flexibility, "
-                "but introduce complexity in service communication and distributed system management."
-            ),
-            "model_answer_ko": (
-                "모놀리식 아키텍처는 모든 컴포넌트(UI, 비즈니스 로직, 데이터 접근)가 "
-                "긴밀하게 결합되어 하나의 통합 애플리케이션으로 배포되는 구조입니다. "
-                "반면 마이크로서비스 아키텍처는 애플리케이션을 작은 독립적인 서비스들로 나누어 "
-                "각각 개발, 배포, 확장할 수 있습니다. "
-                "마이크로서비스는 확장성, 장애 격리, 배포 유연성이 뛰어나지만 "
-                "서비스 간 통신과 분산 시스템 관리의 복잡성이 증가합니다."
-            )
-        }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(url)
+
+                if response.status_code == 404:
+                    logger.warning(f"Question {question_id} not found")
+                    return None
+
+                response.raise_for_status()
+                data = response.json()
+
+                # Spring 2가 이미 snake_case로 보냄 (@JsonProperty)
+                return {
+                    "question_id": data["question_id"],
+                    "question_text": data["question_text"],
+                    "question_text_ko": data.get("question_text_ko"),
+                    "category": data["category"],
+                    "difficulty": data["difficulty"],
+                    "key_keywords": data.get("key_keywords", []),
+                    "model_answer": data.get("model_answer", "")
+                }
+        except Exception as e:
+            logger.error(f"Failed to fetch question {question_id} from Spring 2: {e}")
+            return None
