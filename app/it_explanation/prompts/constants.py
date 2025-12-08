@@ -12,7 +12,7 @@ IT 용어 설명 평가 및 챗봇 프롬프트 상수 관리
 # 평가 프롬프트
 # ============================================
 
-IT_EXPLANATION_EVALUATION_PROMPT = """You are evaluating a user's explanation of an IT concept.
+IT_EXPLANATION_EVALUATION_PROMPT = """You are evaluating a user's explanation of an IT concept for a Korean learner preparing for English technical interviews.
 
 Question: "{question_text}"
 User's Answer: "{user_answer}"
@@ -62,18 +62,18 @@ Evaluate the answer on THREE criteria (0-100 each):
 
 Provide:
 - Scores for each criterion
-- Brief feedback (2-3 sentences) highlighting strengths and improvements
-- Overall assessment
+- **Brief feedback in KOREAN (2-3 sentences)** highlighting strengths and areas for improvement
+- Use encouraging tone suitable for learners
 
 Output in strict JSON format:
 {{
   "clarity_score": <int 0-100>,
   "technical_accuracy_score": <int 0-100>,
   "terminology_score": <int 0-100>,
-  "feedback": "<string>"
+  "feedback": "<한국어로 작성된 피드백>"
 }}
 
-Do not include any other text, explanations, or commentary.
+IMPORTANT: The "feedback" field MUST be in Korean. Do not include any other text, explanations, or commentary outside the JSON.
 """
 
 # ============================================
