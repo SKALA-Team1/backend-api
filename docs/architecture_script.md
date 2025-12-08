@@ -4,7 +4,6 @@ You are a coding agent working on the SKALA backend.
 
 We are building an English learning service with:
 - Real-time role-playing conversations ("roleplaying")
-- Textbook-based Q&A sessions ("textbook-based")
 - User mypage
 - Login / signup / onboarding
 
@@ -31,16 +30,16 @@ Responsibility:
 - Expose `/auth/**` endpoints for login, signup (if needed), token refresh, logout.
 - Issue **JWT tokens** (AccessToken / RefreshToken).
 - Validate JWT on incoming requests.
-- Create **session** for roleplaying / textbook-based sessions:
+- Create **session** for roleplaying sessions:
   - Generate `session_id`
   - Store `session_id` in a shared session store (e.g., Redis) with:
     - userId
     - role
-    - scenarioType (ROLEPLAYING / TEXTBOOK)
+    - scenarioType (ROLEPLAYING)
     - startedAt
     - expiresAt
 - Route business-related requests to Spring 2.
-- Return WebSocket connection information for roleplaying/textbook sessions (FastAPI endpoint + session_id).
+- Return WebSocket connection information for roleplaying sessions (FastAPI endpoint + session_id).
 
 Important constraints:
 - Spring 1 is the **source of truth** for:
@@ -97,12 +96,11 @@ Name (example): `fastapi-model-serving`
 Responsibility:
 - Serve ML/LLM models for:
   - Real-time roleplaying dialog generation
-  - Textbook-based Q&A (pre-defined questions + model answer generation)
 - Provide HTTP and WebSocket endpoints:
   - HTTP for internal calls (e.g., from Spring 2 or 1, if needed)
-  - WebSocket endpoint for continuous conversation during roleplaying/textbook sessions
+  - WebSocket endpoint for continuous conversation during roleplaying sessions
 - Read data from PostgreSQL/Qdrant as **read-only**:
-  - Load user info, textbook content, previous conversation history, etc. to build model input.
+  - Load user info, previous conversation history, etc. to build model input.
 - Use `session_id` for authentication/authorization during WebSocket communication.
 
 Auth behavior:
@@ -130,15 +128,14 @@ Tech stack:
   - User accounts
   - Onboarding status
   - Mypage data (profile, statistics, history)
-  - Textbook metadata
-  - Roleplaying/textbook session logs (if needed)
+  - Roleplaying session logs (if needed)
 - CRUD responsibilities:
   - **WRITE**: Only Spring 2 server
   - **READ**: Spring 2 server + FastAPI server (FastAPI is read-only)
 
 ### 2-2. Qdrant
 - Vector DB for:
-  - Embeddings of textbook content, dialogs, etc.
+  - Embeddings of dialogs, etc.
 - CRUD responsibilities:
   - **WRITE/UPDATE/DELETE**: Only Spring 2 server
   - **READ**: Spring 2 server + FastAPI server (FastAPI read-only)
@@ -181,11 +178,11 @@ Flow:
 
 ---
 
-### 3-3. Start roleplaying/textbook session
+### 3-3. Start roleplaying session
 
 Flow:
 1. Client (already logged in) → Spring 1:
-   - `POST /roleplaying/sessions` or `POST /textbook-sessions`
+   - `POST /roleplaying/sessions`
    - Includes `Authorization: Bearer <AccessToken>`.
 2. Spring 1:
    - Validate JWT again (normal protected endpoint).
@@ -201,7 +198,7 @@ Flow:
 
 ---
 
-### 3-4. WebSocket communication for roleplaying/textbook
+### 3-4. WebSocket communication for roleplaying
 
 Flow:
 1. Client connects to FastAPI via WebSocket:

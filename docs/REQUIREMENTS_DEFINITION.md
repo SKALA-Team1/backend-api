@@ -114,25 +114,19 @@ SKALA는 **AI 기반 실시간 영어 회화 연습 플랫폼**입니다. FastAP
 - [ ] `POST /roleplaying/{sessionId}/nextTurn` - 다음 턴 생성
 - [ ] `GET /roleplaying/{sessionId}/messages` - 세션 메시지 조회
 
-#### 2. Textbook (교재 기반) 모듈
-- [ ] 교재 레슨 시작 API
-- [ ] 질문 흐름 처리
-- [ ] 답변 제출 및 평가
-- [ ] 레슨 종료 및 피드백
-
-#### 3. Feedback (피드백) 모듈
+#### 2. Feedback (피드백) 모듈
 - [ ] 세션 완료 후 피드백 수집
 - [ ] 점수 계산
 - [ ] 피드백 요약 생성
 
-#### 4. MyPage (사용자 페이지) 기능
+#### 3. MyPage (사용자 페이지) 기능
 - [ ] 프로필 조회/수정
 - [ ] 북마크 관리
 - [ ] 순위 시스템
 - [ ] 설정 관리
 - [ ] 데이터 복구
 
-#### 5. Integration (통합) 모듈
+#### 4. Integration (통합) 모듈
 - [ ] GitHub 연동
 - [ ] Slack 동기화
 - [ ] 메시지 매핑 및 정규화
@@ -772,8 +766,7 @@ CREATE TABLE utterances (
 - [ ] roleplayList API
 - [ ] prompt_create API
 
-### Phase 3: 교재 및 피드백 (우선순위 낮음)
-- [ ] Textbook 모듈
+### Phase 3: 피드백 및 사용자 기능 (우선순위 낮음)
 - [ ] Feedback 모듈
 - [ ] MyPage 모듈
 

@@ -91,7 +91,7 @@ class InitMessage(BaseModel):
     )
     fixedQuestions: List[str] = Field(
         ...,
-        description="고정 질문 3개 (턴 1, 5, 10에 사용)",
+        description="고정 질문 3개 (턴 1, 4, 7에 사용)",
         min_length=3,
         max_length=3,
     )
@@ -436,7 +436,7 @@ def get_fixed_question_index(ai_turn: int) -> Optional[int]:
     Examples:
         >>> get_fixed_question_index(1)
         0  # fixedQuestions[0] 사용
-        >>> get_fixed_question_index(5)
+        >>> get_fixed_question_index(4)
         1  # fixedQuestions[1] 사용
         >>> get_fixed_question_index(3)
         None  # LLM 동적 생성

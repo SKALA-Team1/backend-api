@@ -24,17 +24,18 @@ from app.roleplaying.core.session_state_manager import (
     SessionMessageHandler,
     SessionAudioHandler,
 )
-from app.roleplaying.handlers.session_handlers import (
+from app.roleplaying.handlers._common import (
     _send_error,
     _check_turn_limit,
-    _evaluate_feedback,
-    _evaluate_feedback_with_agent,
-    _send_feedback_messages,
     _generate_and_stream_ai_response,
-    _save_utterance_with_feedback,
     _handle_task_error,
     _save_question_with_keywords,
-    _handle_final_feedback_and_session_end,
+    background_tasks,
+    evaluate_feedback as _evaluate_feedback,
+    evaluate_feedback_with_agent as _evaluate_feedback_with_agent,
+    send_feedback_messages as _send_feedback_messages,
+    save_utterance_with_feedback as _save_utterance_with_feedback,
+    handle_final_feedback_and_session_end as _handle_final_feedback_and_session_end,
 )
 from app.roleplaying.handlers.session_validators import ErrorHandler
 from app.roleplaying.handlers.ws_message_models import (
@@ -220,7 +221,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
         next_ai_turn = session_state.get_ai_turn_number() if session_state else 1
         if next_ai_turn > 7:
             logger.info(f"Turn limit reached: next_ai_turn={next_ai_turn}, generating final feedback and ending session")
-            await _handle_final_feedback_and_session_end(websocket, session_id, session_state)
+            await _handle_final_feedback_and_session_end(websocket, session_id, session_state, background_tasks)
             return
 
         # Step 8: AI 응답 생성 (정상 응답일 때만)

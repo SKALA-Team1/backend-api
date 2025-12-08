@@ -6,16 +6,13 @@ TEXT/AUDIO 핸들러에서 공유하는 로직:
 - 백그라운드 태스크 에러 처리
 - 에러 메시지 전송
 - 턴 제한 확인
-- Spring 2 저장
-- 피드백 평가
 - AI 응답 생성
-- 피드백 메시지 전송
+- AI 질문 저장 (바이링궐 + 추천 키워드)
 """
 
 import asyncio
 import logging
 import re
-import time
 from typing import Optional, Tuple
 
 from fastapi import WebSocket, status
@@ -26,8 +23,7 @@ from app.roleplaying.core.session_state_manager import session_manager
 from app.roleplaying.core.session_message_handler import SessionMessageHandler
 from app.roleplaying.handlers.ws_message_models import (
     AiTextMessage, AiTextStreamingMessage, AiTypingMessage,
-    ErrorMessage, FeedbackMessage, FeedbackSectionsMessage, FeedbackStreamingMessage,
-    RetryRequiredMessage, UtteranceSavedMessage
+    ErrorMessage
 )
 
 logger = logging.getLogger(__name__)
@@ -108,12 +104,196 @@ async def _check_turn_limit(
         return False
 
 
+
+
+# ========================================
+# AI 응답 생성 및 전송 (공통)
+# ========================================
+
+
+async def _generate_and_stream_ai_response(
+    websocket: WebSocket,
+    session_id: str,
+    session_state,
+    user_text: str,
+) -> Tuple[str, bool]:
+    """
+    AI 응답 생성 및 스트리밍 전송
+
+    Returns:
+        (full_ai_response, is_fixed_question)
+    """
+    from app.roleplaying.services.business.ai_tutor_service import ai_tutor_service
+
+    full_ai_response = ""
+    is_fixed_question = False
+
+    try:
+        async for chunk, is_fixed in ai_tutor_service.generate_reply_stream(
+            session_state, user_text
+        ):
+            # 빈 chunk는 건너뛰기 (유효하지 않은 JSON 에러 방지)
+            if chunk and chunk.strip():
+                full_ai_response += chunk
+                is_fixed_question = is_fixed
+                await websocket.send_json(
+                    AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
+                )
+
+    except Exception as e:
+        logger.error(f"Error during AI streaming: {e}", exc_info=True)
+        full_ai_response = "Could you tell me more about that?"
+        is_fixed_question = False
+        await websocket.send_json(
+            AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
+        )
+
+    # 히스토리와 세션 상태 업데이트
+    await SessionMessageHandler.append_message_async(
+        session_id=session_id,
+        speaker="ai",
+        text=full_ai_response,
+        is_fixed_question=is_fixed_question,
+    )
+
+    if session_state:
+        session_state.current_question_text = full_ai_response
+        session_state.reset_retry_count()
+
+    return full_ai_response, is_fixed_question
+
+
+# ========================================
+# AI 질문 저장 (바이링궐 + 추천 키워드)
+# ========================================
+
+
+async def _save_question_with_keywords(
+    session_id: str,
+    question_en: str,
+    turn_number: int,
+    utterance_index: int,
+    user_role: str,
+    ai_role: str,
+    scenario_context: str,
+    session_state=None,
+    slack_message: Optional[str] = None,
+    is_fixed_question: bool = False,
+) -> None:
+    """
+    AI 질문을 Spring 2에 저장 (영문 + 한글 + 추천 키워드 포함)
+
+    흐름:
+    1. 추천 키워드 생성 (RECOMMENDED_KEYWORDS_PROMPT 사용)
+    2. 한글 번역 생성 (QUESTION_BILINGUAL_PROMPT 사용)
+    3. Spring 2에 저장 (save_utterance() API 호출)
+
+    Args:
+        session_id: 세션 ID
+        question_en: AI 질문 (영문)
+        turn_number: 턴 번호
+        user_role: 사용자 역할
+        ai_role: AI 역할
+        scenario_context: 시나리오 배경
+        slack_message: 원본 Slack 메시지 (선택사항)
+        is_fixed_question: 고정 질문 여부
+    """
+    try:
+        from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
+        from app.roleplaying.services.llm.llm_base import LLMServiceBase
+        from app.roleplaying.prompts.constants import QUESTION_BILINGUAL_PROMPT
+        import json
+
+        logger.info(
+            f"🟢 [질문 저장] 추천 키워드 생성 중... "
+            f"session={session_id}, turn={turn_number}"
+        )
+
+        # ====================================
+        # Step 1: 추천 키워드 생성
+        # ====================================
+        keywords = await keyword_generator.generate_recommended_keywords(
+            question=question_en,
+            user_role=user_role,
+            ai_role=ai_role,
+            scenario_context=scenario_context,
+            slack_message=slack_message,
+            conversation_summary=""
+        )
+
+        logger.info(f"✅ [질문 저장] 키워드 생성 완료: {keywords}")
+
+        # ====================================
+        # Step 2: 한글 번역 생성
+        # ====================================
+        logger.info(f"🟢 [질문 저장] 한글 번역 생성 중...")
+
+        llm = LLMServiceBase(
+            api_key=settings.openai_api_key,
+            model_name=settings.OPENAI_MODEL_FEEDBACK,
+            temperature=0.3
+        ).llm
+
+        translation_prompt = QUESTION_BILINGUAL_PROMPT.format(
+            english_question=question_en
+        )
+        translation_response = await llm.invoke(translation_prompt)
+
+        # JSON에서 korean_question 추출
+        question_ko = question_en  # 기본값: 번역 실패 시 영문 사용
+        try:
+            json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', translation_response, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+                question_ko = parsed.get("korean_question", question_en)
+        except Exception as e:
+            logger.warning(f"Failed to parse Korean translation: {e}")
+
+        logger.info(f"✅ [질문 저장] 한글 번역 완료")
+
+        # ====================================
+        # Step 3: Spring 2에 저장 (ScenarioMessage에 통합)
+        # ====================================
+        logger.info(
+            f"🟢 [질문 저장] Spring 2에 저장 중... "
+            f"session={session_id}, utterance_index={utterance_index}"
+        )
+
+        # Option 3: AI 질문을 ScenarioMessage에 직접 저장
+        # save_utterance()에 question_ko와 recommended_keywords를 포함시킴
+        await spring2_client.save_utterance(
+            session_id=session_id,
+            stt_text=question_en,
+            utterance_index=utterance_index,
+            speaker="ai",
+            text=question_en,
+            audio_data=None,
+            played_turns=session_state.ai_turn_count if session_state else None,
+            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
+            status="IN_PROGRESS",
+            question_ko=question_ko,  # 한글 질문
+            recommended_keywords=keywords,  # 추천 키워드
+        )
+
+        logger.info(
+            f"✅ [질문 저장] 완료: session={session_id}, utterance_index={utterance_index}, "
+            f"keywords={len(keywords)}"
+        )
+
+    except Exception as e:
+        logger.error(
+            f"❌ [질문 저장] 실패: session={session_id}, turn={turn_number}, error={e}",
+            exc_info=True
+        )
+        raise  # ✅ 에러를 호출자에게 전파
+
+
 # ========================================
 # 피드백 평가 (공통)
 # ========================================
 
 
-async def _evaluate_feedback(
+async def evaluate_feedback(
     feedback_orchestrator,
     websocket: WebSocket,
     session_id: str,
@@ -128,6 +308,8 @@ async def _evaluate_feedback(
     Returns:
         feedback_result dict 또는 None(평가 실패 시)
     """
+    import time
+
     feedback_result = None
 
     try:
@@ -194,68 +376,11 @@ async def _evaluate_feedback(
 
 
 # ========================================
-# AI 응답 생성 및 전송 (공통)
-# ========================================
-
-
-async def _generate_and_stream_ai_response(
-    websocket: WebSocket,
-    session_id: str,
-    session_state,
-    user_text: str,
-) -> Tuple[str, bool]:
-    """
-    AI 응답 생성 및 스트리밍 전송
-
-    Returns:
-        (full_ai_response, is_fixed_question)
-    """
-    from app.roleplaying.services.business.ai_tutor_service import ai_tutor_service
-
-    full_ai_response = ""
-    is_fixed_question = False
-
-    try:
-        async for chunk, is_fixed in ai_tutor_service.generate_reply_stream(
-            session_state, user_text
-        ):
-            # 빈 chunk는 건너뛰기 (유효하지 않은 JSON 에러 방지)
-            if chunk and chunk.strip():
-                full_ai_response += chunk
-                is_fixed_question = is_fixed
-                await websocket.send_json(
-                    AiTextStreamingMessage(chunk=chunk, is_fixed_question=is_fixed).model_dump()
-                )
-
-    except Exception as e:
-        logger.error(f"Error during AI streaming: {e}", exc_info=True)
-        full_ai_response = "Could you tell me more about that?"
-        is_fixed_question = False
-        await websocket.send_json(
-            AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
-        )
-
-    # 히스토리와 세션 상태 업데이트
-    await SessionMessageHandler.append_message_async(
-        session_id=session_id,
-        speaker="ai",
-        text=full_ai_response,
-        is_fixed_question=is_fixed_question,
-    )
-
-    if session_state:
-        session_state.current_question_text = full_ai_response
-        session_state.reset_retry_count()
-
-    return full_ai_response, is_fixed_question
-
-
-# ========================================
 # 피드백 메시지 전송 (공통)
 # ========================================
 
 
-async def _send_feedback_messages(
+async def send_feedback_messages(
     websocket: WebSocket,
     session_id: str,
     session_state,
@@ -269,6 +394,11 @@ async def _send_feedback_messages(
     Returns:
         True if retry needed (early return), False otherwise
     """
+    from app.roleplaying.handlers.ws_message_models import (
+        FeedbackMessage, FeedbackSectionsMessage,
+        FeedbackStreamingMessage, RetryRequiredMessage
+    )
+
     if not feedback_result:
         logger.info(f"Skipping feedback processing: feedback_result is None")
         return False
@@ -402,7 +532,7 @@ async def _send_feedback_messages(
 # ========================================
 
 
-async def _save_utterance_with_feedback(
+async def save_utterance_with_feedback(
     session_id: str,
     speaker: str,
     text: str,
@@ -490,7 +620,7 @@ async def _save_utterance_with_feedback(
 # ========================================
 
 
-async def _evaluate_feedback_with_agent(
+async def evaluate_feedback_with_agent(
     agent,
     session_id: str,
     user_text: str,
@@ -566,139 +696,15 @@ async def _evaluate_feedback_with_agent(
 
 
 # ========================================
-# AI 질문 저장 (바이링궐 + 추천 키워드)
-# ========================================
-
-
-async def _save_question_with_keywords(
-    session_id: str,
-    question_en: str,
-    turn_number: int,
-    utterance_index: int,
-    user_role: str,
-    ai_role: str,
-    scenario_context: str,
-    session_state=None,
-    slack_message: Optional[str] = None,
-    is_fixed_question: bool = False,
-) -> None:
-    """
-    AI 질문을 Spring 2에 저장 (영문 + 한글 + 추천 키워드 포함)
-
-    흐름:
-    1. 추천 키워드 생성 (RECOMMENDED_KEYWORDS_PROMPT 사용)
-    2. 한글 번역 생성 (QUESTION_BILINGUAL_PROMPT 사용)
-    3. Spring 2에 저장 (save_utterance() API 호출)
-
-    Args:
-        session_id: 세션 ID
-        question_en: AI 질문 (영문)
-        turn_number: 턴 번호
-        user_role: 사용자 역할
-        ai_role: AI 역할
-        scenario_context: 시나리오 배경
-        slack_message: 원본 Slack 메시지 (선택사항)
-        is_fixed_question: 고정 질문 여부
-    """
-    try:
-        from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
-        from app.roleplaying.services.llm.llm_base import LLMServiceBase
-        from app.roleplaying.prompts.constants import QUESTION_BILINGUAL_PROMPT
-        import json
-
-        logger.info(
-            f"🟢 [질문 저장] 추천 키워드 생성 중... "
-            f"session={session_id}, turn={turn_number}"
-        )
-
-        # ====================================
-        # Step 1: 추천 키워드 생성
-        # ====================================
-        keywords = await keyword_generator.generate_recommended_keywords(
-            question=question_en,
-            user_role=user_role,
-            ai_role=ai_role,
-            scenario_context=scenario_context,
-            slack_message=slack_message,
-            conversation_summary=""
-        )
-
-        logger.info(f"✅ [질문 저장] 키워드 생성 완료: {keywords}")
-
-        # ====================================
-        # Step 2: 한글 번역 생성
-        # ====================================
-        logger.info(f"🟢 [질문 저장] 한글 번역 생성 중...")
-
-        llm = LLMServiceBase(
-            api_key=settings.openai_api_key,
-            model_name=settings.OPENAI_MODEL_FEEDBACK,
-            temperature=0.3
-        ).llm
-
-        translation_prompt = QUESTION_BILINGUAL_PROMPT.format(
-            english_question=question_en
-        )
-        translation_response = await llm.invoke(translation_prompt)
-
-        # JSON에서 korean_question 추출
-        question_ko = question_en  # 기본값: 번역 실패 시 영문 사용
-        try:
-            json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', translation_response, re.DOTALL)
-            if json_match:
-                parsed = json.loads(json_match.group(0))
-                question_ko = parsed.get("korean_question", question_en)
-        except Exception as e:
-            logger.warning(f"Failed to parse Korean translation: {e}")
-
-        logger.info(f"✅ [질문 저장] 한글 번역 완료")
-
-        # ====================================
-        # Step 3: Spring 2에 저장 (ScenarioMessage에 통합)
-        # ====================================
-        logger.info(
-            f"🟢 [질문 저장] Spring 2에 저장 중... "
-            f"session={session_id}, utterance_index={utterance_index}"
-        )
-
-        # Option 3: AI 질문을 ScenarioMessage에 직접 저장
-        # save_utterance()에 question_ko와 recommended_keywords를 포함시킴
-        await spring2_client.save_utterance(
-            session_id=session_id,
-            stt_text=question_en,
-            utterance_index=utterance_index,
-            speaker="ai",
-            text=question_en,
-            audio_data=None,
-            played_turns=session_state.ai_turn_count if session_state else None,
-            completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
-            status="IN_PROGRESS",
-            question_ko=question_ko,  # 한글 질문
-            recommended_keywords=keywords,  # 추천 키워드
-        )
-
-        logger.info(
-            f"✅ [질문 저장] 완료: session={session_id}, utterance_index={utterance_index}, "
-            f"keywords={len(keywords)}"
-        )
-
-    except Exception as e:
-        logger.error(
-            f"❌ [질문 저장] 실패: session={session_id}, turn={turn_number}, error={e}",
-            exc_info=True
-        )
-        raise  # ✅ 에러를 호출자에게 전파
-
-
-# ========================================
 # 종합 피드백 및 세션 종료
 # ========================================
 
 
-async def _handle_final_feedback_and_session_end(
+async def handle_final_feedback_and_session_end(
     websocket: WebSocket,
     session_id: str,
     session_state,
+    background_tasks_set: set,
 ) -> None:
     """
     세션 종료 및 백그라운드 피드백 생성
@@ -707,6 +713,7 @@ async def _handle_final_feedback_and_session_end(
         websocket: WebSocket 연결
         session_id: 세션 ID
         session_state: 세션 상태
+        background_tasks_set: 백그라운드 태스크 추적용 set
 
     흐름:
         1. SESSION_ENDED 메시지 전송 (WebSocket)
@@ -716,7 +723,6 @@ async def _handle_final_feedback_and_session_end(
         5. GET /api/feedback/{session_id} 호출 (HTTP) - 피드백 조회
     """
     from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
-    import asyncio
 
     # Step 1: SESSION_ENDED 메시지 전송
     await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
@@ -727,51 +733,22 @@ async def _handle_final_feedback_and_session_end(
     logger.info(f"🔌 WebSocket closed (1000): session={session_id}")
 
     # Step 3: 백그라운드에서 피드백 생성 및 저장
-    async def _generate_and_save_feedback_background():
-        """백그라운드 태스크: 피드백 생성 및 DB 저장"""
-        from app.feedback.services.feedback_service import get_feedback_service
+    from app.feedback.services.feedback_service import generate_and_save_final_feedback
 
-        try:
-            feedback_service = get_feedback_service()
-            scenario_id = session_state.subject_id if session_state else 0
-
-            logger.info(f"🔄 [Background] Generating final feedback: session={session_id}, scenario_id={scenario_id}")
-
-            # 종합 피드백 생성
-            session_feedback = await feedback_service.get_session_feedback(
-                session_id=session_id,
-                scenario_id=scenario_id
-            )
-
-            logger.info(
-                f"📊 [Background] Final feedback generated: session={session_id}, "
-                f"avg_pronunciation={session_feedback.avg_pronunciation}, "
-                f"avg_accuracy={session_feedback.avg_accuracy}, "
-                f"avg_fluency={session_feedback.avg_fluency}"
-            )
-
-            # DB에 저장 (Spring 2 API)
-            await spring2_client.save_final_feedback(
-                session_id=session_id,
-                final_feedback_long=session_feedback.final_feedback_long,
-                final_feedback_short=session_feedback.final_feedback_short,
-                avg_pronunciation_score=session_feedback.avg_pronunciation,
-                avg_accuracy_score=session_feedback.avg_accuracy,
-                avg_fluency_score=session_feedback.avg_fluency,
-            )
-            logger.info(f"✅ [Background] Final feedback saved to DB: session={session_id}")
-
-        except Exception as e:
-            logger.error(
-                f"❌ [Background] Failed to generate/save final feedback: session={session_id}, error={e}",
-                exc_info=True
-            )
+    scenario_id = session_state.subject_id if session_state else 0
 
     # 백그라운드 태스크로 실행 (WebSocket 종료 후에도 계속 실행됨)
-    task = asyncio.create_task(_generate_and_save_feedback_background())
+    task = asyncio.create_task(
+        generate_and_save_final_feedback(
+            session_id=session_id,
+            scenario_id=scenario_id
+        )
+    )
 
     # ✅ Task를 set에 추가하여 가비지 컬렉션 방지
-    background_tasks.add(task)
-    task.add_done_callback(lambda t: background_tasks.discard(t))
+    background_tasks_set.add(task)
+    task.add_done_callback(lambda t: background_tasks_set.discard(t))
 
-    logger.info(f"🚀 [Background] Task created and tracked: session={session_id}, active_tasks={len(background_tasks)}")
+    logger.info(f"🚀 [Background] Task created and tracked: session={session_id}, active_tasks={len(background_tasks_set)}")
+
+

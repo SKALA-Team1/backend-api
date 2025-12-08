@@ -12,17 +12,26 @@ from typing import Optional
 from pydantic import BaseModel
 
 from app.config import settings
+from app.feedback.prompts.constants import FINAL_FEEDBACK_SYSTEM_PROMPT
 from app.integrations.clients.spring2_client import spring2_client
 from app.roleplaying.services.llm.llm_base import LLMServiceBase
 
 logger = logging.getLogger(__name__)
 
 
+# Fallback 메시지 상수
+DEFAULT_FEEDBACK_LONG = "롤플레잉 세션을 완료하셨습니다. 영어 커뮤니케이션 실력 향상을 위해 계속 연습하세요!"
+DEFAULT_FEEDBACK_SHORT = "수고하셨습니다!"
+
+EMPTY_FEEDBACK_LONG = "세션이 완료되었습니다. 피드백 데이터가 충분하지 않습니다."
+EMPTY_FEEDBACK_SHORT = "세션 완료."
+
+
 class SessionFeedback(BaseModel):
     """세션 종합 피드백"""
-    avg_pronunciation: float
-    avg_accuracy: float  # grammar
-    avg_fluency: float  # relevance
+    total_pronunciation: float
+    total_grammar: float
+    total_diversity: float
     final_feedback_long: str
     final_feedback_short: str
 
@@ -66,38 +75,38 @@ class FeedbackService:
 
             # Step 2: 평균 점수 계산
             pronunciation_scores = []
-            accuracy_scores = []  # grammar
-            fluency_scores = []  # relevance
+            grammar_scores = []
+            diversity_scores = []
 
             for msg in messages:
                 if msg.get("pronunciation_score") is not None:
                     pronunciation_scores.append(msg["pronunciation_score"])
                 if msg.get("grammar_score") is not None:
-                    accuracy_scores.append(msg["grammar_score"])
+                    grammar_scores.append(msg["grammar_score"])
                 if msg.get("relevance_score") is not None:
-                    fluency_scores.append(msg["relevance_score"])
+                    diversity_scores.append(msg["relevance_score"])
 
-            avg_pronunciation = sum(pronunciation_scores) / len(pronunciation_scores) if pronunciation_scores else 0.0
-            avg_accuracy = sum(accuracy_scores) / len(accuracy_scores) if accuracy_scores else 0.0
-            avg_fluency = sum(fluency_scores) / len(fluency_scores) if fluency_scores else 0.0
+            total_pronunciation = sum(pronunciation_scores) / len(pronunciation_scores) if pronunciation_scores else 0.0
+            total_grammar = sum(grammar_scores) / len(grammar_scores) if grammar_scores else 0.0
+            total_diversity = sum(diversity_scores) / len(diversity_scores) if diversity_scores else 0.0
 
             logger.info(
-                f"📊 Calculated averages: pronunciation={avg_pronunciation:.1f}, "
-                f"accuracy={avg_accuracy:.1f}, fluency={avg_fluency:.1f}"
+                f"📊 Calculated averages: pronunciation={total_pronunciation:.1f}, "
+                f"grammar={total_grammar:.1f}, diversity={total_diversity:.1f}"
             )
 
             # Step 3: 종합 피드백 텍스트 생성
             feedback_long, feedback_short = await self._generate_feedback_text(
                 messages=messages,
-                avg_pronunciation=avg_pronunciation,
-                avg_accuracy=avg_accuracy,
-                avg_fluency=avg_fluency
+                total_pronunciation=total_pronunciation,
+                total_grammar=total_grammar,
+                total_diversity=total_diversity
             )
 
             return SessionFeedback(
-                avg_pronunciation=avg_pronunciation,
-                avg_accuracy=avg_accuracy,
-                avg_fluency=avg_fluency,
+                total_pronunciation=total_pronunciation,
+                total_grammar=total_grammar,
+                total_diversity=total_diversity,
                 final_feedback_long=feedback_long,
                 final_feedback_short=feedback_short
             )
@@ -109,9 +118,9 @@ class FeedbackService:
     async def _generate_feedback_text(
         self,
         messages: list,
-        avg_pronunciation: float,
-        avg_accuracy: float,
-        avg_fluency: float
+        total_pronunciation: float,
+        total_grammar: float,
+        total_diversity: float
     ) -> tuple[str, str]:
         """
         종합 피드백 텍스트 생성 (GPT-4)
@@ -135,7 +144,7 @@ class FeedbackService:
             # 개별 피드백 데이터 (Turn Feedback)
             turn_feedback_list = []
             for msg in messages:
-                if msg.get("grammar_score") is not None or msg.get("relevance_score") is not None:
+                if msg.get("pronunciation_score") is not None or msg.get("grammar_score") is not None or msg.get("relevance_score") is not None:
                     feedback_sections = msg.get("feedback_sections", [])
                     if feedback_sections:
                         for section in feedback_sections:
@@ -147,54 +156,11 @@ class FeedbackService:
 
             logger.info(f"📝 대화 로그와 개별 피드백을 기반으로 종합 피드백 생성")
 
-            prompt = f"""# 1. 역할 정의 (Persona)
-
-당신은 실리콘밸리 기업에서 10년 이상 근무한 'IT 커뮤니케이션 멘토'입니다.
-딱딱한 선생님이 아니라, 사용자의 성장을 진심으로 응원하는 **친절하고 스마트한 '사수(Senior)'의 톤**으로 말해야 합니다.
-
-# 2. 입력 데이터 (Input)
-
-1. 대화 로그(Log): 사용자와 AI의 전체 회의 내용
-{conversation_text}
-
-2. 개별 피드백(Turn Feedback): 문법 및 표현 교정 내역
-{turn_feedback_text}
-
-# 3. 작업 목표 (Objective)
-
-사용자의 회의 롤플레잉 기록을 분석하여, **1:1 채팅을 보내듯** 자연스럽게 피드백을 제공하세요.
-
-- 절대 번호(1, 2, 3...)를 매겨서 보고서처럼 쓰지 마세요.
-- 개별 문법 오류를 나열하지 말고, **"개발자로서 더 프로페셔널해 보이는 법"** 위주로 조언하세요.
-
-# 4. 출력 흐름 및 작성 지침 (Output Flow)
-
-다음 흐름에 따라 **자연스러운 구어체(해요체)**로 연결해서 작성하세요.
-
-**긴 피드백 (final_feedback_long):**
-1. **👋 오프닝 (격려):** "오늘 회의 고생하셨어요!" 같은 인사로 시작하며, 전반적인 수행을 칭찬하세요.
-2. **👍 좋았던 점 (Strengths):** 구체적으로 어떤 기술 용어 사용이나 태도가 좋았는지 콕 집어 언급하세요.
-3. **🚀 아쉬운 점 & 팁 (Coaching):** 문법 지적보다는 비즈니스 리스크를 언급하세요.
-    - *나쁜 예:* "주어를 빼먹으셨네요."
-    - *좋은 예:* "주어 없이 말하면 책임 소재가 모호해져서 나중에 곤란할 수 있어요. `We`나 `I`를 명확히 써주세요!"
-4. **✨ 이 문장만은 꼭! (One-Point Lesson):** 아까 대화 중 사용자가 자주 틀리는 표현을 하나 골라, "이건 이렇게 말하는 게 훨씬 자연스러워요"라며 **원어민급 표현을 영어로 제시하고, 바로 뒤에 괄호를 쳐서 한국어 해석**을 함께 알려주세요.
-   - 예: "We need to deploy the new version." (새 버전을 배포해야 합니다.)
-
-**짧은 피드백 (final_feedback_short):**
-- 1-2문장으로 주요 성취를 강조하는 격려 메시지. "~했어요" 톤으로.
-
-# 5. 제약 사항
-
-- **말투:** "~했습니다" 보다는 "~했어요", "~인 것 같아요" 처럼 부드러운 대화체 사용.
-- **길이:** 긴 피드백은 공백 포함 600자 내외, 간결하게
-- **언어:** 한글로 작성하되, IT 용어(Deploy, Root Cause 등)는 영어 원문 유지.
-
-**JSON 형식으로 응답:**
-{{
-  "final_feedback_long": "해요체로 작성된 자연스러운 피드백 (600자 내외)...",
-  "final_feedback_short": "격려 메시지 (1-2문장)..."
-}}
-"""
+            # Generate prompt from template
+            prompt = FINAL_FEEDBACK_SYSTEM_PROMPT.format(
+                conversation_text=conversation_text,
+                turn_feedback_text=turn_feedback_text
+            )
 
             logger.info("🤖 Generating final feedback text with GPT-4...")
             response = await self.llm.invoke(prompt)
@@ -205,30 +171,30 @@ class FeedbackService:
             json_match = re.search(r'\{[^{}]*"final_feedback_(long|short)"[^{}]*\}', response, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group(0))
-                feedback_long = parsed.get("final_feedback_long", "롤플레잉 세션을 완료하셨습니다!")
-                feedback_short = parsed.get("final_feedback_short", "수고하셨습니다!")
+                feedback_long = parsed.get("final_feedback_long", DEFAULT_FEEDBACK_LONG)
+                feedback_short = parsed.get("final_feedback_short", DEFAULT_FEEDBACK_SHORT)
             else:
-                feedback_long = "롤플레잉 세션을 완료하셨습니다. 영어 커뮤니케이션 실력 향상을 위해 계속 연습하세요!"
-                feedback_short = "수고하셨습니다!"
+                feedback_long = DEFAULT_FEEDBACK_LONG
+                feedback_short = DEFAULT_FEEDBACK_SHORT
 
             logger.info("✅ Final feedback text generated successfully")
             return feedback_long, feedback_short
 
-        except Exception as e:
+        except Exception as e:  
             logger.error(f"Failed to generate feedback text: {e}", exc_info=True)
             return (
-                "롤플레잉 세션을 완료하셨습니다. 계속 연습하세요!",
-                "수고하셨습니다!"
+                DEFAULT_FEEDBACK_LONG,
+                DEFAULT_FEEDBACK_SHORT
             )
 
     def _create_empty_feedback(self) -> SessionFeedback:
-        """빈 피드백 반환 (에러 시)"""
+        """빈 피드백 반환 (데이터 없을 때)"""
         return SessionFeedback(
-            avg_pronunciation=0.0,
-            avg_accuracy=0.0,
-            avg_fluency=0.0,
-            final_feedback_long="세션이 완료되었습니다. 피드백 데이터가 없습니다.",
-            final_feedback_short="세션 완료."
+            total_pronunciation=0.0,
+            total_grammar=0.0,
+            total_diversity=0.0,
+            final_feedback_long=EMPTY_FEEDBACK_LONG,
+            final_feedback_short=EMPTY_FEEDBACK_SHORT
         )
 
 
@@ -242,3 +208,56 @@ def get_feedback_service() -> FeedbackService:
     if _feedback_service is None:
         _feedback_service = FeedbackService()
     return _feedback_service
+
+
+async def generate_and_save_final_feedback(
+    session_id: str,
+    scenario_id: int
+) -> None:
+    """
+    종합 피드백 생성 및 Spring 2 API에 저장
+
+    이 함수는 세션 종료 후 백그라운드에서 실행됩니다.
+
+    Args:
+        session_id: 세션 ID
+        scenario_id: 시나리오 ID
+
+    흐름:
+        1. 종합 피드백 생성 (평균 점수 + 텍스트)
+        2. Spring 2 API에 저장
+    """
+    try:
+        feedback_service = get_feedback_service()
+
+        logger.info(f"🔄 [Background] Generating final feedback: session={session_id}, scenario_id={scenario_id}")
+
+        # 종합 피드백 생성
+        session_feedback = await feedback_service.get_session_feedback(
+            session_id=session_id,
+            scenario_id=scenario_id
+        )
+
+        logger.info(
+            f"📊 [Background] Final feedback generated: session={session_id}, "
+            f"total_pronunciation={session_feedback.total_pronunciation}, "
+            f"total_grammar={session_feedback.total_grammar}, "
+            f"total_diversity={session_feedback.total_diversity}"
+        )
+
+        # DB에 저장 (Spring 2 API)
+        await spring2_client.save_final_feedback(
+            session_id=session_id,
+            final_feedback_long=session_feedback.final_feedback_long,
+            final_feedback_short=session_feedback.final_feedback_short,
+            total_pronunciation=session_feedback.total_pronunciation,
+            total_grammar=session_feedback.total_grammar,
+            total_diversity=session_feedback.total_diversity,
+        )
+        logger.info(f"✅ [Background] Final feedback saved to DB: session={session_id}")
+
+    except Exception as e:
+        logger.error(
+            f"❌ [Background] Failed to generate/save final feedback: session={session_id}, error={e}",
+            exc_info=True
+        )

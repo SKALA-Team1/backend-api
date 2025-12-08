@@ -9,7 +9,6 @@ Your job is to generate code, directory structures, and API definitions that str
 We are building an English learning service with:
 
 - Real-time roleplaying English conversation ("roleplaying")
-- Textbook-based Q&A sessions ("textbook-based")
 - Mypage
 - Login / signup / onboarding
 
@@ -40,7 +39,7 @@ You MUST keep this architecture consistent whenever you generate any code or API
   - Login, logout, token issuing (JWT Access/Refresh)
   - JWT validation on incoming requests
   - Authorization decisions (based on roles, user status)
-  - Session creation for roleplaying/textbook:
+  - Session creation for roleplaying:
     - Generate `session_id`
     - Store `session_id` in Redis:
       - `session_id -> { userId, role, scenarioType, startedAt, expiresAt }`
@@ -83,7 +82,6 @@ You MUST keep this architecture consistent whenever you generate any code or API
 -------------------------
 - Handles real-time model serving for:
   - Roleplaying dialog generation
-  - Textbook-based Q&A
 - Responsibilities:
   - WebSocket server for real-time communication with the client.
   - Generate AI tutor questions/responses (LLM calls).
@@ -123,7 +121,6 @@ You MUST keep this architecture consistent whenever you generate any code or API
 
 - Qdrant
   - Stores:
-    - textbook embeddings
     - dialog-related embeddings
   - Spring 2 = write/update/delete
   - FastAPI = READ-ONLY
@@ -280,7 +277,7 @@ You may assume schemas like:
 - `session` table:
   - id (session_id)
   - user_id
-  - type (ROLEPLAYING / TEXTBOOK)
+  - type (ROLEPLAYING)
   - started_at, ended_at, ...
 
 - `utterance` table:

@@ -15,10 +15,6 @@ app/roleplaying/services/generators
 app/feedback
 app/feedback/services
 app/feedback/builder
-app/textbook
-app/textbook/services
-app/textbook/rag
-app/textbook/utils
 app/user
 app/user/services
 app/mypage
@@ -34,7 +30,6 @@ tests
 tests/roleplaying
 tests/feedback
 tests/user
-tests/textbook
 tests/integrations
 scripts
 EOF
@@ -53,10 +48,6 @@ app/roleplaying/services/generators
 app/feedback
 app/feedback/services
 app/feedback/builder
-app/textbook
-app/textbook/services
-app/textbook/rag
-app/textbook/utils
 app/user
 app/user/services
 app/mypage
@@ -72,7 +63,6 @@ tests
 tests/roleplaying
 tests/feedback
 tests/user
-tests/textbook
 tests/integrations
 EOF
 
@@ -101,7 +91,6 @@ EOF
 done <<'EOF'
 app/roleplaying/router.py
 app/feedback/router.py
-app/textbook/router.py
 app/user/router.py
 app/mypage/router.py
 app/integrations/router.py
@@ -153,24 +142,6 @@ app/feedback/builder/response_parser.py
 app/feedback/builder/score_calculator.py
 app/feedback/builder/summary_generator.py
 app/feedback/builder/feedback_assembler.py
-app/textbook/ws_audio.py
-app/textbook/models.py
-app/textbook/schemas.py
-app/textbook/repository.py
-app/textbook/services/start_lesson_service.py
-app/textbook/services/question_flow_service.py
-app/textbook/services/submit_answer_service.py
-app/textbook/services/finish_lesson_service.py
-app/textbook/services/review_service.py
-app/textbook/rag/ingest_pipeline.py
-app/textbook/rag/chunker.py
-app/textbook/rag/embedder.py
-app/textbook/rag/index_store.py
-app/textbook/rag/retriever.py
-app/textbook/rag/question_builder.py
-app/textbook/rag/ranker.py
-app/textbook/utils/evaluator.py
-app/textbook/utils/text_parser.py
 app/user/models.py
 app/user/schemas.py
 app/user/repository.py
@@ -208,7 +179,6 @@ app/jobs/tasks.py
 tests/roleplaying/__init__.py
 tests/feedback/__init__.py
 tests/user/__init__.py
-tests/textbook/__init__.py
 tests/integrations/__init__.py
 EOF
 

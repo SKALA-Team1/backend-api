@@ -461,9 +461,9 @@ class Spring2Client:
         session_id: str,
         final_feedback_long: str,
         final_feedback_short: str,
-        avg_pronunciation_score: float,
-        avg_accuracy_score: float,
-        avg_fluency_score: float,
+        total_pronunciation: float,
+        total_grammar: float,
+        total_diversity: float,
     ) -> dict:
         """
         종합 피드백 저장 (scenario_feedback 테이블)
@@ -476,9 +476,9 @@ class Spring2Client:
             session_id: 세션 ID
             final_feedback_long: 긴 피드백 텍스트 (7문장, 멘토 스타일)
             final_feedback_short: 짧은 피드백 텍스트 (1-2문장)
-            avg_pronunciation_score: 평균 발음 점수
-            avg_accuracy_score: 평균 정확도 점수 (문법)
-            avg_fluency_score: 평균 유창성 점수 (적합성)
+            total_pronunciation: 평균 발음 점수
+            total_grammar: 평균 문법 점수
+            total_diversity: 평균 다양성 점수 (맥락 적합성)
 
         Returns:
             API 응답 ({"success": true, "feedback_id": "...", ...})
@@ -492,9 +492,9 @@ class Spring2Client:
         payload = {
             "finalFeedbackLong": final_feedback_long,
             "finalFeedbackShort": final_feedback_short,
-            "avgPronunciationScore": avg_pronunciation_score,
-            "avgAccuracyScore": avg_accuracy_score,
-            "avgFluencyScore": avg_fluency_score,
+            "totalPronunciation": total_pronunciation,
+            "totalGrammar": total_grammar,
+            "totalDiversity": total_diversity,
         }
 
         try:

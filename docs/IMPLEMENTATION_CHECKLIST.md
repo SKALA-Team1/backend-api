@@ -195,23 +195,16 @@
 
 ---
 
-## 🎯 Phase 3: 교재 및 피드백 모듈
+## 🎯 Phase 3: 피드백 모듈
 
-### 3.1 Textbook 모듈
-
-- [ ] **`POST /textbook/lessons/{lessonId}/start`**
-- [ ] **`POST /textbook/lessons/{sessionId}/submit-answer`**
-- [ ] **`POST /textbook/lessons/{sessionId}/finish`**
-- [ ] **`GET /textbook/lessons/{sessionId}/review`**
-
-### 3.2 Feedback 모듈
+### 3.1 Feedback 모듈
 
 - [ ] **피드백 수집**
   - [ ] 점수 계산
   - [ ] 요약 생성
   - [ ] 개선 제안
 
-### 3.3 MyPage 모듈
+### 3.2 MyPage 모듈
 
 - [ ] **프로필 관리**
 - [ ] **북마크 관리**
