@@ -110,7 +110,7 @@ class PromptBasedScenarioService:
         # Step 5: 응답 구성
         result = ScenarioInfoDto(
             aiRole=ai_role,
-            topicType="direct",
+            topicType="DIRECT",
             title=title,
             fixedQuestions=fixed_questions,
             creationType="prompt"
