@@ -311,6 +311,9 @@ class InternalSessionSetupRequest(BaseModel):
     # 사용자가 선택한 시나리오의 DB ID (양수만 유효)
     # Spring 1에서 미리 조회하여 전달
     scenarioId: int = Field(..., description="시나리오 ID", gt=0)
+    # 상호작용 모드 (예: "default", "handsfree")
+    # Spring 1에서 전달
+    interactionMode: str | None = Field("default", description="상호작용 모드 (default, handsfree)")
 
 
 class InternalSessionSetupResponse(BaseModel):

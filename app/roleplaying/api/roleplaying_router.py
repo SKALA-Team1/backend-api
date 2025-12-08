@@ -327,7 +327,8 @@ async def internal_setup_session(
             session_id=request.sessionId,  # Spring 1에서 생성한 고유 ID
             user_id=request.userId,         # 사용자 DB PK
             scenario_id=request.scenarioId,  # 선택된 시나리오 DB PK
-            db=db                          # 시나리오 정보 조회용
+            db=db,                          # 시나리오 정보 조회용
+            interaction_mode=request.interactionMode  # Pass interaction mode
         )
 
         # WebSocket 연결 URL 생성

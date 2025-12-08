@@ -61,7 +61,8 @@ class SessionManager:
         my_role: str,
         ai_role: str,
         fixed_questions: List[str],
-        expires_at: Optional[datetime] = None
+        expires_at: Optional[datetime] = None,
+        interaction_mode: str = "default"  # Add interaction mode
     ) -> SessionState:
         """
         새 세션 생성
@@ -74,6 +75,7 @@ class SessionManager:
             ai_role: AI 역할
             fixed_questions: 고정 질문 3개
             expires_at: 세션 만료 시각 (옵션)
+            interaction_mode: 상호작용 모드 (default, handsfree)
 
         Returns:
             생성된 SessionState
@@ -94,7 +96,8 @@ class SessionManager:
             my_role=my_role,
             ai_role=ai_role,
             fixed_questions=fixed_questions,
-            expires_at=expires_at
+            expires_at=expires_at,
+            interaction_mode=interaction_mode  # Pass interaction mode
         )
 
         self._sessions[session_id] = session

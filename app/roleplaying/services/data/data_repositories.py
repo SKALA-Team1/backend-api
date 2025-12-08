@@ -70,7 +70,8 @@ class RedisSessionRepository(SessionRepository):
         self,
         session_id: str,
         user_id: int,
-        expires_at: Optional[datetime] = None
+        expires_at: Optional[datetime] = None,
+        interaction_mode: str = "default"  # Add interaction mode
     ) -> None:
         """
         세션 저장
@@ -79,6 +80,7 @@ class RedisSessionRepository(SessionRepository):
             session_id: 세션 ID
             user_id: 사용자 ID
             expires_at: 만료 시각 (기본값: 현재 + 2시간)
+            interaction_mode: 상호작용 모드 (default, handsfree)
         """
         redis_client = await self._get_redis_client()
 
@@ -89,13 +91,14 @@ class RedisSessionRepository(SessionRepository):
         # Redis 키: session:{session_id}
         redis_key = f"session:{session_id}"
 
-        # 세션 데이터 (Spring 1과 동일한 형식)
+        # 세션 데이터
         session_data = {
             "userId": user_id,
             "role": "user",
             "scenarioType": "ROLEPLAYING",
             "startedAt": datetime.utcnow().isoformat() + "Z",
-            "expiresAt": expires_at.isoformat() + "Z"
+            "expiresAt": expires_at.isoformat() + "Z",
+            "interactionMode": interaction_mode  # Store interaction mode
         }
 
         # TTL 계산

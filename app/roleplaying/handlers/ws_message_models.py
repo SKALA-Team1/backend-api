@@ -90,6 +90,9 @@ class InitMessage(BaseModel):
         min_length=3,
         max_length=3,
     )
+    interactionMode: Literal["default", "handsfree"] = Field(
+        "default", description="상호작용 모드 (default, handsfree)"
+    )
 
     @field_validator("fixedQuestions")
     @classmethod
