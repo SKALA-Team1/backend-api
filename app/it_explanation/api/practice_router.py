@@ -19,6 +19,7 @@ from app.it_explanation.models.schemas import (
 )
 from app.it_explanation.services.evaluation_service import EvaluationService
 from app.it_explanation.services.question_service import QuestionService
+from app.it_explanation.services.session_service import SessionService
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ router = APIRouter(prefix="/it-explanation", tags=["it-explanation"])
 # 서비스 초기화
 evaluation_service = EvaluationService()
 question_service = QuestionService()
+session_service = SessionService()
 
 
 @router.get("/questions/random", response_model=QuestionResponse)
@@ -96,12 +98,27 @@ async def create_practice_session(request: PracticeSessionCreate):
         if not evaluation:
             raise HTTPException(status_code=500, detail="Evaluation failed")
 
-        # 3. 응답 구성
-        # TODO: Spring 2에 세션 저장 (session_id 받아오기)
-        mock_session_id = 1
+        # 3. Spring 2에 세션 저장
+        session_id = await session_service.create_session(
+            user_id=request.user_id,
+            question_id=request.question_id,
+            user_answer=request.user_answer,
+            clarity_score=evaluation["clarity_score"],
+            technical_accuracy_score=evaluation["technical_accuracy_score"],
+            terminology_score=evaluation["terminology_score"],
+            overall_score=evaluation["overall_score"],
+            feedback_en=evaluation["feedback"],
+            feedback_ko=None,  # TODO: 번역 서비스 추가
+            session_type=request.session_type,
+            audio_url=getattr(request, 'audio_url', None)
+        )
+
+        if not session_id:
+            logger.warning("Failed to save session to database, using mock session_id")
+            session_id = 0  # Fallback
 
         return PracticeSessionResponse(
-            session_id=mock_session_id,
+            session_id=session_id,
             scores=EvaluationScores(
                 clarity_score=evaluation["clarity_score"],
                 technical_accuracy_score=evaluation["technical_accuracy_score"],

@@ -15,6 +15,7 @@ from datetime import datetime
 
 class PracticeSessionCreate(BaseModel):
     """설명 연습 세션 생성 요청"""
+    user_id: int = Field(..., description="사용자 ID (Gateway에서 JWT로 추출)")
     question_id: int = Field(..., description="질문 ID")
     user_answer: str = Field(..., description="사용자 답변 (텍스트)")
     session_type: str = Field(default="TEXT", description="세션 타입 (TEXT or VOICE)")
