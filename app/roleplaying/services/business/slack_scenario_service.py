@@ -134,7 +134,7 @@ class SlackScenarioService:
                 my_role=request.myRole,
                 situation=situation,
                 ai_role=request.aiRoles[0],  # 첫 번째 AI role 사용
-                topic_type="overview",
+                topic_type="OVERVIEW",
                 summary=conversation_summary
             )
             scenario_tasks.append(task)
@@ -145,7 +145,7 @@ class SlackScenarioService:
                 my_role=request.myRole,
                 situation=situation,
                 ai_role=ai_role,
-                topic_type="detail",
+                topic_type="DETAIL",
                 summary=conversation_summary
             )
             scenario_tasks.append(task)
@@ -311,7 +311,7 @@ class SlackScenarioService:
     ) -> str:
         """Attach contextual metadata to the summaries so downstream prompts stay role-aware."""
         clean_summary = (summary or "").strip() or "Not enough related messages."
-        depth_label = "overview" if topic_type == "overview" else "detail"
+        depth_label = "overview" if topic_type == "OVERVIEW" else "detail"
         return (
             f"[{perspective_label}] "
             f"[User role: {my_role}] "

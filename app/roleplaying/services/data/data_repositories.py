@@ -212,7 +212,7 @@ class DatabaseScenarioRepository(ScenarioRepository):
                 JOIN subject sub ON sc.subject_id = sub.subject_id
                 WHERE sc.scenario_id = :scenario_id
                   AND sc.user_id = :user_id
-                  AND LOWER(sc.status) = 'generated'
+                  AND sc.status = 'GENERATED'
             """)
 
             result = db.execute(
@@ -299,7 +299,7 @@ class DatabaseScenarioRepository(ScenarioRepository):
                 FROM scenario sc
                 JOIN subject sub ON sc.subject_id = sub.subject_id
                 WHERE sc.user_id = :user_id
-                  AND LOWER(sc.status) = 'generated'
+                  AND sc.status = 'GENERATED'
                 ORDER BY sc.created_at DESC
                 LIMIT :limit
             """)
