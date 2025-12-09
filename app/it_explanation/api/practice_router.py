@@ -19,7 +19,7 @@ from app.it_explanation.models.schemas import (
 )
 from app.it_explanation.services.evaluation_service import EvaluationService
 from app.it_explanation.services.question_service import QuestionService
-from app.it_explanation.services.session_service import SessionService
+from app.integrations.clients.spring2_client import spring2_client
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,6 @@ router = APIRouter(prefix="/it-explanation", tags=["it-explanation"])
 # 서비스 초기화
 evaluation_service = EvaluationService()
 question_service = QuestionService()
-session_service = SessionService()
 
 
 @router.get("/questions/random", response_model=QuestionResponse)
@@ -99,7 +98,7 @@ async def create_practice_session(request: PracticeSessionCreate):
             raise HTTPException(status_code=500, detail="Evaluation failed")
 
         # 3. Spring 2에 세션 저장
-        session_id = await session_service.create_session(
+        session_id = await spring2_client.save_practice_session(
             user_id=request.user_id,
             question_id=request.question_id,
             user_answer=request.user_answer,

@@ -351,6 +351,89 @@ class Spring2Client:
             logger.error(f"Session completion error: {e}", exc_info=True)
             raise
 
+    async def save_practice_session(
+        self,
+        user_id: int,
+        question_id: int,
+        user_answer: str,
+        clarity_score: int,
+        technical_accuracy_score: int,
+        terminology_score: int,
+        overall_score: int,
+        feedback_en: str,
+        feedback_ko: Optional[str] = None,
+        session_type: str = "TEXT",
+        audio_url: Optional[str] = None,
+    ) -> Optional[int]:
+        """
+        IT 연습 세션 저장 API 호출
+
+        Spring 2는 MySQL의 it_practice_session 테이블에 평가 결과를 저장합니다.
+
+        Args:
+            user_id: 사용자 ID
+            question_id: 질문 ID
+            user_answer: 사용자 답변
+            clarity_score: 명확성 점수 (0-100)
+            technical_accuracy_score: 기술적 정확성 점수 (0-100)
+            terminology_score: 전문용어 사용 점수 (0-100)
+            overall_score: 종합 점수 (0-100)
+            feedback_en: 영문 피드백
+            feedback_ko: 한글 피드백 (선택)
+            session_type: TEXT or VOICE
+            audio_url: 음성 URL (선택)
+
+        Returns:
+            session_id 또는 None (실패 시)
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = "/internal/it-practice/sessions"
+
+        payload = {
+            "user_id": user_id,
+            "question_id": question_id,
+            "user_answer": user_answer,
+            "clarity_score": clarity_score,
+            "technical_accuracy_score": technical_accuracy_score,
+            "terminology_score": terminology_score,
+            "overall_score": overall_score,
+            "feedback_en": feedback_en,
+            "feedback_ko": feedback_ko,
+            "session_type": session_type,
+            "audio_url": audio_url,
+        }
+
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=payload)
+
+            logger.info(f"📥 [Spring2] Practice session save response status: {response.status_code}")
+
+            if response.status_code == 400:
+                logger.error(f"Bad request when creating practice session: {response.text}")
+                return None
+
+            response.raise_for_status()
+
+            result = response.json()
+            session_id = result.get("session_id") or result.get("sessionId")
+            logger.info(f"Practice session saved: user_id={user_id}, session_id={session_id}")
+
+            return session_id
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to save practice session: user_id={user_id}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Practice session save error: {e}", exc_info=True)
+            raise
+
     async def save_chatbot_conversation(
         self,
         user_id: int,
