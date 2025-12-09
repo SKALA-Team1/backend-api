@@ -48,8 +48,7 @@ class PracticeSessionResponse(BaseModel):
     """설명 연습 세션 응답"""
     session_id: int = Field(..., description="세션 ID")
     scores: EvaluationScores = Field(..., description="평가 점수")
-    feedback_en: str = Field(..., description="피드백 (영문)")
-    feedback_ko: Optional[str] = Field(None, description="피드백 (한글)")
+    feedback: str = Field(..., description="피드백 (한국어)")
     model_answer: str = Field(..., description="모범 답안")
 
 

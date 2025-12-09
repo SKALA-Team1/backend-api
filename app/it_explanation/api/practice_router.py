@@ -104,8 +104,7 @@ async def create_practice_session(request: PracticeSessionCreate):
             technical_accuracy_score=evaluation["technical_accuracy_score"],
             terminology_score=evaluation["terminology_score"],
             overall_score=evaluation["overall_score"],
-            feedback_en=evaluation["feedback"],
-            feedback_ko=None,  # TODO: 번역 서비스 추가
+            feedback=evaluation["feedback"],
             session_type=request.session_type,
             audio_url=getattr(request, 'audio_url', None)
         )
@@ -122,8 +121,7 @@ async def create_practice_session(request: PracticeSessionCreate):
                 terminology_score=evaluation["terminology_score"],
                 overall_score=evaluation["overall_score"]
             ),
-            feedback_en=evaluation["feedback"],
-            feedback_ko=None,  # TODO: 번역 서비스 추가
+            feedback=evaluation["feedback"],
             model_answer=question["model_answer"]
         )
 
