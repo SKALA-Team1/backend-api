@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.it_explanation.models.schemas import ChatbotMessage, ChatbotResponse
 from app.it_explanation.services.chatbot_service import ChatbotService
+from app.integrations.clients.spring2_client import spring2_client
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +50,24 @@ async def chat_with_bot(request: ChatbotMessage):
             conversation_history=request.conversation_history
         )
 
-        # TODO: Spring 2에 대화 저장 (conversation_id 받아오기)
-        mock_conversation_id = None
+        # Spring 2에 대화 저장
+        conversation_id = None
+        try:
+            result = await spring2_client.save_chatbot_conversation(
+                user_id=request.user_id,
+                user_message=request.user_message,
+                bot_response=response,
+                context=None  # TODO: conversation_history를 JSON으로 변환하여 저장 (선택사항)
+            )
+            conversation_id = result.get("conversationId")
+            logger.info(f"✅ Saved conversation to CRUD2: conversation_id={conversation_id}")
+        except Exception as save_error:
+            logger.error(f"⚠️ Failed to save conversation to CRUD2: {save_error}")
+            # 저장 실패해도 챗봇 응답은 반환 (저장은 부가 기능)
 
         return ChatbotResponse(
             bot_response=response,
-            conversation_id=mock_conversation_id
+            conversation_id=conversation_id
         )
 
     except Exception as e:

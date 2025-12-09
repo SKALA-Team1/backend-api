@@ -351,6 +351,67 @@ class Spring2Client:
             logger.error(f"Session completion error: {e}", exc_info=True)
             raise
 
+    async def save_chatbot_conversation(
+        self,
+        user_id: int,
+        user_message: str,
+        bot_response: str,
+        context: Optional[str] = None,
+    ) -> dict:
+        """
+        IT 챗봇 대화 저장 API 호출
+
+        Spring 2는 MySQL의 it_chatbot_conversation 테이블에 대화를 저장합니다.
+
+        Args:
+            user_id: 사용자 ID
+            user_message: 사용자 질문/메시지
+            bot_response: 챗봇 응답
+            context: 대화 컨텍스트 (JSON 문자열, 선택사항)
+
+        Returns:
+            API 응답 ({"conversationId": 1, "userId": 6, ...})
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = "/internal/it-chatbot/conversations"
+
+        payload = {
+            "userId": user_id,
+            "userMessage": user_message,
+            "botResponse": bot_response,
+        }
+
+        if context:
+            payload["context"] = context
+
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=payload)
+
+            logger.info(f"📥 [Spring2] Chatbot conversation save response status: {response.status_code}")
+
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"Chatbot conversation saved: user_id={user_id}, conversation_id={result.get('conversationId')}"
+            )
+
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to save chatbot conversation: user_id={user_id}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Chatbot conversation save error: {e}", exc_info=True)
+            raise
+
     async def close(self):
         """HTTP 클라이언트 종료"""
         if self.client:
