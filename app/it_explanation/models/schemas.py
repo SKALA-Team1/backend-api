@@ -24,6 +24,7 @@ class PracticeSessionCreate(BaseModel):
 
 class ChatbotMessage(BaseModel):
     """챗봇 메시지 요청"""
+    user_id: int = Field(..., description="사용자 ID (Gateway에서 JWT로 추출)")
     user_message: str = Field(..., description="사용자 질문")
     conversation_history: List[Dict[str, str]] = Field(
         default=[],
