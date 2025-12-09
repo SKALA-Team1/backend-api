@@ -351,6 +351,98 @@ class Spring2Client:
             logger.error(f"Session completion error: {e}", exc_info=True)
             raise
 
+    async def get_random_it_question(self) -> Optional[dict]:
+        """
+        랜덤 IT 질문 조회 API 호출
+
+        Spring 2는 MySQL의 it_question 테이블에서 랜덤 질문을 반환합니다.
+
+        Returns:
+            질문 데이터 또는 None (질문이 없을 경우)
+            {
+                "question_id": int,
+                "question_text": str,
+                "question_text_ko": str,
+                "category": str,
+                "difficulty": str,
+                "key_keywords": list,
+                "model_answer": str
+            }
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = "/internal/it-questions/random"
+
+        try:
+            client = await self._get_client()
+            response = await client.get(url)
+
+            logger.info(f"📥 [Spring2] Random question response status: {response.status_code}")
+
+            if response.status_code == 204:
+                logger.warning("No questions available in database")
+                return None
+
+            response.raise_for_status()
+
+            data = response.json()
+            logger.info(f"Random question fetched: question_id={data.get('question_id')}")
+
+            return data
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to fetch random question: status={e.response.status_code}, error={e}")
+            raise
+
+        except Exception as e:
+            logger.error(f"Random question fetch error: {e}", exc_info=True)
+            raise
+
+    async def get_it_question_by_id(self, question_id: int) -> Optional[dict]:
+        """
+        IT 질문 ID로 조회 API 호출
+
+        Spring 2는 MySQL의 it_question 테이블에서 특정 질문을 반환합니다.
+
+        Args:
+            question_id: 질문 ID
+
+        Returns:
+            질문 데이터 또는 None (질문이 없을 경우)
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = f"/internal/it-questions/{question_id}"
+
+        try:
+            client = await self._get_client()
+            response = await client.get(url)
+
+            logger.info(f"📥 [Spring2] Question by ID response status: {response.status_code}")
+
+            if response.status_code == 404:
+                logger.warning(f"Question {question_id} not found")
+                return None
+
+            response.raise_for_status()
+
+            data = response.json()
+            logger.info(f"Question fetched: question_id={question_id}")
+
+            return data
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            logger.error(f"Failed to fetch question {question_id}: status={e.response.status_code}, error={e}")
+            raise
+
+        except Exception as e:
+            logger.error(f"Question fetch error: {e}", exc_info=True)
+            raise
+
     async def save_practice_session(
         self,
         user_id: int,

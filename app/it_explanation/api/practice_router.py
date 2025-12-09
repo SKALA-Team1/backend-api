@@ -18,7 +18,6 @@ from app.it_explanation.models.schemas import (
     QuestionResponse
 )
 from app.it_explanation.services.evaluation_service import EvaluationService
-from app.it_explanation.services.question_service import QuestionService
 from app.integrations.clients.spring2_client import spring2_client
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,6 @@ router = APIRouter(prefix="/it-explanation", tags=["it-explanation"])
 
 # 서비스 초기화
 evaluation_service = EvaluationService()
-question_service = QuestionService()
 
 
 @router.get("/questions/random", response_model=QuestionResponse)
@@ -41,7 +39,7 @@ async def get_random_question():
     try:
         logger.info("🎲 [API] GET /it-explanation/questions/random")
 
-        question = await question_service.get_random_question()
+        question = await spring2_client.get_random_it_question()
 
         if not question:
             raise HTTPException(status_code=404, detail="No questions available")
@@ -81,7 +79,7 @@ async def create_practice_session(request: PracticeSessionCreate):
         logger.info(f"📝 [API] POST /it-explanation/sessions (question_id={request.question_id})")
 
         # 1. 질문 조회
-        question = await question_service.get_question_by_id(request.question_id)
+        question = await spring2_client.get_it_question_by_id(request.question_id)
 
         if not question:
             raise HTTPException(status_code=404, detail=f"Question {request.question_id} not found")
