@@ -553,9 +553,9 @@ class Spring2Client:
         url = "/internal/it-chatbot/conversations"
 
         payload = {
-            "userId": user_id,
-            "userMessage": user_message,
-            "botResponse": bot_response,
+            "user_id": user_id,
+            "user_message": user_message,
+            "bot_response": bot_response,
         }
 
         if context:
