@@ -114,8 +114,8 @@ async def create_practice_session(request: PracticeSessionCreate):
         )
 
         if not session_id:
-            logger.warning("Failed to save session to database, using mock session_id")
-            session_id = 0  # Fallback
+            logger.error("Failed to save session to database.")
+            raise HTTPException(status_code=500, detail="Failed to create a practice session.")
 
         return PracticeSessionResponse(
             session_id=session_id,
