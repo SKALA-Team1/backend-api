@@ -198,6 +198,11 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             logger.info(f"Turn limit reached: next_ai_turn={next_ai_turn}, ending session")
             from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
             await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
+
+            # 세션 정리 및 종합 피드백 생성
+            from app.roleplaying.handlers.ws_realtime_handler import _cleanup_session
+            await _cleanup_session(session_id, "turn_limit")
+
             await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
             return
 
