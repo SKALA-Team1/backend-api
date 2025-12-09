@@ -7,6 +7,7 @@ Endpoints:
 - POST /it-explanation/chatbot - IT 용어 설명 챗봇 대화
 """
 
+import httpx
 import logging
 from fastapi import APIRouter, HTTPException
 
@@ -61,7 +62,7 @@ async def chat_with_bot(request: ChatbotMessage):
             )
             conversation_id = result.get("conversationId")
             logger.info(f"✅ Saved conversation to CRUD2: conversation_id={conversation_id}")
-        except Exception as save_error:
+        except (httpx.RequestError, httpx.HTTPStatusError) as save_error:
             logger.error(f"⚠️ Failed to save conversation to CRUD2: {save_error}")
             # 저장 실패해도 챗봇 응답은 반환 (저장은 부가 기능)
 
