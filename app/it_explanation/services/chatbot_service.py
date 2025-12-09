@@ -103,7 +103,7 @@ class ChatbotService:
 
         except Exception as e:
             logger.error(f"Chatbot response generation failed: {e}", exc_info=True)
-            return "Sorry, I encountered an error. Please try again."
+            return "죄송합니다. 오류가 발생했습니다. 다시 시도해 주세요."
 
     async def get_response_stream(
         self,
@@ -156,4 +156,4 @@ class ChatbotService:
 
         except Exception as e:
             logger.error(f"Chatbot streaming failed: {e}", exc_info=True)
-            yield "Sorry, I encountered an error. Please try again."
+            yield "죄송합니다. 오류가 발생했습니다. 다시 시도해 주세요."
