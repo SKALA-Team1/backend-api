@@ -72,6 +72,7 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
             ai_role=init_msg.aiRole,
             fixed_questions=init_msg.fixedQuestions,
             expires_at=expires_at,
+            interaction_mode=init_msg.interactionMode,  # Pass interaction mode
         )
 
         logger.info(

@@ -397,7 +397,8 @@ class SessionRepository(Protocol):
         self,
         session_id: str,
         user_id: int,
-        expires_at: Optional[Any]
+        expires_at: Optional[Any],
+        interaction_mode: str
     ) -> None:
         """
         세션 저장

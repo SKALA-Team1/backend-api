@@ -59,7 +59,8 @@ class SessionServiceImpl:
         session_id: str,
         user_id: int,
         scenario_id: int,
-        db: Session
+        db: Session,
+        interaction_mode: str
     ) -> tuple[str, ScenarioDetail, datetime]:
         """
         세션 설정 (Spring 1에서 생성한 session_id를 받아서 FastAPI 내부용으로 저장)
@@ -69,6 +70,7 @@ class SessionServiceImpl:
             user_id: 사용자 ID
             scenario_id: 시나리오 ID
             db: DB 세션
+            interaction_mode: 상호작용 모드 (default, handsfree)
 
         Returns:
             (session_id, scenario_detail, expires_at)
@@ -84,11 +86,11 @@ class SessionServiceImpl:
 
         # Step 2: Redis에 세션 저장 (TTL 2시간)
         expires_at = datetime.utcnow() + timedelta(hours=2)
-        await self.session_repo.save_session(session_id, user_id, expires_at)
+        await self.session_repo.save_session(session_id, user_id, expires_at, interaction_mode)
 
         logger.info(
             f"Session setup: {session_id}, user={user_id}, "
-            f"scenario={scenario_id}, expires_at={expires_at}"
+            f"scenario={scenario_id}, expires_at={expires_at}, interaction_mode={interaction_mode}"
         )
 
         return (session_id, scenario_detail, expires_at)
