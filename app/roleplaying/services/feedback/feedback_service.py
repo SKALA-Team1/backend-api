@@ -687,42 +687,35 @@ class FeedbackOrchestratorImpl:
             # 병렬 평가
             eval_start = time.time()
 
-
+            # 동적으로 task 구성
+            tasks = [
+                self.grammar_evaluator.evaluate_grammar(user_text),
+                self.relevance_evaluator.evaluate_relevance(
+                    user_text, conversation_history, scenario_context
+                ),
+            ]
             if audio_data:
-                results = await asyncio.gather(
-                    self.pronunciation_evaluator.evaluate_pronunciation(audio_data, user_text),
-                    self.grammar_evaluator.evaluate_grammar(user_text),
-                    self.relevance_evaluator.evaluate_relevance(
-                        user_text, conversation_history, scenario_context
-                    ),
-                    return_exceptions=True
-                )
-                pronunciation = results[0] if not isinstance(results[0], Exception) else None
-                grammar = results[1] if not isinstance(results[1], Exception) else None
-                relevance = results[2] if not isinstance(results[2], Exception) else None
+                tasks.insert(0, self.pronunciation_evaluator.evaluate_pronunciation(audio_data, user_text))
 
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 결과 추출 및 에러 처리
+            pronunciation = None
+            if audio_data:
+                pronunciation = results.pop(0)
                 if isinstance(pronunciation, Exception):
                     logger.warning(f"Pronunciation evaluation failed: {pronunciation}")
-                if isinstance(grammar, Exception):
-                    logger.warning(f"Grammar evaluation failed: {grammar}")
-                if isinstance(relevance, Exception):
-                    logger.warning(f"Relevance evaluation failed: {relevance}")
-            else:
-                results = await asyncio.gather(
-                    self.grammar_evaluator.evaluate_grammar(user_text),
-                    self.relevance_evaluator.evaluate_relevance(
-                        user_text, conversation_history, scenario_context
-                    ),
-                    return_exceptions=True
-                )
-                grammar = results[0] if not isinstance(results[0], Exception) else None
-                relevance = results[1] if not isinstance(results[1], Exception) else None
-                pronunciation = None
+                    pronunciation = None
 
-                if isinstance(grammar, Exception):
-                    logger.warning(f"Grammar evaluation failed: {grammar}")
-                if isinstance(relevance, Exception):
-                    logger.warning(f"Relevance evaluation failed: {relevance}")
+            grammar = results.pop(0)
+            if isinstance(grammar, Exception):
+                logger.warning(f"Grammar evaluation failed: {grammar}")
+                grammar = None
+
+            relevance = results.pop(0)
+            if isinstance(relevance, Exception):
+                logger.warning(f"Relevance evaluation failed: {relevance}")
+                relevance = None
 
             eval_time = time.time() - eval_start
 
