@@ -230,7 +230,7 @@ def _fetch_utterances_from_db(session_id: str, db: Session) -> List[Dict]:
             FROM scenario_message
             WHERE session_id = :session_id
               AND speaker = 'user'
-              AND feedback_sections IS NOT NULL
+              AND (grammar_score IS NOT NULL OR relevance_score IS NOT NULL OR pronunciation_score IS NOT NULL)
             ORDER BY turn_index ASC
         """)
 
