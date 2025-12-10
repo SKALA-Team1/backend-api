@@ -195,10 +195,29 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         # Step 7: 🔑 다음 AI 질문이 8번째가 될 것인지 미리 확인 (생성 전)
         next_ai_turn = session_state.get_ai_turn_number() if session_state else 1
         if next_ai_turn > 7:
-            logger.info(f"Turn limit reached: next_ai_turn={next_ai_turn}, ending session")
+            logger.info(f"🏁 Turn limit reached: next_ai_turn={next_ai_turn}, ending session")
+
+            # 🔑 Spring 2에 세션 완료 알림 (DB 업데이트)
+            from app.integrations.clients.spring2_client import spring2_client
+            try:
+                await spring2_client.complete_session(
+                    session_id=session_id,
+                    status="FINISHED",
+                    reason="turn_limit",
+                    played_turns=session_state.ai_turn_count if session_state else 0,
+                    completed_all_turns=True,  # 모든 턴 완료
+                    finish_reason="turn_limit",
+                    finished_at=None,  # Spring 2가 현재 시간 사용
+                )
+                logger.info(f"✅ Session completion notified to Spring 2: session={session_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to notify Spring 2 of session completion: {e}", exc_info=True)
+
+            # 클라이언트에 세션 종료 알림
             from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
             await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
             await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
+            session_manager.cleanup(session_id)
             return
 
         # Step 8: AI 응답 생성 (정상 응답일 때만)
