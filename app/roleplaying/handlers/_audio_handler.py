@@ -150,12 +150,6 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
                 if isinstance(feedback_result, dict):
                     feedback_result['feedback_sections'] = []
 
-            if isinstance(feedback_result, dict):
-                needs_correction = feedback_result.get("needs_correction", False)
-                retry_count = session_state.current_question_retry_count if (session_state and needs_correction) else 0
-                feedback_result['needs_correction'] = needs_correction
-                feedback_result['retry_count'] = retry_count
-
         # Azure 사용 시 usage 증가
         if can_use_azure and feedback_result:
             try:

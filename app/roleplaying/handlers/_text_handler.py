@@ -132,12 +132,6 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             if not show_feedback and isinstance(feedback_result, dict):
                 feedback_result['feedback_sections'] = []
 
-            if isinstance(feedback_result, dict):
-                needs_correction = feedback_result.get("needs_correction", False)
-                retry_count = session_state.current_question_retry_count if (session_state and needs_correction) else 0
-                feedback_result['needs_correction'] = needs_correction
-                feedback_result['retry_count'] = retry_count
-
         utterance_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
 
         needs_retry = await _send_feedback_messages(
