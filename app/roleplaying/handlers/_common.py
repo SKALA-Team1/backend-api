@@ -463,9 +463,9 @@ async def _save_utterance_with_feedback(
                 "relevance_score": None,
                 "overall_score": None,
                 "needs_correction": False,  # ✅ Boolean False (spring2_client에서 0으로 변환)
-                "retry_count": None,
+                "retry_count": 0,  # ✅ 0으로 저장 (재시도 필요 없음)
                 "primary_issue": "none",  # ✅ 명시적으로 "none"
-                "feedback_sections": None,
+                "feedback_sections": [],  # ✅ 빈 배열 (피드백 섹션 없음)
             })
 
         logger.info(f"📤 [Spring2 저장] save_utterance 호출 중: session={session_id}, index={utterance_index}")

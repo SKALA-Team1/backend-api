@@ -151,7 +151,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             if not show_feedback:
                 logger.info(f"📝 [피드백 섹션 제외] session={session_id} - show_feedback=False")
                 if isinstance(feedback_result, dict):
-                    feedback_result['feedback_sections'] = None
+                    feedback_result['feedback_sections'] = []  # ✅ 빈 배열로 저장 (NULL 대신)
 
             # 항상 needs_correction과 retry_count 설정
             if isinstance(feedback_result, dict):
