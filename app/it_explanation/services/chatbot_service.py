@@ -55,7 +55,8 @@ class ChatbotService:
     async def get_response(
         self,
         user_message: str,
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        current_question: Optional[Dict[str, str]] = None
     ) -> str:
         """
         챗봇 응답 생성
@@ -65,6 +66,8 @@ class ChatbotService:
             conversation_history: 대화 히스토리
                                  [{"role": "user", "content": "..."},
                                   {"role": "assistant", "content": "..."}]
+            current_question: 현재 연습 중인 질문
+                            {"question_text": "...", "question_text_ko": "..."}
 
         Returns:
             챗봇 응답 텍스트
@@ -81,10 +84,29 @@ class ChatbotService:
             else:
                 history_text = "(No previous conversation)"
 
+            # 첫 질문인지 추가 질문인지 판단
+            is_first_question = not conversation_history or len(conversation_history) == 0
+
+            # 현재 질문 컨텍스트 추가
+            question_context = ""
+            if current_question:
+                question_text = current_question.get("question_text", "")
+                question_text_ko = current_question.get("question_text_ko", "")
+                question_context = f"""
+현재 사용자는 다음 질문에 답변을 준비하고 있습니다:
+- 영문: "{question_text}"
+- 한글: "{question_text_ko}"
+
+사용자가 "답변 추천해줘", "어떻게 답하면 돼?" 같은 요청을 하면,
+위 질문에 대한 답변을 추천해주세요.
+"""
+
             # 프롬프트 구성
             prompt = IT_CHATBOT_PROMPT.format(
+                question_context=question_context,
                 conversation_history=history_text,
-                user_message=user_message
+                user_message=user_message,
+                is_first_question="true" if is_first_question else "false"
             )
 
             logger.info("💬 [IT 챗봇] LLM 호출 중...")
