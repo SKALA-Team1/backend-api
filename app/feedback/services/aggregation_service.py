@@ -60,14 +60,7 @@ async def generate_comprehensive_feedback(
             return None
 
         # ========================================
-        # Step 2: 시나리오 정보는 필요 없음 (피드백만 사용)
-        # ========================================
-        scenario_title = "IT 영어 회화 연습"
-        my_role = "IT Professional"
-        ai_role = "Colleague"
-
-        # ========================================
-        # Step 3: 발화 목록 포맷팅 (프롬프트용)
+        # Step 2: 발화 목록 포맷팅 (프롬프트용)
         # ========================================
         utterances = []
         pronunciation_scores = []
@@ -124,7 +117,7 @@ async def generate_comprehensive_feedback(
         logger.info(f"📝 발화 개수: {len(utterances)}, 점수 수집: pronunciation={len(pronunciation_scores)}, grammar={len(grammar_scores)}, relevance={len(relevance_scores)}")
 
         # ========================================
-        # Step 4: 평균 점수 계산
+        # Step 3: 평균 점수 계산
         # ========================================
         total_pronunciation = round(sum(pronunciation_scores) / len(pronunciation_scores), 1) if pronunciation_scores else None
         total_grammar = round(sum(grammar_scores) / len(grammar_scores), 1) if grammar_scores else None
@@ -133,19 +126,16 @@ async def generate_comprehensive_feedback(
         logger.info(f"📊 평균 점수: pronunciation={total_pronunciation}, grammar={total_grammar}, diversity={total_diversity}")
 
         # ========================================
-        # Step 5: 프롬프트 생성
+        # Step 4: 프롬프트 생성
         # ========================================
         prompt = build_comprehensive_feedback_prompt(
-            scenario_title=scenario_title,
-            my_role=my_role,
-            ai_role=ai_role,
             utterances=utterances
         )
 
         logger.debug(f"🔍 Generated prompt length: {len(prompt)} characters")
 
         # ========================================
-        # Step 6: GPT-4 호출
+        # Step 5: GPT-4 호출
         # ========================================
         try:
             from openai import OpenAI
@@ -170,7 +160,7 @@ async def generate_comprehensive_feedback(
             return None
 
         # ========================================
-        # Step 7: 응답 파싱
+        # Step 6: 응답 파싱
         # ========================================
         parsed_feedback = parse_comprehensive_feedback_response(response_text)
 
@@ -179,7 +169,7 @@ async def generate_comprehensive_feedback(
             return None
 
         # ========================================
-        # Step 8: 최종 결과 구성 (점수 → 짧은 피드백 → 긴 피드백 순서)
+        # Step 7: 최종 결과 구성 (점수 → 짧은 피드백 → 긴 피드백 순서)
         # ========================================
         result = {
             "total_pronunciation": total_pronunciation,
@@ -192,7 +182,7 @@ async def generate_comprehensive_feedback(
         logger.info(f"🎉 [종합 피드백 생성 완료] session_id={session_id}")
 
         # ========================================
-        # Step 9: Spring 2 API를 통해 DB에 저장
+        # Step 8: Spring 2 API를 통해 DB에 저장
         # ========================================
         try:
             await _save_to_spring2(session_id, result)
@@ -288,9 +278,9 @@ async def _save_to_spring2(session_id: str, feedback_data: Dict) -> None:
 
     # Spring 2 DTO 형식으로 변환
     payload = {
-        "totalPronunciation": feedback_data.get("total_pronunciation"),
-        "totalGrammar": feedback_data.get("total_grammar"),
-        "totalDiversity": feedback_data.get("total_diversity"),
+        "avgPronunciaition": feedback_data.get("total_pronunciation"),
+        "avgGrammar": feedback_data.get("total_grammar"),
+        "avgRelevance": feedback_data.get("total_diversity"),
         "feedbackShort": feedback_data.get("feedback_short"),
         "feedbackLong": feedback_data.get("feedback_long")
     }

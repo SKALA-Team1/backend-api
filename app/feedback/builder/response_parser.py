@@ -9,7 +9,6 @@
 """
 
 import json
-import re
 import logging
 from typing import Optional, Dict
 
@@ -31,19 +30,17 @@ def parse_comprehensive_feedback_response(response_text: str) -> Optional[Dict[s
         또는 None (파싱 실패)
     """
     try:
-        # Step 1: 정규식으로 JSON 블록 추출
-        # GPT가 설명을 붙일 수 있으므로 JSON 부분만 추출
-        json_match = re.search(
-            r'\{[^{}]*"feedback_long"[^{}]*"feedback_short"[^{}]*\}',
-            response_text,
-            re.DOTALL
-        )
+        # Step 1: 응답에서 JSON 객체 부분을 더 안정적으로 찾기
+        # 첫 번째 '{' 와 마지막 '}' 사이의 문자열을 추출
+        # (피드백 내용에 { } 문자가 포함될 수 있으므로 정규식 [^{}] 방식은 취약)
+        start_index = response_text.find('{')
+        end_index = response_text.rfind('}')
 
-        if not json_match:
-            logger.warning(f"No JSON found in response: {response_text[:200]}...")
+        if start_index == -1 or end_index == -1 or end_index < start_index:
+            logger.warning(f"No JSON object found in response: {response_text[:200]}...")
             return None
 
-        json_str = json_match.group(0)
+        json_str = response_text[start_index : end_index + 1]
         logger.debug(f"Extracted JSON: {json_str[:200]}...")
 
         # Step 2: JSON 파싱
