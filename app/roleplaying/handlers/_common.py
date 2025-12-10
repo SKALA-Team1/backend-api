@@ -77,22 +77,16 @@ async def _check_turn_limit(
     """
     try:
         if session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS):
-            logger.info(f"Turn limit reached for session {session_id}, ending session.")
-
-            # 클라이언트에 세션 종료 메시지 전송
             from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
             try:
                 await websocket.send_json(
                     SessionEndedMessage(reason="turn_limit").model_dump()
                 )
-                logger.info(f"SESSION_ENDED message sent: session={session_id}, reason=turn_limit")
             except Exception as e:
                 logger.warning(f"Failed to send SESSION_ENDED message: {e}")
 
-            # ✅ WebSocket 연결 종료
             try:
                 await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
-                logger.info(f"WebSocket closed: session={session_id}")
             except Exception as e:
                 logger.warning(f"Failed to close WebSocket: {e}")
 
@@ -127,10 +121,6 @@ async def _evaluate_feedback(
 
     try:
         feedback_start = time.time()
-        logger.info(
-            f"⏱️  [피드백 평가 시작] session={session_id}, 텍스트 길이: {len(user_text)} 글자, "
-            f"audio={audio_data is not None}, azure={can_use_azure}"
-        )
 
         conversation_history = session_state.history if session_state else []
         scenario_context = {
@@ -162,11 +152,8 @@ async def _evaluate_feedback(
             if scores:
                 scores["pronunciation_score"] = None
 
-        feedback_elapsed = time.time() - feedback_start
-        logger.info(f"✅ [피드백 평가 완료] session={session_id}, 소요 시간: {feedback_elapsed:.2f}초")
-
     except asyncio.TimeoutError:
-        logger.warning(f"⏱️  [피드백 평가 타임아웃] session={session_id}")
+        logger.warning(f"Feedback evaluation timeout: session={session_id}")
         await websocket.send_json(
             ErrorMessage(
                 code="FEEDBACK_TIMEOUT",
@@ -176,7 +163,7 @@ async def _evaluate_feedback(
         feedback_result = None
 
     except Exception as e:
-        logger.error(f"❌ [피드백 평가 실패] {e}", exc_info=True)
+        logger.error(f"Feedback evaluation failed: {e}", exc_info=True)
         await websocket.send_json(
             ErrorMessage(
                 code="FEEDBACK_ERROR",
@@ -269,10 +256,8 @@ async def _send_feedback_messages(
         True if retry needed (early return), False otherwise
     """
     if not feedback_result:
-        logger.info(f"Skipping feedback processing: feedback_result is None")
         return False
 
-    # Step 1: 점수 전송
     scores = feedback_result.get("scores", {})
     feedback_msg = FeedbackMessage(
         pronunciation_score=scores.get("pronunciation_score"),
@@ -281,10 +266,7 @@ async def _send_feedback_messages(
         overall_score=scores.get("overall_score", 0)
     )
     await websocket.send_json(feedback_msg.model_dump())
-    logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
-    # Step 2: ✅ 구조화된 피드백 섹션 스트리밍 (영문 토큰 + 한글 섹션)
-    # 🔑 show_feedback=False면 피드백 섹션을 생성하지 않음
     if show_feedback:
         feedback_sections_list = []
         try:
@@ -292,27 +274,17 @@ async def _send_feedback_messages(
 
             feedback_orchestrator = get_feedback_orchestrator()
 
-            # 평가 결과에서 필요한 정보 추출
             pronunciation = feedback_result.get("pronunciation")
             grammar = feedback_result.get("grammar")
             relevance = feedback_result.get("relevance")
             pronunciation_score = feedback_result.get("pronunciation_score")
             grammar_score = feedback_result.get("grammar_score")
             relevance_score = feedback_result.get("relevance_score")
-
-            # 🔍 점수 확인 로깅
-            logger.info(
-                f"📊 [점수 추출] pronunciation={pronunciation_score}, "
-                f"grammar={grammar_score}, relevance={relevance_score}"
-            )
-
-            # 스트리밍에 필요한 추가 정보
             user_text = feedback_result.get("user_text", "")
             conversation_history = feedback_result.get("conversation_history", [])
             scenario_context = feedback_result.get("scenario_context", {})
             audio_data = feedback_result.get("audio_data")
 
-            # 피드백 섹션 스트리밍 생성 (영문 토큰 + 한글 섹션)
             section_count = 0
             async for item in feedback_orchestrator._build_feedback_sections_stream(
                 user_text=user_text,
@@ -327,20 +299,13 @@ async def _send_feedback_messages(
                 audio_data=audio_data
             ):
                 if item["type"] == "feedback_token":
-                    # 영문 토큰 즉시 전송
                     token_msg = FeedbackStreamingMessage(
                         chunk=item["token"]
                     )
                     await websocket.send_json(token_msg.model_dump())
-                    logger.debug(f"📤 [피드백 토큰 전송] {item['section_type']}: {repr(item['token'])}")
 
                 elif item["type"] == "feedback_section":
-                    # 한글 섹션 완성 후 한 번에 전송
                     section_score = item["score"]
-                    logger.info(
-                        f"📤 [피드백 섹션 전송] {item['section_type']}: "
-                        f"score={section_score} (type={type(section_score).__name__})"
-                    )
 
                     sections_msg = FeedbackSectionsMessage(sections=[{
                         "type": item["section_type"],
@@ -349,9 +314,6 @@ async def _send_feedback_messages(
                         "score": section_score
                     }])
                     await websocket.send_json(sections_msg.model_dump())
-                    logger.debug(f"✅ 메시지 전송 완료: {sections_msg.model_dump()}")
-
-                    # ✅ 생성된 섹션을 리스트에 저장 (Spring 2 저장용)
                     feedback_sections_list.append({
                         "type": item["section_type"],
                         "feedback_en": item["feedback_en"],
@@ -359,20 +321,13 @@ async def _send_feedback_messages(
                         "score": section_score
                     })
                     section_count += 1
-                    logger.info(f"✅ [피드백 섹션 완성] {item['section_type']} ({section_count}/3)")
 
-            logger.info(f"All {section_count} feedback sections streamed")
-
-            # ✅ feedback_result에 생성된 feedback_sections 저장 (Spring 2에 저장하기 위해)
             if feedback_sections_list:
                 feedback_result["feedback_sections"] = feedback_sections_list
-                logger.info(f"✅ feedback_sections saved to feedback_result: {len(feedback_sections_list)} sections")
 
         except Exception as e:
             logger.error(f"Failed to stream feedback sections: {e}", exc_info=True)
     else:
-        # show_feedback=False면 피드백 섹션을 빈 배열로 유지
-        logger.info(f"🔑 [피드백 미표시] show_feedback=False - 피드백 섹션 생성 생략, feedback_sections=[]")
         if isinstance(feedback_result, dict):
             feedback_result["feedback_sections"] = []
 
@@ -438,21 +393,15 @@ async def _save_utterance_with_feedback(
             "status": "IN_PROGRESS",
         }
 
-        # ✅ Conditionally include feedback fields
         if feedback_result:
-            logger.info(f"📝 [Spring2 저장] feedback_result 확인: keys={list(feedback_result.keys())}")
-
             needs_correction = feedback_result.get("needs_correction", False)
-            # needs_correction이 True일 때만 retry_count 유지, False면 0
             retry_count = session_state.current_question_retry_count if (session_state and needs_correction) else 0
 
-            # ✅ scores가 있는지 확인
             scores = feedback_result.get("scores", {})
             if not scores:
-                logger.warning(f"⚠️  [Spring2 저장] feedback_result에 scores가 없음: {feedback_result}")
+                logger.warning(f"Feedback result has no scores: {feedback_result}")
 
             feedback_sections = feedback_result.get("feedback_sections")
-            logger.info(f"📝 [Spring2 저장] feedback_sections 확인: {feedback_sections}")
 
             save_kwargs.update({
                 "pronunciation_score": scores.get("pronunciation_score"),
@@ -465,9 +414,6 @@ async def _save_utterance_with_feedback(
                 "feedback_sections": feedback_sections,  # ✅ 구조화된 피드백 (영문 + 한글)
             })
         else:
-            # No feedback data - explicitly set fields
-            # needs_correction should be False (not None) when no feedback
-            logger.info(f"📝 [Spring2 저장] feedback_result가 None - 피드백 없음")
             save_kwargs.update({
                 "pronunciation_score": None,
                 "grammar_score": None,
@@ -476,18 +422,14 @@ async def _save_utterance_with_feedback(
                 "needs_correction": False,  # ✅ Boolean False (spring2_client에서 0으로 변환)
                 "retry_count": 0,  # ✅ 0으로 저장 (재시도 필요 없음)
                 "primary_issue": "none",  # ✅ 명시적으로 "none"
-                "feedback_sections": [],  # ✅ 빈 배열 (피드백 섹션 없음)
+                "feedback_sections": [],
             })
 
-        logger.info(f"📤 [Spring2 저장] save_utterance 호출 중: session={session_id}, index={utterance_index}")
-        logger.debug(f"📤 [Spring2 저장] save_kwargs: {save_kwargs}")
-
         result = await spring2_client.save_utterance(**save_kwargs)
-        logger.info(f"✅ [Spring2 저장] 성공: session={session_id}, index={utterance_index}, result={result}")
         return result
 
     except Exception as e:
-        logger.error(f"❌ [Spring2 저장] 실패: session={session_id}, error={e}", exc_info=True)
+        logger.error(f"Failed to save utterance: session={session_id}, error={e}", exc_info=True)
         return None
 
 
@@ -525,11 +467,6 @@ async def _evaluate_feedback_with_agent(
         또는 None (에러 시)
     """
     try:
-        logger.info(
-            f"🤖 [ReAct] Starting feedback evaluation: session={session_id}, "
-            f"text_length={len(user_text)}, audio={audio_data is not None}, azure={can_use_azure}"
-        )
-
         conversation_history = session_state.history if session_state else []
         scenario_context = {
             "my_role": session_state.my_role if session_state else "",
@@ -547,10 +484,9 @@ async def _evaluate_feedback_with_agent(
         )
 
         if agent_decision is None:
-            logger.warning(f"❌ [ReAct] Agent returned None for session={session_id}")
+            logger.warning(f"Agent returned None for session={session_id}")
             return None
 
-        # ✅ 스트리밍에 필요한 추가 정보를 feedback_result에 추가
         feedback_result = agent_decision.get("feedback_result")
         if feedback_result:
             feedback_result["user_text"] = user_text
@@ -558,16 +494,10 @@ async def _evaluate_feedback_with_agent(
             feedback_result["scenario_context"] = scenario_context
             feedback_result["audio_data"] = audio_data if can_use_azure else None
 
-        logger.info(
-            f"✅ [ReAct] Agent decision: action={agent_decision.get('action')}, "
-            f"confidence={agent_decision.get('confidence'):.2f}, "
-            f"reasoning={agent_decision.get('reasoning')[:60]}..."
-        )
-
         return agent_decision
 
     except Exception as e:
-        logger.error(f"❌ [ReAct] Agent evaluation failed: {e}", exc_info=True)
+        logger.error(f"Agent evaluation failed: {e}", exc_info=True)
         return None
 
 
@@ -612,14 +542,6 @@ async def _save_question_with_keywords(
         from app.roleplaying.prompts.constants import QUESTION_BILINGUAL_PROMPT
         import json
 
-        logger.info(
-            f"🟢 [질문 저장] 추천 키워드 생성 중... "
-            f"session={session_id}, turn={turn_number}"
-        )
-
-        # ====================================
-        # Step 1: 추천 키워드 생성
-        # ====================================
         keywords = await keyword_generator.generate_recommended_keywords(
             question=question_en,
             user_role=user_role,
@@ -628,13 +550,6 @@ async def _save_question_with_keywords(
             slack_message=slack_message,
             conversation_summary=""
         )
-
-        logger.info(f"✅ [질문 저장] 키워드 생성 완료: {keywords}")
-
-        # ====================================
-        # Step 2: 한글 번역 생성
-        # ====================================
-        logger.info(f"🟢 [질문 저장] 한글 번역 생성 중...")
 
         llm = LLMServiceBase(
             api_key=settings.openai_api_key,
@@ -647,8 +562,7 @@ async def _save_question_with_keywords(
         )
         translation_response = await llm.invoke(translation_prompt)
 
-        # JSON에서 korean_question 추출
-        question_ko = question_en  # 기본값: 번역 실패 시 영문 사용
+        question_ko = question_en
         try:
             json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', translation_response, re.DOTALL)
             if json_match:
@@ -657,18 +571,6 @@ async def _save_question_with_keywords(
         except Exception as e:
             logger.warning(f"Failed to parse Korean translation: {e}")
 
-        logger.info(f"✅ [질문 저장] 한글 번역 완료")
-
-        # ====================================
-        # Step 3: Spring 2에 저장 (ScenarioMessage에 통합)
-        # ====================================
-        logger.info(
-            f"🟢 [질문 저장] Spring 2에 저장 중... "
-            f"session={session_id}, utterance_index={utterance_index}"
-        )
-
-        # Option 3: AI 질문을 ScenarioMessage에 직접 저장
-        # save_utterance()에 question_ko와 recommended_keywords를 포함시킴
         await spring2_client.save_utterance(
             session_id=session_id,
             stt_text=question_en,
@@ -679,18 +581,13 @@ async def _save_question_with_keywords(
             played_turns=session_state.ai_turn_count if session_state else None,
             completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
             status="IN_PROGRESS",
-            question_ko=question_ko,  # 한글 질문
-            recommended_keywords=keywords,  # 추천 키워드
-        )
-
-        logger.info(
-            f"✅ [질문 저장] 완료: session={session_id}, utterance_index={utterance_index}, "
-            f"keywords={len(keywords)}"
+            question_ko=question_ko,
+            recommended_keywords=keywords,
         )
 
     except Exception as e:
         logger.error(
-            f"❌ [질문 저장] 실패: session={session_id}, turn={turn_number}, error={e}",
+            f"Failed to save question: session={session_id}, turn={turn_number}, error={e}",
             exc_info=True
         )
-        raise  # ✅ 에러를 호출자에게 전파
+        raise
