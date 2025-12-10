@@ -72,11 +72,11 @@ class PromptBasedScenarioService:
             f"my_role={my_role}, ai_role={ai_role}"
         )
 
-        # Step 1: DB에서 사용자의 과거 시나리오 조회 (컨텍스트)
+
         context = await self._fetch_user_context(user_id, db)
         logger.debug(f"Fetched {len(context)} past scenarios for context")
 
-        # Step 2: 상황 구체화
+
         concrete_situation = await self.enhancer.enhance_situation(
             situation=situation,
             my_role=my_role,
@@ -85,7 +85,7 @@ class PromptBasedScenarioService:
         )
         logger.debug(f"Enhanced situation: {concrete_situation}")
 
-        # Step 3: 제목 생성
+
         title = await self.enhancer.generate_title(
             situation=concrete_situation,
             ai_role=ai_role,
@@ -99,7 +99,7 @@ class PromptBasedScenarioService:
         )
         logger.debug(f"Generated title: {title}")
 
-        # Step 4: 고정 질문 생성
+
         fixed_questions = await self._generate_fixed_questions(
             situation=concrete_situation,
             my_role=my_role,
@@ -107,7 +107,7 @@ class PromptBasedScenarioService:
         )
         logger.debug(f"Generated {len(fixed_questions)} fixed questions")
 
-        # Step 5: 응답 구성
+
         result = ScenarioInfoDto(
             aiRole=ai_role,
             topicType="DIRECT",

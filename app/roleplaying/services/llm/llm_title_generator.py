@@ -97,7 +97,7 @@ class ScenarioTitleGeneratorImpl(LLMServiceBase):
             # ====================================
             # Step 2: LLM 호출
             # ====================================
-            logger.info("📝 LLM으로 제목 생성 중...")
+
             title = await self.llm.invoke(prompt)
             logger.info(f"🔹 LLM 반환값 (처리 전): '{title}'")
             logger.info(f"🔹 LLM 반환 길이: {len(title)}자")
@@ -124,8 +124,8 @@ class ScenarioTitleGeneratorImpl(LLMServiceBase):
                         logger.info(f"🔹 문장 부호 '{punct}' 찾음 (위치: {last_punct}) → '{title}'")
                         break
 
-            logger.info(f"✅ [최종 제목] '{title}'")
-            logger.info(f"✅ [최종 길이] {len(title)}자 (제한: 80자)")
+
+
             return title
 
         except Exception as e:
@@ -134,7 +134,7 @@ class ScenarioTitleGeneratorImpl(LLMServiceBase):
             # 예외 처리: 상황의 첫 문장 반환
             # ====================================
             fallback = self._extract_first_sentence(situation)
-            logger.info(f"⚠️  폴백 제목 사용: '{fallback}' ({len(fallback)}자)")
+
             return fallback
 
     @staticmethod

@@ -144,7 +144,7 @@ class ScenarioEnhancerImpl(LLMServiceBase):
             enhanced = await self.llm.invoke(prompt)
             enhanced = enhanced.strip()
 
-            logger.info(f"✅ [상황 구체화 완료] {enhanced[:80]}...")
+
             return enhanced
 
         except Exception as e:
@@ -194,11 +194,11 @@ class ScenarioEnhancerImpl(LLMServiceBase):
             # ====================================
             # Step 2: LLM 호출
             # ====================================
-            logger.info("📝 [제목 생성] LLM 호출 중...")
+
             title = await self.llm.invoke(prompt)
             title = title.strip()
 
-            logger.info(f"✅ [제목 생성 완료] {title}")
+
             return title
 
         except Exception as e:
@@ -267,7 +267,7 @@ class ScenarioEnhancerImpl(LLMServiceBase):
                         f"Tell me more about {ai_role.lower()}"
                     )
 
-                logger.info(f"✅ [프롬프트 질문 생성 완료] {len(normalized_questions)} 질문 생성")
+
                 return normalized_questions[:3]
 
             # ====================================

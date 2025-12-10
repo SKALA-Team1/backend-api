@@ -194,7 +194,7 @@ class AgentToolRegistry:
     def register(cls, name: str, tool_func):
         """Tool 등록"""
         cls._tools[name] = tool_func
-        logger.info(f"✅ Tool registered: {name}")
+
 
     @classmethod
     def get_tool(cls, name: str):

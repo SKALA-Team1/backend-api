@@ -313,7 +313,7 @@ Respond in JSON format ONLY (no other text):
 
         if filtered_lines:
             result = "\n".join(filtered_lines)
-            logger.info(f"✂️ [Filter] Extracted {primary_issue} feedback")
+
             return result
 
         # 필터링 실패 시 전체 반환

@@ -103,7 +103,7 @@ class AITutorService:
             )
 
             # ========================================
-            # Step 1: 고정 질문 턴 확인 (턴 1, 4, 7)
+
             # ========================================
             if session_state.should_use_fixed_question():
                 fixed_index = session_state.get_fixed_question_index()
@@ -117,7 +117,7 @@ class AITutorService:
                     return
 
             # ========================================
-            # Step 2: 동적 질문 생성 (LLM 스트리밍)
+
             # ========================================
             logger.debug(f"Starting dynamic question stream (turn {next_turn})")
 
@@ -151,13 +151,13 @@ class AITutorService:
             청크 단위로 생성된 질문 텍스트
         """
         # ========================================
-        # Step 1: 시나리오 & 대화 컨텍스트 구성
+
         # ========================================
         scenario_context = self._build_scenario_context(session_state)
         conversation_history = self._build_conversation_history(session_state)
 
         # ========================================
-        # Step 2: 프롬프트 구성
+
         # ========================================
         prompt = FOLLOWUP_QUESTION_PROMPT.format(
             role=session_state.ai_role,
@@ -168,7 +168,7 @@ class AITutorService:
 
         try:
             # ========================================
-            # Step 3: LLM 스트리밍 호출 (의존성 주입)
+
             # ========================================
             async for chunk in self.question_generator.generate_followup_question_stream(prompt):
                 yield chunk
