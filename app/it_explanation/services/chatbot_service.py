@@ -55,7 +55,8 @@ class ChatbotService:
     async def get_response(
         self,
         user_message: str,
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        current_question: Optional[Dict[str, str]] = None
     ) -> str:
         """
         챗봇 응답 생성
@@ -65,11 +66,16 @@ class ChatbotService:
             conversation_history: 대화 히스토리
                                  [{"role": "user", "content": "..."},
                                   {"role": "assistant", "content": "..."}]
+            current_question: 현재 연습 중인 질문 컨텍스트
+                            {"question_text": "...", "question_text_ko": "..."}
 
         Returns:
             챗봇 응답 텍스트
         """
         try:
+            # 첫 질문 여부 판단 (대화 히스토리가 없거나 비어있으면 첫 질문)
+            is_first_question = not conversation_history or len(conversation_history) == 0
+
             # 히스토리 포맷팅 (최근 5턴만, 총 10개 메시지)
             if conversation_history:
                 # 최근 10개 메시지만 유지
@@ -81,10 +87,33 @@ class ChatbotService:
             else:
                 history_text = "(No previous conversation)"
 
+            # 질문 컨텍스트 구성
+            question_context = ""
+            if current_question:
+                question_text = current_question.get("question_text", "")
+                question_text_ko = current_question.get("question_text_ko", "")
+                question_context = f"""
+============================================
+📝 MAIN INTERVIEW QUESTION (사용자가 연습 중인 면접 질문):
+============================================
+English: "{question_text}"
+Korean: "{question_text_ko}"
+
+⚠️ IMPORTANT:
+When the user asks "모범 답안", "답변 추천", "위의 질문에 대한 답", "어떻게 답하면 돼?",
+they are asking for a MODEL ANSWER to THIS MAIN INTERVIEW QUESTION above,
+NOT about the chatbot conversation topics (컨테이너, 라이브러리 등).
+
+Provide a professional answer suitable for a job interview (3-4 sentences, with example).
+============================================
+"""
+
             # 프롬프트 구성
             prompt = IT_CHATBOT_PROMPT.format(
+                question_context=question_context,
                 conversation_history=history_text,
-                user_message=user_message
+                user_message=user_message,
+                is_first_question="true" if is_first_question else "false"
             )
 
             logger.info("💬 [IT 챗봇] LLM 호출 중...")
@@ -108,7 +137,8 @@ class ChatbotService:
     async def get_response_stream(
         self,
         user_message: str,
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        current_question: Optional[Dict[str, str]] = None
     ):
         """
         챗봇 응답 스트리밍 생성 (토큰 단위)
@@ -116,11 +146,15 @@ class ChatbotService:
         Args:
             user_message: 사용자 질문
             conversation_history: 대화 히스토리
+            current_question: 현재 연습 중인 질문 컨텍스트
 
         Yields:
             각 토큰 문자열
         """
         try:
+            # 첫 질문 여부 판단
+            is_first_question = not conversation_history or len(conversation_history) == 0
+
             # 히스토리 포맷팅
             if conversation_history:
                 history = conversation_history[-(self.max_history_turns * 2):]
@@ -131,10 +165,33 @@ class ChatbotService:
             else:
                 history_text = "(No previous conversation)"
 
+            # 질문 컨텍스트 구성
+            question_context = ""
+            if current_question:
+                question_text = current_question.get("question_text", "")
+                question_text_ko = current_question.get("question_text_ko", "")
+                question_context = f"""
+============================================
+📝 MAIN INTERVIEW QUESTION (사용자가 연습 중인 면접 질문):
+============================================
+English: "{question_text}"
+Korean: "{question_text_ko}"
+
+⚠️ IMPORTANT:
+When the user asks "모범 답안", "답변 추천", "위의 질문에 대한 답", "어떻게 답하면 돼?",
+they are asking for a MODEL ANSWER to THIS MAIN INTERVIEW QUESTION above,
+NOT about the chatbot conversation topics (컨테이너, 라이브러리 등).
+
+Provide a professional answer suitable for a job interview (3-4 sentences, with example).
+============================================
+"""
+
             # 프롬프트 구성
             prompt = IT_CHATBOT_PROMPT.format(
+                question_context=question_context,
                 conversation_history=history_text,
-                user_message=user_message
+                user_message=user_message,
+                is_first_question="true" if is_first_question else "false"
             )
 
             logger.info("💬 [IT 챗봇 스트리밍] LLM 스트리밍 중...")

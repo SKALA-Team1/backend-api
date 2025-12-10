@@ -45,10 +45,19 @@ async def chat_with_bot(request: ChatbotMessage):
         logger.info(f"💬 [API] POST /it-explanation/chatbot")
         logger.debug(f"User message: {request.user_message[:100]}...")
 
+        # current_question을 dict로 변환
+        current_question_dict = None
+        if request.current_question:
+            current_question_dict = {
+                "question_text": request.current_question.question_text,
+                "question_text_ko": request.current_question.question_text_ko
+            }
+
         # 챗봇 응답 생성
         response = await chatbot_service.get_response(
             user_message=request.user_message,
-            conversation_history=request.conversation_history
+            conversation_history=request.conversation_history,
+            current_question=current_question_dict
         )
 
         # Spring 2에 대화 저장

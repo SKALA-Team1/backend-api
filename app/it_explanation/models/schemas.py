@@ -22,6 +22,12 @@ class PracticeSessionCreate(BaseModel):
     audio_url: Optional[str] = Field(None, description="음성 답변 S3 URL (선택)")
 
 
+class CurrentQuestionContext(BaseModel):
+    """현재 연습 중인 질문 컨텍스트"""
+    question_text: str = Field(..., description="질문 내용 (영문)")
+    question_text_ko: Optional[str] = Field(None, description="질문 내용 (한글)")
+
+
 class ChatbotMessage(BaseModel):
     """챗봇 메시지 요청"""
     user_id: int = Field(..., description="사용자 ID (Gateway에서 JWT로 추출)")
@@ -29,6 +35,10 @@ class ChatbotMessage(BaseModel):
     conversation_history: List[Dict[str, str]] = Field(
         default=[],
         description="대화 히스토리 [{'role': 'user', 'content': '...'}]"
+    )
+    current_question: Optional[CurrentQuestionContext] = Field(
+        None,
+        description="현재 연습 중인 질문 컨텍스트 (선택사항)"
     )
 
 
