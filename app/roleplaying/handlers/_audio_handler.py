@@ -117,7 +117,21 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
         logger.info(f"🔑 [턴 정보] next_ai_turn={next_ai_turn}, is_last_turn={is_last_turn}")
 
         # ========================================
-        # Step 2a: ReAct Agent를 통한 피드백 판단
+        # Step 2: 🔑 항상 평가 수행 (점수는 항상 계산)
+        # ========================================
+        logger.info(f"📊 [평가 수행] 항상 평가를 수행하여 점수 계산: session={session_id}")
+        evaluation_result = await _evaluate_feedback(
+            feedback_orchestrator=feedback_orchestrator,
+            websocket=websocket,
+            session_id=session_id,
+            user_text=stt_text,
+            audio_data=audio_data if can_use_azure else None,
+            session_state=session_state,
+            can_use_azure=can_use_azure,
+        )
+
+        # ========================================
+        # Step 2a: Agent를 통한 피드백 섹션 표시 여부 판단
         # ========================================
         agent_decision = await _evaluate_feedback_with_agent(
             agent=feedback_decision_agent,
@@ -128,46 +142,42 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             can_use_azure=can_use_azure,
         )
 
+        # 피드백 섹션 표시 여부 결정
+        show_feedback = False
         if agent_decision and agent_decision.get("action") == "FEEDBACK":
-            # Agent가 피드백 결정
-            feedback_result = agent_decision.get("feedback_result")
-            logger.info(
-                f"🤖 [Agent Decision] FEEDBACK - reasoning: {agent_decision.get('reasoning')}"
-            )
+            show_feedback = True
+            logger.info(f"🤖 [Agent Decision] FEEDBACK 표시 - reasoning: {agent_decision.get('reasoning')}")
         elif agent_decision and agent_decision.get("action") == "NEXT_QUESTION":
-            # 🔑 마지막 턴은 항상 피드백 제공 (다음 질문이 없으므로)
             if is_last_turn:
-                logger.info(
-                    f"🔑 [마지막 턴 피드백 강제] Agent said NEXT_QUESTION but this is turn 7 (last), "
-                    f"forcing feedback evaluation"
-                )
-                feedback_result = await _evaluate_feedback(
-                    feedback_orchestrator=feedback_orchestrator,
-                    websocket=websocket,
-                    session_id=session_id,
-                    user_text=stt_text,
-                    audio_data=audio_data if can_use_azure else None,
-                    session_state=session_state,
-                    can_use_azure=can_use_azure,
-                )
+                # 🔑 마지막 턴은 항상 피드백 표시 (다음 질문이 없으므로)
+                show_feedback = True
+                logger.info(f"🔑 [마지막 턴 피드백 강제 표시] Agent said NEXT_QUESTION but this is turn 7 (last)")
             else:
-                # Agent가 다음 질문 결정 (일반 턴)
-                feedback_result = None
-                logger.info(
-                    f"🤖 [Agent Decision] NEXT_QUESTION - reasoning: {agent_decision.get('reasoning')}"
-                )
+                show_feedback = False
+                logger.info(f"🤖 [Agent Decision] NEXT_QUESTION - 피드백 미표시")
         else:
-            # Agent 실패 시 Fallback: 기존 평가 로직 사용
-            logger.info("⏮️  [Fallback] Using traditional feedback evaluation")
-            feedback_result = await _evaluate_feedback(
-                feedback_orchestrator=feedback_orchestrator,
-                websocket=websocket,
-                session_id=session_id,
-                user_text=stt_text,
-                audio_data=audio_data if can_use_azure else None,
-                session_state=session_state,
-                can_use_azure=can_use_azure,
-            )
+            # Agent 실패 시 Fallback: 평가 점수만 사용 (피드백 섹션 미표시)
+            logger.info("⏮️  [Fallback] Using traditional feedback evaluation - 피드백 미표시")
+            show_feedback = False
+
+        # 최종 feedback_result 구성
+        feedback_result = None
+        if evaluation_result:
+            feedback_result = evaluation_result.copy() if isinstance(evaluation_result, dict) else evaluation_result
+
+            # 🔑 피드백 섹션 조건부 설정
+            if not show_feedback:
+                logger.info(f"📝 [피드백 섹션 제외] session={session_id} - show_feedback=False")
+                if isinstance(feedback_result, dict):
+                    feedback_result['feedback_sections'] = None
+
+            # 항상 needs_correction과 retry_count 설정
+            if isinstance(feedback_result, dict):
+                needs_correction = feedback_result.get("needs_correction", False)
+                retry_count = session_state.current_question_retry_count if (session_state and needs_correction) else 0
+                feedback_result['needs_correction'] = needs_correction
+                feedback_result['retry_count'] = retry_count
+                logger.info(f"📊 [점수 및 재시도 정보] session={session_id}, needs_correction={needs_correction}, retry_count={retry_count}")
 
         # Azure 사용 시 usage 증가
         if can_use_azure and feedback_result:
