@@ -80,12 +80,6 @@ class Settings(BaseSettings):
     AZURE_SPEECH_DAILY_LIMIT: int = Field(600, alias="AZURE_SPEECH_DAILY_LIMIT")
 
     # ========================================
-    # Ollama Settings
-    # ========================================
-    OLLAMA_MODEL: str = Field(default="llama3.2", alias="OLLAMA_MODEL")
-    OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
-
-    # ========================================
     # LLM Provider Selection
     # ========================================
     FEEDBACK_LLM_PROVIDER: str = Field("openai", alias="FEEDBACK_LLM_PROVIDER")
@@ -107,7 +101,7 @@ class Settings(BaseSettings):
     # -------------------------------------
     # Spring 2 Backend
     # -------------------------------------
-    SPRING2_BASE_URL: str = Field(default="http://localhost:8082", alias="SPRING2_BASE_URL")
+    SPRING2_BASE_URL: str = Field(default="http://localhost:8081", alias="SPRING2_BASE_URL")
     WS_BASE_URL: str = Field(default="ws://localhost:8001", alias="WS_BASE_URL")
 
     # -------------------------------------
