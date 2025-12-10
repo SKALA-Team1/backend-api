@@ -213,6 +213,11 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             # 클라이언트에 세션 종료 알림
             from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
             await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
+
+            # 세션 정리 및 종합 피드백 생성
+            from app.roleplaying.handlers.ws_realtime_handler import _cleanup_session
+            await _cleanup_session(session_id, "turn_limit")
+
             await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
             session_manager.cleanup(session_id)
             return

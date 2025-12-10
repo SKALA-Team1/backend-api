@@ -326,6 +326,18 @@ async def _cleanup_session(session_id: str, reason: str) -> None:
                 logger.error(f"Failed to notify Spring 2 during cleanup: {e}")
                 # 에러가 나도 cleanup은 계속 진행
 
+            # 종합 피드백 생성 Hook 호출
+            try:
+                import httpx
+                # WS_BASE_URL을 HTTP로 변환 (ws://localhost:8001 -> http://localhost:8001)
+                feedback_base_url = settings.WS_BASE_URL.replace("ws://", "http://").replace("wss://", "https://")
+                feedback_hook_url = f"{feedback_base_url}/feedback/sessions/{session_id}/end-hook"
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    await client.post(feedback_hook_url)
+                logger.info(f"✅ [종합 피드백 Hook 호출 완료] session_id={session_id}")
+            except Exception as e:
+                logger.error(f"❌ [종합 피드백 Hook 오류] {e}", exc_info=True)
+
         session_manager.cleanup(session_id)
         logger.info(f"Session cleaned up: {session_id}, reason={reason}")
 

@@ -351,6 +351,239 @@ class Spring2Client:
             logger.error(f"Session completion error: {e}", exc_info=True)
             raise
 
+    async def get_random_it_question(self) -> Optional[dict]:
+        """
+        랜덤 IT 질문 조회 API 호출
+
+        Spring 2는 MySQL의 it_question 테이블에서 랜덤 질문을 반환합니다.
+
+        Returns:
+            질문 데이터 또는 None (질문이 없을 경우)
+            {
+                "question_id": int,
+                "question_text": str,
+                "question_text_ko": str,
+                "category": str,
+                "difficulty": str,
+                "key_keywords": list,
+                "model_answer": str
+            }
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = "/internal/it-questions/random"
+
+        try:
+            client = await self._get_client()
+            response = await client.get(url)
+
+            logger.info(f"📥 [Spring2] Random question response status: {response.status_code}")
+
+            if response.status_code == 204:
+                logger.warning("No questions available in database")
+                return None
+
+            response.raise_for_status()
+
+            data = response.json()
+            logger.info(f"Random question fetched: question_id={data.get('question_id')}")
+
+            return data
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to fetch random question: status={e.response.status_code}, error={e}")
+            raise
+
+        except Exception as e:
+            logger.error(f"Random question fetch error: {e}", exc_info=True)
+            raise
+
+    async def get_it_question_by_id(self, question_id: int) -> Optional[dict]:
+        """
+        IT 질문 ID로 조회 API 호출
+
+        Spring 2는 MySQL의 it_question 테이블에서 특정 질문을 반환합니다.
+
+        Args:
+            question_id: 질문 ID
+
+        Returns:
+            질문 데이터 또는 None (질문이 없을 경우)
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = f"/internal/it-questions/{question_id}"
+
+        try:
+            client = await self._get_client()
+            response = await client.get(url)
+
+            logger.info(f"📥 [Spring2] Question by ID response status: {response.status_code}")
+
+            if response.status_code == 404:
+                logger.warning(f"Question {question_id} not found")
+                return None
+
+            response.raise_for_status()
+
+            data = response.json()
+            logger.info(f"Question fetched: question_id={question_id}")
+
+            return data
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            logger.error(f"Failed to fetch question {question_id}: status={e.response.status_code}, error={e}")
+            raise
+
+        except Exception as e:
+            logger.error(f"Question fetch error: {e}", exc_info=True)
+            raise
+
+    async def save_practice_session(
+        self,
+        user_id: int,
+        question_id: int,
+        user_answer: str,
+        clarity_score: int,
+        technical_accuracy_score: int,
+        terminology_score: int,
+        overall_score: int,
+        feedback: str,
+        session_type: str = "TEXT",
+        audio_url: Optional[str] = None,
+    ) -> Optional[int]:
+        """
+        IT 연습 세션 저장 API 호출
+
+        Spring 2는 MySQL의 it_practice_session 테이블에 평가 결과를 저장합니다.
+
+        Args:
+            user_id: 사용자 ID
+            question_id: 질문 ID
+            user_answer: 사용자 답변
+            clarity_score: 명확성 점수 (0-100)
+            technical_accuracy_score: 기술적 정확성 점수 (0-100)
+            terminology_score: 전문용어 사용 점수 (0-100)
+            overall_score: 종합 점수 (0-100)
+            feedback: 한국어 피드백
+            session_type: TEXT or VOICE
+            audio_url: 음성 URL (선택)
+
+        Returns:
+            session_id 또는 None (실패 시)
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = "/internal/it-practice/sessions"
+
+        payload = {
+            "user_id": user_id,
+            "question_id": question_id,
+            "user_answer": user_answer,
+            "clarity_score": clarity_score,
+            "technical_accuracy_score": technical_accuracy_score,
+            "terminology_score": terminology_score,
+            "overall_score": overall_score,
+            "feedback": feedback,
+            "session_type": session_type,
+            "audio_url": audio_url,
+        }
+
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=payload)
+
+            logger.info(f"📥 [Spring2] Practice session save response status: {response.status_code}")
+
+            if response.status_code == 400:
+                logger.error(f"Bad request when creating practice session: {response.text}")
+                return None
+
+            response.raise_for_status()
+
+            result = response.json()
+            session_id = result.get("session_id") or result.get("sessionId")
+            logger.info(f"Practice session saved: user_id={user_id}, session_id={session_id}")
+
+            return session_id
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to save practice session: user_id={user_id}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Practice session save error: {e}", exc_info=True)
+            raise
+
+    async def save_chatbot_conversation(
+        self,
+        user_id: int,
+        user_message: str,
+        bot_response: str,
+        context: Optional[str] = None,
+    ) -> dict:
+        """
+        IT 챗봇 대화 저장 API 호출
+
+        Spring 2는 MySQL의 it_chatbot_conversation 테이블에 대화를 저장합니다.
+
+        Args:
+            user_id: 사용자 ID
+            user_message: 사용자 질문/메시지
+            bot_response: 챗봇 응답
+            context: 대화 컨텍스트 (JSON 문자열, 선택사항)
+
+        Returns:
+            API 응답 ({"conversationId": 1, "userId": 6, ...})
+
+        Raises:
+            httpx.HTTPStatusError: HTTP 에러 발생 시
+        """
+        url = "/internal/it-chatbot/conversations"
+
+        payload = {
+            "user_id": user_id,
+            "user_message": user_message,
+            "bot_response": bot_response,
+        }
+
+        if context:
+            payload["context"] = context
+
+        try:
+            client = await self._get_client()
+            response = await client.post(url, json=payload)
+
+            logger.info(f"📥 [Spring2] Chatbot conversation save response status: {response.status_code}")
+
+            response.raise_for_status()
+
+            result = response.json()
+            logger.info(
+                f"Chatbot conversation saved: user_id={user_id}, conversation_id={result.get('conversationId')}"
+            )
+
+            return result
+
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed to save chatbot conversation: user_id={user_id}, "
+                f"status={e.response.status_code}, error={e}"
+            )
+            raise
+
+        except Exception as e:
+            logger.error(f"Chatbot conversation save error: {e}", exc_info=True)
+            raise
+
     async def close(self):
         """HTTP 클라이언트 종료"""
         if self.client:
