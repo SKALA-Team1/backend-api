@@ -239,6 +239,113 @@ class FeedbackDecisionAgentImpl:
                 can_use_azure=can_use_azure,
             )
 
+    async def decide_based_on_evaluation(
+        self,
+        evaluation_result: Dict[str, Any],
+        session_state: Any,
+        retry_count: int,
+        can_use_azure: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        이미 평가된 결과를 기반으로 피드백/질문 판단 (재평가 없음)
+
+        Method B의 최적화: 평가 1회만 수행하고, Agent는 판단만 함
+
+        Args:
+            evaluation_result: 이미 평가된 결과 (evaluate_response_fast 반환값)
+            session_state: 세션 상태
+            retry_count: 현재 재시도 횟수
+            can_use_azure: Azure 발음 평가 사용 가능 여부
+
+        Returns:
+            {
+                "action": "FEEDBACK" | "NEXT_QUESTION",
+                "feedback_result": evaluation_result,
+                "reasoning": str,
+                "confidence": float (0-1)
+            }
+        """
+        try:
+            logger.info(
+                f"🤖 [ReAct-Optimized] Starting decision with pre-evaluated result: "
+                f"pronunciation={evaluation_result.get('pronunciation_score')}, "
+                f"retry={retry_count}"
+            )
+
+            # Step 1: 재시도 컨텍스트 분석만 수행 (평가는 재수행하지 않음)
+            logger.info("🔧 [ReAct-Optimized] Step 1: Analyzing retry context...")
+
+            retry_context = await analyze_retry_context_tool(
+                session_state=session_state,
+                retry_count=retry_count,
+                can_use_azure=can_use_azure,
+            )
+
+            logger.info(
+                f"🔄 [ReAct-Optimized] Retry context: "
+                f"count={retry_context['retry_count']}, "
+                f"max_exceeded={retry_context['is_max_retries_exceeded']}"
+            )
+
+            # Step 2: LLM의 최종 판단 (평가 결과 기반)
+            logger.info("🔧 [ReAct-Optimized] Step 2: LLM making final decision...")
+
+            decision_prompt = self._format_decision_prompt(
+                evaluation_result=evaluation_result,
+                retry_context=retry_context,
+                session_state=session_state,
+                retry_count=retry_count,
+            )
+
+            # 동기 LLM 호출
+            loop = asyncio.get_event_loop()
+            llm_response = await loop.run_in_executor(
+                None,
+                lambda: self.llm.invoke(decision_prompt),
+            )
+
+            decision_text = (
+                llm_response.content
+                if hasattr(llm_response, "content")
+                else str(llm_response)
+            )
+
+            logger.info(f"💭 [ReAct-Optimized] LLM decision: {decision_text[:100]}...")
+
+            # Step 3: 응답 파싱
+            parsed_decision = self._parse_decision(decision_text)
+
+            # ✅ 피드백 결정 시 전달받은 평가 결과 포함
+            if parsed_decision["action"] == "FEEDBACK":
+                parsed_decision["feedback_result"] = evaluation_result
+
+                logger.info(
+                    f"🔢 [ReAct-Optimized] Feedback decision: "
+                    f"pronunciation={evaluation_result.get('pronunciation_score')}, "
+                    f"grammar={evaluation_result.get('grammar_score')}, "
+                    f"relevance={evaluation_result.get('relevance_score')}"
+                )
+            else:
+                # NEXT_QUESTION 결정 시에도 결과 포함 (나중 참고용)
+                parsed_decision["feedback_result"] = evaluation_result
+
+            logger.info(
+                f"✅ [ReAct-Optimized] Final decision: action={parsed_decision['action']}, "
+                f"confidence={parsed_decision['confidence']:.2f}"
+            )
+
+            return parsed_decision
+
+        except Exception as e:
+            logger.error(f"❌ [ReAct-Optimized] Error: {e}", exc_info=True)
+            # Fallback: 평가 결과 그대로 반환
+            return {
+                "action": "FEEDBACK" if evaluation_result.get("needs_correction", False) else "NEXT_QUESTION",
+                "feedback_result": evaluation_result,
+                "reasoning": "Fallback: Using evaluation result directly",
+                "confidence": 0.5,
+            }
+
     def _format_decision_prompt(
         self,
         evaluation_result: Dict[str, Any],
@@ -313,7 +420,7 @@ Respond in JSON format ONLY (no other text):
 
         if filtered_lines:
             result = "\n".join(filtered_lines)
-            logger.info(f"✂️ [Filter] Extracted {primary_issue} feedback")
+
             return result
 
         # 필터링 실패 시 전체 반환

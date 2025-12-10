@@ -193,7 +193,7 @@ class StreamingSTTManager:
             self._connections[session_id] = connection
             session = StreamingSTTSession(connection)
             self._sessions[session_id] = session
-            logger.info(f"✅ Streaming STT session created: {session_id}")
+
             return session
         except Exception as e:
             logger.error(f"❌ Failed to create streaming session: {e}", exc_info=True)

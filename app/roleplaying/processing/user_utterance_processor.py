@@ -107,10 +107,15 @@ class UtterancePersistence:
         audio_data: Optional[bytes] = None
     ) -> None:
         """비동기 발화 저장 스케줄"""
-        asyncio.create_task(
+        from app.roleplaying.handlers._common import _handle_task_error
+
+        task = asyncio.create_task(
             UtterancePersistence._save_with_retry(
                 session_id, text, utterance_index, speaker, audio_data
             )
+        )
+        task.add_done_callback(
+            lambda t: _handle_task_error(t, f"utterance_save:session={session_id}")
         )
 
     @staticmethod

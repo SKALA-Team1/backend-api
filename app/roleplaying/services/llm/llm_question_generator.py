@@ -136,11 +136,11 @@ class QuestionGeneratorImpl(LLMServiceBase):
             # ====================================
             # Step 4: LLM 호출
             # ====================================
-            logger.info("🟢 [다음 질문 생성] LLM 호출 중...")
+
             question = await self.llm.invoke(prompt)
             question = question.strip()
 
-            logger.info(f"✅ [다음 질문 생성 완료] {question[:80]}...")
+
             return question
 
         except Exception as e:
@@ -174,7 +174,7 @@ class QuestionGeneratorImpl(LLMServiceBase):
             question = await self.llm.invoke(prompt)
             question = question.strip()
 
-            logger.info(f"✅ [Follow-up 질문 생성 완료] {question[:80]}...")
+
             return question
 
         except Exception as e:
@@ -220,7 +220,7 @@ class QuestionGeneratorImpl(LLMServiceBase):
                     if word.strip():  # 빈 word 필터링
                         yield word + " "
 
-            logger.info("✅ [Follow-up 질문 스트리밍 완료]")
+
 
         except Exception as e:
             logger.error(f"Follow-up question streaming failed: {e}", exc_info=True)

@@ -112,7 +112,7 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
 
     try:
         # ========================================
-        # Step 1: 세션 검증 (Redis 캐시 → Spring 2 조회)
+
         # ========================================
         session_data = await _validate_session(session_id)
 
@@ -130,7 +130,7 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
         )
 
         # ========================================
-        # Step 2: 메시지 라우터 생성 및 websocket.scope 설정
+
         # ========================================
         # websocket.scope에 session_data와 user_id를 저장 (핸들러에서 접근 가능하도록)
         websocket.scope["session_data"] = session_data
@@ -146,7 +146,7 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
         )
 
         # ========================================
-        # Step 3: 메시지 수신 루프
+
         # ========================================
         session_initialized = False
 
@@ -166,10 +166,8 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
                 ):
                     continue
 
-                # 오디오 청크를 세션 버퍼에 저장 (라우터를 거치지 않음 - binary 데이터)
                 try:
-                    SessionAudioHandler.append_audio_chunk(session_id, raw_data["bytes"])
-                    logger.debug(f"Audio chunk appended: session={session_id}, size={len(raw_data['bytes'])} bytes")
+                    await SessionAudioHandler.append_audio_chunk_async(session_id, raw_data["bytes"])
                 except Exception as e:
                     logger.error(f"Failed to append audio chunk: {e}", exc_info=True)
                 continue

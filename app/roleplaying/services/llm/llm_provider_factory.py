@@ -79,7 +79,7 @@ class OpenAIProvider:
             temperature=temperature
         )
         self.model_name = model_name
-        logger.info(f"✅ OpenAIProvider initialized: model={model_name}")
+
 
     async def invoke(self, prompt: str) -> str:
         """

@@ -75,11 +75,6 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
             interaction_mode=init_msg.interactionMode,  # Pass interaction mode
         )
 
-        logger.info(
-            f"Session initialized: {session_id}, "
-            f"role={init_msg.myRole} → {init_msg.aiRole}"
-        )
-
         # ACK 전송
         ack = AckMessage(message="Session initialized")
         await websocket.send_json(ack.model_dump())
@@ -119,15 +114,12 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
                 slack_message=None,
                 is_fixed_question=True,  # ✅ 고정 질문임을 명시
             )
-            logger.info(f"✅ First fixed question saved: session={session_id}, index={first_ai_index}")
         except Exception as e:
-            logger.error(f"❌ Failed to save first fixed question: {e}", exc_info=True)
+            logger.error(f"Failed to save first fixed question: {e}", exc_info=True)
 
         # 클라이언트에 전송
         ai_msg = AiTextMessage(text=first_question, is_fixed_question=True)
         await websocket.send_json(ai_msg.model_dump())
-
-        logger.info(f"First question sent: {first_question[:50]}...")
 
     except ValueError as e:
         logger.error(f"Session creation failed: {e}")
@@ -154,7 +146,6 @@ async def handle_end_session(router, websocket: WebSocket, session_id: str, mess
     """
     try:
         reason = message.get("reason", "user_end") if isinstance(message, dict) else "user_end"
-        logger.info(f"Ending session: {session_id}, reason={reason}")
 
         session_state = session_manager.get_session(session_id)
         session_manager.end_session(session_id, reason)
@@ -176,7 +167,6 @@ async def handle_end_session(router, websocket: WebSocket, session_id: str, mess
         await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason=reason)
 
         session_manager.cleanup(session_id)
-        logger.info(f"Session ended and cleaned up: {session_id}")
 
     except Exception as e:
         logger.error(f"End session handler error: {e}", exc_info=True)

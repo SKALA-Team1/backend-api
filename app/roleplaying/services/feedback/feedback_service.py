@@ -92,7 +92,7 @@ class GrammarEvaluatorImpl:
         prompt = GRAMMAR_EVALUATION_PROMPT.format(user_text=user_text)
 
         try:
-            logger.info("🟢 [문법 평가] LLM 호출 중...")
+
 
             response = await self.llm.invoke(prompt)
             response_text = response if isinstance(response, str) else str(response)
@@ -107,12 +107,12 @@ class GrammarEvaluatorImpl:
                 if score is None:
                     logger.warning("Grammar evaluation returned no score")
                     return None
-                logger.info(f"✅ [문법 평가 완료] {score}점 | feedback: {feedback[:50] if feedback else '(없음)'}")
+
                 return_value = {
                     "score": score,
                     "feedback": feedback
                 }
-                logger.info(f"📤 [문법 평가 반환값] {return_value}")  # ← 반환값 로깅
+
                 return return_value
             else:
                 # 점수만 추출 시도
@@ -120,7 +120,7 @@ class GrammarEvaluatorImpl:
                 if score is None:
                     logger.warning(f"Failed to parse grammar score from: {response_text}")
                     return None
-                logger.info(f"✅ [문법 평가 완료 (파싱)] {score}점")
+
                 return {"score": score, "feedback": response_text}
 
         except Exception as e:
@@ -140,7 +140,7 @@ class GrammarEvaluatorImpl:
         prompt = GRAMMAR_EVALUATION_PROMPT.format(user_text=user_text)
 
         try:
-            logger.info("🟢 [문법 평가 스트리밍] LLM 스트리밍 중...")
+
 
             async for token in self.llm.stream(prompt):
                 if token:  # 빈 토큰 제외
@@ -219,7 +219,7 @@ class RelevanceEvaluatorImpl:
         )
 
         try:
-            logger.info("🔴 [맥락 평가] LLM 호출 중...")
+
 
             response = await self.llm.invoke(prompt)
             response_text = response if isinstance(response, str) else str(response)
@@ -234,12 +234,12 @@ class RelevanceEvaluatorImpl:
                 if score is None:
                     logger.warning("Relevance evaluation returned no score")
                     return None
-                logger.info(f"✅ [맥락 평가 완료] {score}점 | feedback: {feedback[:50] if feedback else '(없음)'}")
+
                 return_value = {
                     "score": score,
                     "feedback": feedback
                 }
-                logger.info(f"📤 [맥락 평가 반환값] {return_value}")  # ← 반환값 로깅
+
                 return return_value
             else:
                 # 점수만 추출 시도
@@ -247,7 +247,7 @@ class RelevanceEvaluatorImpl:
                 if score is None:
                     logger.warning(f"Failed to parse relevance score from: {response_text}")
                     return None
-                logger.info(f"✅ [맥락 평가 완료 (파싱)] {score}점")
+
                 return {"score": score, "feedback": response_text}
 
         except Exception as e:
@@ -279,7 +279,7 @@ class RelevanceEvaluatorImpl:
         )
 
         try:
-            logger.info("🔴 [맥락 평가 스트리밍] LLM 스트리밍 중...")
+
 
             async for token in self.llm.stream(prompt):
                 if token:  # 빈 토큰 제외
@@ -405,7 +405,7 @@ class PronunciationEvaluatorImpl:
             completeness_score = azure_result.get("completeness_score", 0)
             words = azure_result.get("words", [])
 
-            logger.info(f"✅ [Azure 발음 평가 완료] 점수: {pronunciation_score}")
+
 
             # Step 2: LLM으로 피드백 생성
             error_words = [
@@ -439,7 +439,7 @@ class PronunciationEvaluatorImpl:
                     feedback_score = int(pronunciation_score)
 
                 feedback_text = result.get("feedback", "")
-                logger.info(f"✅ [발음 피드백 생성 완료] {feedback_score}점")
+
 
                 return {
                     "success": True,
@@ -453,7 +453,7 @@ class PronunciationEvaluatorImpl:
                 }
             else:
                 # 피드백만 추출 시도
-                logger.info(f"✅ [발음 피드백 생성 완료 (파싱)] {int(pronunciation_score)}점")
+
                 return {
                     "success": True,
                     "score": int(pronunciation_score),
@@ -510,7 +510,7 @@ class PronunciationEvaluatorImpl:
             completeness_score = azure_result.get("completeness_score", 0)
             words = azure_result.get("words", [])
 
-            logger.info(f"✅ [Azure 발음 평가 완료] 점수: {pronunciation_score}")
+
 
             # Step 2: LLM으로 피드백 생성 (스트리밍)
             error_words = [
@@ -686,33 +686,42 @@ class FeedbackOrchestratorImpl:
 
             # 병렬 평가
             eval_start = time.time()
-            logger.info("📊 [병렬 평가 시작] 발음, 문법, 맥락 평가 중...")
 
+            # 동적으로 task 구성
+            tasks = [
+                self.grammar_evaluator.evaluate_grammar(user_text),
+                self.relevance_evaluator.evaluate_relevance(
+                    user_text, conversation_history, scenario_context
+                ),
+            ]
             if audio_data:
-                pronunciation, grammar, relevance = await asyncio.gather(
-                    self.pronunciation_evaluator.evaluate_pronunciation(audio_data, user_text),
-                    self.grammar_evaluator.evaluate_grammar(user_text),
-                    self.relevance_evaluator.evaluate_relevance(
-                        user_text, conversation_history, scenario_context
-                    )
-                )
-            else:
-                logger.debug("Skipping pronunciation evaluation (no audio data)")
-                grammar, relevance = await asyncio.gather(
-                    self.grammar_evaluator.evaluate_grammar(user_text),
-                    self.relevance_evaluator.evaluate_relevance(
-                        user_text, conversation_history, scenario_context
-                    )
-                )
-                pronunciation = None
+                tasks.insert(0, self.pronunciation_evaluator.evaluate_pronunciation(audio_data, user_text))
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # 결과 추출 및 에러 처리
+            pronunciation = None
+            if audio_data:
+                pronunciation = results.pop(0)
+                if isinstance(pronunciation, Exception):
+                    logger.warning(f"Pronunciation evaluation failed: {pronunciation}")
+                    pronunciation = None
+
+            grammar = results.pop(0)
+            if isinstance(grammar, Exception):
+                logger.warning(f"Grammar evaluation failed: {grammar}")
+                grammar = None
+
+            relevance = results.pop(0)
+            if isinstance(relevance, Exception):
+                logger.warning(f"Relevance evaluation failed: {relevance}")
+                relevance = None
 
             eval_time = time.time() - eval_start
-            logger.info(f"✅ [병렬 평가 완료] 소요 시간: {eval_time:.2f}초")
 
-            # 평가 결과 안전 처리
-            pronunciation_score = normalize_score(pronunciation.get("score") if pronunciation else None)
-            grammar_score = normalize_score(grammar.get("score") if grammar else None)
-            relevance_score = normalize_score(relevance.get("score") if relevance else None)
+            pronunciation_score = normalize_score(pronunciation.get("score") if pronunciation and isinstance(pronunciation, dict) else None)
+            grammar_score = normalize_score(grammar.get("score") if grammar and isinstance(grammar, dict) else None)
+            relevance_score = normalize_score(relevance.get("score") if relevance and isinstance(relevance, dict) else None)
 
             logger.info(f"  - 발음: {pronunciation_score if pronunciation_score is not None else '?'}점")
             logger.info(f"  - 문법: {grammar_score if grammar_score is not None else '?'}점")
@@ -905,7 +914,7 @@ class FeedbackOrchestratorImpl:
             # 각 섹션 순차 처리
             for config in section_configs:
                 section_type = config["section_type"]
-                logger.info(f"🟢 [{section_type}] 영문 피드백 실시간 스트리밍 중...")
+
 
                 # Step 1: 실시간 LLM 스트리밍으로 영문 피드백 생성
                 english_tokens = []
@@ -923,14 +932,14 @@ class FeedbackOrchestratorImpl:
                 if not english_feedback:
                     english_feedback = config["fallback"]
 
-                logger.info(f"✅ [{section_type}] 영문 완료: {english_feedback[:60]}...")
+
 
                 # Step 2: 영문이 완성되면 한글로 번역
-                logger.info(f"🟢 [{section_type}] 한글 번역 중...")
+
                 korean_feedback = await self._translate_feedback(english_feedback)
                 korean_feedback = korean_feedback or english_feedback
 
-                logger.info(f"✅ [{section_type}] 한글 완료: {korean_feedback[:60]}...")
+
 
                 # Step 3: 완성된 섹션 (영문 + 한글) 한 번에 yield
                 section_score = config["score"]
@@ -966,7 +975,7 @@ class FeedbackOrchestratorImpl:
         user_text = config.get("user_text", "")
 
         try:
-            logger.info(f"🟢 [{section_type}] evaluator 스트리밍 메서드 호출...")
+
 
             # 각 섹션별로 evaluator의 스트리밍 메서드 직접 호출
             if section_type == "pronunciation":
