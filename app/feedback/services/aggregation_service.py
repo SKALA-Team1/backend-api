@@ -278,7 +278,7 @@ async def _save_to_spring2(session_id: str, feedback_data: Dict) -> None:
 
     # Spring 2 DTO 형식으로 변환
     payload = {
-        "avgPronunciaition": feedback_data.get("total_pronunciation"),
+        "avgPronunciation": feedback_data.get("total_pronunciation"),
         "avgGrammar": feedback_data.get("total_grammar"),
         "avgRelevance": feedback_data.get("total_diversity"),
         "feedbackShort": feedback_data.get("feedback_short"),
