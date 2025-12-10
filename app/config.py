@@ -82,8 +82,8 @@ class Settings(BaseSettings):
     # ========================================
     # Ollama Settings
     # ========================================
-    OLLAMA_MODEL: str = Field("llama3.2", alias="OLLAMA_MODEL")
-    OLLAMA_BASE_URL: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
+    OLLAMA_MODEL: str = Field(default="llama3.2", alias="OLLAMA_MODEL")
+    OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
 
     # ========================================
     # LLM Provider Selection
@@ -93,22 +93,22 @@ class Settings(BaseSettings):
     # -------------------------------------
     # Redis
     # -------------------------------------
-    REDIS_URL: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
+    REDIS_URL: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
 
     # -------------------------------------
     # S3 (MinIO 또는 AWS S3)
     # -------------------------------------
-    S3_ENDPOINT_URL: str = Field("http://localhost:9000", alias="S3_ENDPOINT_URL")
-    S3_ACCESS_KEY: str = Field("minioadmin", alias="S3_ACCESS_KEY")
-    S3_SECRET_KEY: str = Field("minioadmin123", alias="S3_SECRET_KEY")
-    S3_BUCKET_NAME: str = Field("skala", alias="S3_BUCKET_NAME")
-    S3_REGION: str = Field("us-east-1", alias="S3_REGION")
+    S3_ENDPOINT_URL: str = Field(default="http://localhost:9000", alias="S3_ENDPOINT_URL")
+    S3_ACCESS_KEY: str = Field(default="minioadmin", alias="S3_ACCESS_KEY")
+    S3_SECRET_KEY: str = Field(default="minioadmin123", alias="S3_SECRET_KEY")
+    S3_BUCKET_NAME: str = Field(default="skala", alias="S3_BUCKET_NAME")
+    S3_REGION: str = Field(default="us-east-1", alias="S3_REGION")
 
     # -------------------------------------
     # Spring 2 Backend
     # -------------------------------------
-    SPRING2_BASE_URL: str = Field("http://localhost:8082", alias="SPRING2_BASE_URL")
-    WS_BASE_URL: str = Field("ws://localhost:8001", alias="WS_BASE_URL")
+    SPRING2_BASE_URL: str = Field(default="http://localhost:8082", alias="SPRING2_BASE_URL")
+    WS_BASE_URL: str = Field(default="ws://localhost:8001", alias="WS_BASE_URL")
 
     # -------------------------------------
     # Roleplay Session Settings
