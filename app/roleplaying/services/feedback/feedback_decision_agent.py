@@ -267,9 +267,9 @@ Retry Context:
 Decision Criteria:
 1. If all evaluations failed → NEXT_QUESTION
 2. If max retries exceeded → NEXT_QUESTION (force pass)
-3. If pronunciation < 65 → FEEDBACK (pronunciation issue)
+3. If pronunciation < 70 → FEEDBACK (pronunciation issue)
 4. If grammar < 70 → FEEDBACK (grammar issue)
-5. If relevance < 75 → FEEDBACK (relevance issue)
+5. If relevance < 70 → FEEDBACK (relevance issue)
 6. Otherwise → NEXT_QUESTION (learner doing well)
 
 Respond in JSON format ONLY (no other text):

@@ -255,11 +255,15 @@ async def _send_feedback_messages(
     session_id: str,
     session_state,
     feedback_result: Optional[dict],
+    show_feedback: bool = True,
 ) -> bool:
     """
     피드백 메시지 전송 및 재시도 여부 판단
     - 점수 전송
     - 피드백 섹션 스트리밍 (각 섹션이 생성되면 즉시 전송)
+
+    Args:
+        show_feedback: False면 피드백 섹션을 생성하지 않음 (점수는 여전히 전송)
 
     Returns:
         True if retry needed (early return), False otherwise
@@ -280,90 +284,97 @@ async def _send_feedback_messages(
     logger.info(f"Feedback scores sent: {feedback_result['scores']}")
 
     # Step 2: ✅ 구조화된 피드백 섹션 스트리밍 (영문 토큰 + 한글 섹션)
-    feedback_sections_list = []
-    try:
-        from app.roleplaying.services.dependencies.feedback import get_feedback_orchestrator
+    # 🔑 show_feedback=False면 피드백 섹션을 생성하지 않음
+    if show_feedback:
+        feedback_sections_list = []
+        try:
+            from app.roleplaying.services.dependencies.feedback import get_feedback_orchestrator
 
-        feedback_orchestrator = get_feedback_orchestrator()
+            feedback_orchestrator = get_feedback_orchestrator()
 
-        # 평가 결과에서 필요한 정보 추출
-        pronunciation = feedback_result.get("pronunciation")
-        grammar = feedback_result.get("grammar")
-        relevance = feedback_result.get("relevance")
-        pronunciation_score = feedback_result.get("pronunciation_score")
-        grammar_score = feedback_result.get("grammar_score")
-        relevance_score = feedback_result.get("relevance_score")
+            # 평가 결과에서 필요한 정보 추출
+            pronunciation = feedback_result.get("pronunciation")
+            grammar = feedback_result.get("grammar")
+            relevance = feedback_result.get("relevance")
+            pronunciation_score = feedback_result.get("pronunciation_score")
+            grammar_score = feedback_result.get("grammar_score")
+            relevance_score = feedback_result.get("relevance_score")
 
-        # 🔍 점수 확인 로깅
-        logger.info(
-            f"📊 [점수 추출] pronunciation={pronunciation_score}, "
-            f"grammar={grammar_score}, relevance={relevance_score}"
-        )
+            # 🔍 점수 확인 로깅
+            logger.info(
+                f"📊 [점수 추출] pronunciation={pronunciation_score}, "
+                f"grammar={grammar_score}, relevance={relevance_score}"
+            )
 
-        # 스트리밍에 필요한 추가 정보
-        user_text = feedback_result.get("user_text", "")
-        conversation_history = feedback_result.get("conversation_history", [])
-        scenario_context = feedback_result.get("scenario_context", {})
-        audio_data = feedback_result.get("audio_data")
+            # 스트리밍에 필요한 추가 정보
+            user_text = feedback_result.get("user_text", "")
+            conversation_history = feedback_result.get("conversation_history", [])
+            scenario_context = feedback_result.get("scenario_context", {})
+            audio_data = feedback_result.get("audio_data")
 
-        # 피드백 섹션 스트리밍 생성 (영문 토큰 + 한글 섹션)
-        section_count = 0
-        async for item in feedback_orchestrator._build_feedback_sections_stream(
-            user_text=user_text,
-            conversation_history=conversation_history,
-            scenario_context=scenario_context,
-            pronunciation=pronunciation,
-            grammar=grammar,
-            relevance=relevance,
-            pronunciation_score=pronunciation_score,
-            grammar_score=grammar_score,
-            relevance_score=relevance_score,
-            audio_data=audio_data
-        ):
-            if item["type"] == "feedback_token":
-                # 영문 토큰 즉시 전송
-                token_msg = FeedbackStreamingMessage(
-                    chunk=item["token"]
-                )
-                await websocket.send_json(token_msg.model_dump())
-                logger.debug(f"📤 [피드백 토큰 전송] {item['section_type']}: {repr(item['token'])}")
+            # 피드백 섹션 스트리밍 생성 (영문 토큰 + 한글 섹션)
+            section_count = 0
+            async for item in feedback_orchestrator._build_feedback_sections_stream(
+                user_text=user_text,
+                conversation_history=conversation_history,
+                scenario_context=scenario_context,
+                pronunciation=pronunciation,
+                grammar=grammar,
+                relevance=relevance,
+                pronunciation_score=pronunciation_score,
+                grammar_score=grammar_score,
+                relevance_score=relevance_score,
+                audio_data=audio_data
+            ):
+                if item["type"] == "feedback_token":
+                    # 영문 토큰 즉시 전송
+                    token_msg = FeedbackStreamingMessage(
+                        chunk=item["token"]
+                    )
+                    await websocket.send_json(token_msg.model_dump())
+                    logger.debug(f"📤 [피드백 토큰 전송] {item['section_type']}: {repr(item['token'])}")
 
-            elif item["type"] == "feedback_section":
-                # 한글 섹션 완성 후 한 번에 전송
-                section_score = item["score"]
-                logger.info(
-                    f"📤 [피드백 섹션 전송] {item['section_type']}: "
-                    f"score={section_score} (type={type(section_score).__name__})"
-                )
+                elif item["type"] == "feedback_section":
+                    # 한글 섹션 완성 후 한 번에 전송
+                    section_score = item["score"]
+                    logger.info(
+                        f"📤 [피드백 섹션 전송] {item['section_type']}: "
+                        f"score={section_score} (type={type(section_score).__name__})"
+                    )
 
-                sections_msg = FeedbackSectionsMessage(sections=[{
-                    "type": item["section_type"],
-                    "feedback_en": item["feedback_en"],
-                    "feedback_ko": item["feedback_ko"],
-                    "score": section_score
-                }])
-                await websocket.send_json(sections_msg.model_dump())
-                logger.debug(f"✅ 메시지 전송 완료: {sections_msg.model_dump()}")
+                    sections_msg = FeedbackSectionsMessage(sections=[{
+                        "type": item["section_type"],
+                        "feedback_en": item["feedback_en"],
+                        "feedback_ko": item["feedback_ko"],
+                        "score": section_score
+                    }])
+                    await websocket.send_json(sections_msg.model_dump())
+                    logger.debug(f"✅ 메시지 전송 완료: {sections_msg.model_dump()}")
 
-                # ✅ 생성된 섹션을 리스트에 저장 (Spring 2 저장용)
-                feedback_sections_list.append({
-                    "type": item["section_type"],
-                    "feedback_en": item["feedback_en"],
-                    "feedback_ko": item["feedback_ko"],
-                    "score": section_score
-                })
-                section_count += 1
-                logger.info(f"✅ [피드백 섹션 완성] {item['section_type']} ({section_count}/3)")
+                    # ✅ 생성된 섹션을 리스트에 저장 (Spring 2 저장용)
+                    feedback_sections_list.append({
+                        "type": item["section_type"],
+                        "feedback_en": item["feedback_en"],
+                        "feedback_ko": item["feedback_ko"],
+                        "score": section_score
+                    })
+                    section_count += 1
+                    logger.info(f"✅ [피드백 섹션 완성] {item['section_type']} ({section_count}/3)")
 
-        logger.info(f"All {section_count} feedback sections streamed")
+            logger.info(f"All {section_count} feedback sections streamed")
 
-        # ✅ feedback_result에 생성된 feedback_sections 저장 (Spring 2에 저장하기 위해)
-        if feedback_sections_list:
-            feedback_result["feedback_sections"] = feedback_sections_list
-            logger.info(f"✅ feedback_sections saved to feedback_result: {len(feedback_sections_list)} sections")
+            # ✅ feedback_result에 생성된 feedback_sections 저장 (Spring 2에 저장하기 위해)
+            if feedback_sections_list:
+                feedback_result["feedback_sections"] = feedback_sections_list
+                logger.info(f"✅ feedback_sections saved to feedback_result: {len(feedback_sections_list)} sections")
 
-    except Exception as e:
-        logger.error(f"Failed to stream feedback sections: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Failed to stream feedback sections: {e}", exc_info=True)
+    else:
+        # show_feedback=False면 피드백 섹션을 빈 배열로 유지
+        logger.info(f"🔑 [피드백 미표시] show_feedback=False - 피드백 섹션 생성 생략, feedback_sections=[]")
+        if isinstance(feedback_result, dict):
+            feedback_result["feedback_sections"] = []
 
     # 재시도 처리
     needs_correction = feedback_result.get("needs_correction", False)
@@ -463,9 +474,9 @@ async def _save_utterance_with_feedback(
                 "relevance_score": None,
                 "overall_score": None,
                 "needs_correction": False,  # ✅ Boolean False (spring2_client에서 0으로 변환)
-                "retry_count": None,
+                "retry_count": 0,  # ✅ 0으로 저장 (재시도 필요 없음)
                 "primary_issue": "none",  # ✅ 명시적으로 "none"
-                "feedback_sections": None,
+                "feedback_sections": [],  # ✅ 빈 배열 (피드백 섹션 없음)
             })
 
         logger.info(f"📤 [Spring2 저장] save_utterance 호출 중: session={session_id}, index={utterance_index}")

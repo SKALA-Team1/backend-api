@@ -99,7 +99,21 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         logger.info(f"🔑 [턴 정보] next_ai_turn={next_ai_turn}, is_last_turn={is_last_turn}")
 
         # ========================================
-        # Step 2a: ReAct Agent를 통한 피드백 판단
+        # Step 2: 🔑 항상 평가 수행 (점수는 항상 계산)
+        # ========================================
+        logger.info(f"📊 [평가 수행] 항상 평가를 수행하여 점수 계산: session={session_id}")
+        evaluation_result = await _evaluate_feedback(
+            feedback_orchestrator=feedback_orchestrator,
+            websocket=websocket,
+            session_id=session_id,
+            user_text=user_text,
+            audio_data=None,  # Text mode - no audio
+            session_state=session_state,
+            can_use_azure=False,  # Text mode - no Azure pronunciation
+        )
+
+        # ========================================
+        # Step 2a: Agent를 통한 피드백 섹션 표시 여부 판단
         # ========================================
         agent_decision = await _evaluate_feedback_with_agent(
             agent=feedback_decision_agent,
@@ -110,46 +124,51 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             can_use_azure=False,  # Text mode - no Azure pronunciation
         )
 
-        if agent_decision and agent_decision.get("action") == "FEEDBACK":
-            # Agent가 피드백 결정
-            feedback_result = agent_decision.get("feedback_result")
-            logger.info(
-                f"🤖 [Agent Decision] FEEDBACK - reasoning: {agent_decision.get('reasoning')}"
-            )
-        elif agent_decision and agent_decision.get("action") == "NEXT_QUESTION":
-            # 🔑 마지막 턴은 항상 피드백 제공 (다음 질문이 없으므로)
-            if is_last_turn:
-                logger.info(
-                    f"🔑 [마지막 턴 피드백 강제] Agent said NEXT_QUESTION but this is turn 7 (last), "
-                    f"forcing feedback evaluation"
-                )
-                feedback_result = await _evaluate_feedback(
-                    feedback_orchestrator=feedback_orchestrator,
-                    websocket=websocket,
-                    session_id=session_id,
-                    user_text=user_text,
-                    audio_data=None,  # Text mode - no audio
-                    session_state=session_state,
-                    can_use_azure=False,  # Text mode - no Azure pronunciation
-                )
+        # 🔑 needs_correction을 기준으로 피드백 표시 여부 결정
+        # needs_correction = 점수 기반 판단 (신뢰도 높음)
+        # agent_decision = LLM 기반 판단 (참고용)
+        needs_correction = False
+        if evaluation_result and isinstance(evaluation_result, dict):
+            needs_correction = evaluation_result.get("needs_correction", False)
+
+        logger.info(f"📊 [피드백 표시 결정] needs_correction={needs_correction}, is_last_turn={is_last_turn}")
+
+        if needs_correction:
+            # needs_correction = True → Agent 판단 존중 또는 마지막 턴이면 표시
+            if agent_decision and agent_decision.get("action") == "FEEDBACK":
+                show_feedback = True
+                logger.info(f"🤖 [Agent + needs_correction] FEEDBACK 표시 - reasoning: {agent_decision.get('reasoning')}")
+            elif is_last_turn:
+                # 마지막 턴은 무조건 피드백 표시
+                show_feedback = True
+                logger.info(f"🔑 [마지막 턴 피드백 강제 표시] needs_correction=True + is_last_turn")
             else:
-                # Agent가 다음 질문 결정 (일반 턴)
-                feedback_result = None
-                logger.info(
-                    f"🤖 [Agent Decision] NEXT_QUESTION - reasoning: {agent_decision.get('reasoning')}"
-                )
+                # Agent가 NEXT_QUESTION이지만 needs_correction=True면 피드백 안 함
+                show_feedback = False
+                logger.info(f"📊 [needs_correction=True 무시] Agent said NEXT_QUESTION but needs_correction shows correction needed")
         else:
-            # Agent 실패 시 Fallback: 기존 평가 로직 사용
-            logger.info("⏮️  [Fallback] Using traditional feedback evaluation")
-            feedback_result = await _evaluate_feedback(
-                feedback_orchestrator=feedback_orchestrator,
-                websocket=websocket,
-                session_id=session_id,
-                user_text=user_text,
-                audio_data=None,  # Text mode - no audio
-                session_state=session_state,
-                can_use_azure=False,  # Text mode - no Azure pronunciation
-            )
+            # needs_correction = False → 무조건 피드백 미표시 (점수 기준 충분)
+            show_feedback = False
+            logger.info(f"📊 [needs_correction=False] 점수 기준 충분 - 피드백 미표시")
+
+        # 최종 feedback_result 구성
+        feedback_result = None
+        if evaluation_result:
+            feedback_result = evaluation_result.copy() if isinstance(evaluation_result, dict) else evaluation_result
+
+            # 🔑 피드백 섹션 조건부 설정
+            if not show_feedback:
+                logger.info(f"📝 [피드백 섹션 제외] session={session_id} - show_feedback=False")
+                if isinstance(feedback_result, dict):
+                    feedback_result['feedback_sections'] = []  # ✅ 빈 배열로 저장 (NULL 대신)
+
+            # 항상 needs_correction과 retry_count 설정
+            if isinstance(feedback_result, dict):
+                needs_correction = feedback_result.get("needs_correction", False)
+                retry_count = session_state.current_question_retry_count if (session_state and needs_correction) else 0
+                feedback_result['needs_correction'] = needs_correction
+                feedback_result['retry_count'] = retry_count
+                logger.info(f"📊 [점수 및 재시도 정보] session={session_id}, needs_correction={needs_correction}, retry_count={retry_count}")
 
         # Step 3: 🔑 항상 먼저 index를 증가 (Retry든 Success든 상관없이)
         logger.info(f"🔼 Before increment: session={session_id}")
@@ -162,6 +181,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             session_id=session_id,
             session_state=session_state,
             feedback_result=feedback_result,
+            show_feedback=show_feedback,
         )
 
         # ✅ Step 4b: 사용자 메시지 DB에 저장 (피드백 섹션이 생성된 후)
@@ -195,7 +215,25 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         # Step 7: 🔑 다음 AI 질문이 8번째가 될 것인지 미리 확인 (생성 전)
         next_ai_turn = session_state.get_ai_turn_number() if session_state else 1
         if next_ai_turn > 7:
-            logger.info(f"Turn limit reached: next_ai_turn={next_ai_turn}, ending session")
+            logger.info(f"🏁 Turn limit reached: next_ai_turn={next_ai_turn}, ending session")
+
+            # 🔑 Spring 2에 세션 완료 알림 (DB 업데이트)
+            from app.integrations.clients.spring2_client import spring2_client
+            try:
+                await spring2_client.complete_session(
+                    session_id=session_id,
+                    status="FINISHED",
+                    reason="turn_limit",
+                    played_turns=session_state.ai_turn_count if session_state else 0,
+                    completed_all_turns=True,  # 모든 턴 완료
+                    finish_reason="turn_limit",
+                    finished_at=None,  # Spring 2가 현재 시간 사용
+                )
+                logger.info(f"✅ Session completion notified to Spring 2: session={session_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to notify Spring 2 of session completion: {e}", exc_info=True)
+
+            # 클라이언트에 세션 종료 알림
             from app.roleplaying.handlers.ws_message_models import SessionEndedMessage
             await websocket.send_json(SessionEndedMessage(reason="turn_limit").model_dump())
 
@@ -204,6 +242,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             await _cleanup_session(session_id, "turn_limit")
 
             await websocket.close(code=status.WS_1000_NORMAL_CLOSURE, reason="Turn limit reached")
+            session_manager.cleanup(session_id)
             return
 
         # Step 8: AI 응답 생성 (정상 응답일 때만)
