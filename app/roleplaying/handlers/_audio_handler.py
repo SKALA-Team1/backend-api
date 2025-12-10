@@ -142,23 +142,32 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             can_use_azure=can_use_azure,
         )
 
-        # 피드백 섹션 표시 여부 결정
-        show_feedback = False
-        if agent_decision and agent_decision.get("action") == "FEEDBACK":
-            show_feedback = True
-            logger.info(f"🤖 [Agent Decision] FEEDBACK 표시 - reasoning: {agent_decision.get('reasoning')}")
-        elif agent_decision and agent_decision.get("action") == "NEXT_QUESTION":
-            if is_last_turn:
-                # 🔑 마지막 턴은 항상 피드백 표시 (다음 질문이 없으므로)
+        # 🔑 needs_correction을 기준으로 피드백 표시 여부 결정
+        # needs_correction = 점수 기반 판단 (신뢰도 높음)
+        # agent_decision = LLM 기반 판단 (참고용)
+        needs_correction = False
+        if evaluation_result and isinstance(evaluation_result, dict):
+            needs_correction = evaluation_result.get("needs_correction", False)
+
+        logger.info(f"📊 [피드백 표시 결정] needs_correction={needs_correction}, is_last_turn={is_last_turn}")
+
+        if needs_correction:
+            # needs_correction = True → Agent 판단 존중 또는 마지막 턴이면 표시
+            if agent_decision and agent_decision.get("action") == "FEEDBACK":
                 show_feedback = True
-                logger.info(f"🔑 [마지막 턴 피드백 강제 표시] Agent said NEXT_QUESTION but this is turn 7 (last)")
+                logger.info(f"🤖 [Agent + needs_correction] FEEDBACK 표시 - reasoning: {agent_decision.get('reasoning')}")
+            elif is_last_turn:
+                # 마지막 턴은 무조건 피드백 표시
+                show_feedback = True
+                logger.info(f"🔑 [마지막 턴 피드백 강제 표시] needs_correction=True + is_last_turn")
             else:
+                # Agent가 NEXT_QUESTION이지만 needs_correction=True면 피드백 안 함
                 show_feedback = False
-                logger.info(f"🤖 [Agent Decision] NEXT_QUESTION - 피드백 미표시")
+                logger.info(f"📊 [needs_correction=True 무시] Agent said NEXT_QUESTION but needs_correction shows correction needed")
         else:
-            # Agent 실패 시 Fallback: 평가 점수만 사용 (피드백 섹션 미표시)
-            logger.info("⏮️  [Fallback] Using traditional feedback evaluation - 피드백 미표시")
+            # needs_correction = False → 무조건 피드백 미표시 (점수 기준 충분)
             show_feedback = False
+            logger.info(f"📊 [needs_correction=False] 점수 기준 충분 - 피드백 미표시")
 
         # 최종 feedback_result 구성
         feedback_result = None
