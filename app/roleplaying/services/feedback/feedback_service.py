@@ -689,30 +689,46 @@ class FeedbackOrchestratorImpl:
 
 
             if audio_data:
-                pronunciation, grammar, relevance = await asyncio.gather(
+                results = await asyncio.gather(
                     self.pronunciation_evaluator.evaluate_pronunciation(audio_data, user_text),
                     self.grammar_evaluator.evaluate_grammar(user_text),
                     self.relevance_evaluator.evaluate_relevance(
                         user_text, conversation_history, scenario_context
-                    )
+                    ),
+                    return_exceptions=True
                 )
+                pronunciation = results[0] if not isinstance(results[0], Exception) else None
+                grammar = results[1] if not isinstance(results[1], Exception) else None
+                relevance = results[2] if not isinstance(results[2], Exception) else None
+
+                if isinstance(pronunciation, Exception):
+                    logger.warning(f"Pronunciation evaluation failed: {pronunciation}")
+                if isinstance(grammar, Exception):
+                    logger.warning(f"Grammar evaluation failed: {grammar}")
+                if isinstance(relevance, Exception):
+                    logger.warning(f"Relevance evaluation failed: {relevance}")
             else:
-                logger.debug("Skipping pronunciation evaluation (no audio data)")
-                grammar, relevance = await asyncio.gather(
+                results = await asyncio.gather(
                     self.grammar_evaluator.evaluate_grammar(user_text),
                     self.relevance_evaluator.evaluate_relevance(
                         user_text, conversation_history, scenario_context
-                    )
+                    ),
+                    return_exceptions=True
                 )
+                grammar = results[0] if not isinstance(results[0], Exception) else None
+                relevance = results[1] if not isinstance(results[1], Exception) else None
                 pronunciation = None
+
+                if isinstance(grammar, Exception):
+                    logger.warning(f"Grammar evaluation failed: {grammar}")
+                if isinstance(relevance, Exception):
+                    logger.warning(f"Relevance evaluation failed: {relevance}")
 
             eval_time = time.time() - eval_start
 
-
-            # 평가 결과 안전 처리
-            pronunciation_score = normalize_score(pronunciation.get("score") if pronunciation else None)
-            grammar_score = normalize_score(grammar.get("score") if grammar else None)
-            relevance_score = normalize_score(relevance.get("score") if relevance else None)
+            pronunciation_score = normalize_score(pronunciation.get("score") if pronunciation and isinstance(pronunciation, dict) else None)
+            grammar_score = normalize_score(grammar.get("score") if grammar and isinstance(grammar, dict) else None)
+            relevance_score = normalize_score(relevance.get("score") if relevance and isinstance(relevance, dict) else None)
 
             logger.info(f"  - 발음: {pronunciation_score if pronunciation_score is not None else '?'}점")
             logger.info(f"  - 문법: {grammar_score if grammar_score is not None else '?'}점")

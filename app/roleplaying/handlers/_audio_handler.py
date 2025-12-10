@@ -28,7 +28,6 @@ from app.roleplaying.handlers._common import (
     _send_error,
     _check_turn_limit,
     _evaluate_feedback,
-    _evaluate_feedback_with_agent,
     _send_feedback_messages,
     _generate_and_stream_ai_response,
     _save_utterance_with_feedback,
@@ -62,7 +61,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             await _send_error(websocket, "Session not found")
             return
 
-        audio_data = SessionAudioHandler.get_current_audio(session_id)
+        audio_data = await SessionAudioHandler.get_current_audio_async(session_id)
         if not audio_data:
             await _send_error(websocket, "No audio data received")
             return
@@ -88,7 +87,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
                 "Silence detected. Please speak again.",
                 code="SILENCE_DETECTED",
             )
-            SessionAudioHandler.clear_audio_buffer(session_id)
+            await SessionAudioHandler.clear_audio_buffer_async(session_id)
             return
 
         await websocket.send_json(SttFinalMessage(text=stt_text).model_dump())
@@ -107,6 +106,8 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
 
         next_ai_turn = session_state.get_ai_turn_number() if session_state else 1
         is_last_turn = next_ai_turn > 7
+
+        # Step 1: 평가 수행 (1회만)
         evaluation_result = await _evaluate_feedback(
             feedback_orchestrator=feedback_orchestrator,
             websocket=websocket,
@@ -117,14 +118,15 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             can_use_azure=can_use_azure,
         )
 
-        agent_decision = await _evaluate_feedback_with_agent(
-            agent=feedback_decision_agent,
-            session_id=session_id,
-            user_text=stt_text,
-            audio_data=audio_data if can_use_azure else None,
-            session_state=session_state,
-            can_use_azure=can_use_azure,
-        )
+        # Step 2: Agent는 평가 결과를 받아 판단만 수행 (재평가 없음)
+        agent_decision = None
+        if evaluation_result:
+            agent_decision = await feedback_decision_agent.decide_based_on_evaluation(
+                evaluation_result=evaluation_result,
+                session_state=session_state,
+                retry_count=session_state.current_question_retry_count if session_state else 0,
+                can_use_azure=can_use_azure,
+            )
 
         needs_correction = False
         if evaluation_result and isinstance(evaluation_result, dict):

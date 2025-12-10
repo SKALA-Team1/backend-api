@@ -27,7 +27,6 @@ from app.roleplaying.handlers._common import (
     _send_error,
     _check_turn_limit,
     _evaluate_feedback,
-    _evaluate_feedback_with_agent,
     _send_feedback_messages,
     _generate_and_stream_ai_response,
     _save_utterance_with_feedback,
@@ -91,6 +90,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         next_ai_turn = session_state.get_ai_turn_number() if session_state else 1
         is_last_turn = next_ai_turn > 7
 
+        # Step 1: 평가 수행 (1회만)
         evaluation_result = await _evaluate_feedback(
             feedback_orchestrator=feedback_orchestrator,
             websocket=websocket,
@@ -101,14 +101,15 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             can_use_azure=False,
         )
 
-        agent_decision = await _evaluate_feedback_with_agent(
-            agent=feedback_decision_agent,
-            session_id=session_id,
-            user_text=user_text,
-            audio_data=None,
-            session_state=session_state,
-            can_use_azure=False,
-        )
+        # Step 2: Agent는 평가 결과를 받아 판단만 수행 (재평가 없음)
+        agent_decision = None
+        if evaluation_result:
+            agent_decision = await feedback_decision_agent.decide_based_on_evaluation(
+                evaluation_result=evaluation_result,
+                session_state=session_state,
+                retry_count=session_state.current_question_retry_count if session_state else 0,
+                can_use_azure=False,
+            )
 
         needs_correction = False
         if evaluation_result and isinstance(evaluation_result, dict):

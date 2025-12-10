@@ -166,10 +166,8 @@ async def roleplaying_websocket(websocket: WebSocket, session_id: str):
                 ):
                     continue
 
-                # 오디오 청크를 세션 버퍼에 저장 (라우터를 거치지 않음 - binary 데이터)
                 try:
-                    SessionAudioHandler.append_audio_chunk(session_id, raw_data["bytes"])
-                    logger.debug(f"Audio chunk appended: session={session_id}, size={len(raw_data['bytes'])} bytes")
+                    await SessionAudioHandler.append_audio_chunk_async(session_id, raw_data["bytes"])
                 except Exception as e:
                     logger.error(f"Failed to append audio chunk: {e}", exc_info=True)
                 continue
