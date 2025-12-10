@@ -181,6 +181,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
             session_id=session_id,
             session_state=session_state,
             feedback_result=feedback_result,
+            show_feedback=show_feedback,
         )
 
         # ✅ Step 4b: 사용자 메시지 DB에 저장 (피드백 섹션이 생성된 후)

@@ -206,6 +206,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
             session_id=session_id,
             session_state=session_state,
             feedback_result=feedback_result,
+            show_feedback=show_feedback,
         )
 
         # ✅ Step 4b: 사용자 발화 DB에 저장 (피드백 섹션이 생성된 후)
