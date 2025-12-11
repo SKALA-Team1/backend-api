@@ -29,7 +29,6 @@ from app.roleplaying.handlers._text_handler import handle_user_text
 from app.roleplaying.handlers._audio_handler import handle_utterance_end
 from app.roleplaying.handlers.ws_message_models import (
     AckMessage, AiTextMessage, InitMessage, SessionEndedMessage,
-    TtsAudioMessage, TtsVisemeMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -125,31 +124,8 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
         # ========================================
         # ElevenLabs TTS 호출 및 전송 (첫 질문)
         # ========================================
-        try:
-            from app.adapters.tts_adapter import get_tts_adapter
-            
-            tts_adapter = get_tts_adapter()
-            tts_result = await tts_adapter.synthesize_with_viseme(first_question)
-            
-            # 오디오 전송
-            await websocket.send_json(
-                TtsAudioMessage(
-                    audio_base64=tts_result['audio_base64']
-                ).model_dump()
-            )
-            
-            # Viseme 데이터 전송
-            for viseme in tts_result['visemes']:
-                await websocket.send_json(
-                    TtsVisemeMessage(
-                        start_time=viseme['start_time'],
-                        end_time=viseme['end_time'],
-                        value=viseme['value']
-                    ).model_dump()
-                )
-        except Exception as e:
-            logger.error(f"TTS error (INIT): {e}", exc_info=True)
-            # TTS 실패해도 세션은 계속 진행
+        from app.roleplaying.handlers._common import _send_tts_audio_and_visemes
+        await _send_tts_audio_and_visemes(websocket, first_question, context="INIT")
 
     except ValueError as e:
         logger.error(f"Session creation failed: {e}")

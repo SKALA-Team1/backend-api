@@ -232,11 +232,29 @@ async def _generate_and_stream_ai_response(
     # ========================================
     # ElevenLabs TTS 호출 및 전송
     # ========================================
+    await _send_tts_audio_and_visemes(websocket, full_ai_response)
+
+    return full_ai_response, is_fixed_question
+
+
+# ========================================
+# TTS 오디오 및 Viseme 전송 (공통)
+# ========================================
+
+async def _send_tts_audio_and_visemes(websocket: WebSocket, text: str, context: str = "") -> None:
+    """
+    ElevenLabs TTS를 호출하고 오디오 및 Viseme 데이터를 WebSocket으로 전송
+    
+    Args:
+        websocket: WebSocket 연결
+        text: TTS로 변환할 텍스트
+        context: 에러 로그에 포함할 컨텍스트 정보 (예: "INIT")
+    """
     try:
         from app.adapters.tts_adapter import get_tts_adapter
         
         tts_adapter = get_tts_adapter()
-        tts_result = await tts_adapter.synthesize_with_viseme(full_ai_response)
+        tts_result = await tts_adapter.synthesize_with_viseme(text)
         
         # 오디오 전송
         await websocket.send_json(
@@ -255,10 +273,9 @@ async def _generate_and_stream_ai_response(
                 ).model_dump()
             )
     except Exception as e:
-        logger.error(f"TTS error: {e}", exc_info=True)
+        error_context = f" ({context})" if context else ""
+        logger.error(f"TTS error{error_context}: {e}", exc_info=True)
         # TTS 실패해도 세션은 계속 진행
-
-    return full_ai_response, is_fixed_question
 
 
 # ========================================
