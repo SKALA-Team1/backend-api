@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     # ElevenLabs TTS Settings
     # ========================================
     ELEVENLABS_API_KEY: Optional[str] = Field(default=None, alias="ELEVENLABS_API_KEY")
-    ELEVENLABS_VOICE_ID: str = Field("21m00Tcm4TlvDq8ikWAM", alias="ELEVENLABS_VOICE_ID")
+    ELEVENLABS_VOICE_ID: str = Field("ErXwobaYiN019PkySvjV", alias="ELEVENLABS_VOICE_ID")  # Antoni (남자 목소리)
 
     # ========================================
     # Azure Speech (발음 평가)
