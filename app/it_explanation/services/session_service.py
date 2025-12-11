@@ -33,8 +33,7 @@ class SessionService:
         technical_accuracy_score: int,
         terminology_score: int,
         overall_score: int,
-        feedback_en: str,
-        feedback_ko: str = None,
+        feedback: str,
         session_type: str = "TEXT",
         audio_url: str = None
     ) -> Optional[int]:
@@ -49,8 +48,7 @@ class SessionService:
             technical_accuracy_score: 기술적 정확성 점수
             terminology_score: 전문용어 점수
             overall_score: 종합 점수
-            feedback_en: 영문 피드백
-            feedback_ko: 한글 피드백 (선택)
+            feedback: 피드백 (한국어 우선)
             session_type: TEXT or VOICE
             audio_url: 음성 URL (선택)
 
@@ -69,8 +67,7 @@ class SessionService:
                 "technical_accuracy_score": technical_accuracy_score,
                 "terminology_score": terminology_score,
                 "overall_score": overall_score,
-                "feedback_en": feedback_en,
-                "feedback_ko": feedback_ko,
+                "feedback": feedback,
                 "session_type": session_type,
                 "audio_url": audio_url
             }
