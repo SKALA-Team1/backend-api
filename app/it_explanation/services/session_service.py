@@ -90,8 +90,14 @@ class SessionService:
 
                 return session_id
 
+        except httpx.RequestError as e:
+            logger.error(f"Failed to connect to Spring 2 to create session: {e}", exc_info=True)
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to create session (HTTP error): {e}", exc_info=True)
+            return None
         except Exception as e:
-            logger.error(f"Failed to create session: {e}", exc_info=True)
+            logger.error(f"An unexpected error occurred while creating session: {e}", exc_info=True)
             return None
 
     async def get_user_sessions(self, user_id: int) -> Optional[list]:
@@ -117,8 +123,14 @@ class SessionService:
 
                 return sessions
 
+        except httpx.RequestError as e:
+            logger.error(f"Failed to connect to Spring 2 to fetch user sessions: {e}")
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to fetch user sessions (HTTP error): {e}")
+            return None
         except Exception as e:
-            logger.error(f"Failed to fetch user sessions: {e}")
+            logger.error(f"An unexpected error occurred while fetching user sessions: {e}")
             return None
 
     async def get_user_stats(self, user_id: int) -> Optional[Dict[str, Any]]:
@@ -144,6 +156,12 @@ class SessionService:
 
                 return stats
 
+        except httpx.RequestError as e:
+            logger.error(f"Failed to connect to Spring 2 to fetch user stats: {e}")
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to fetch user stats (HTTP error): {e}")
+            return None
         except Exception as e:
-            logger.error(f"Failed to fetch user stats: {e}")
+            logger.error(f"An unexpected error occurred while fetching user stats: {e}")
             return None

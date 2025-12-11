@@ -64,8 +64,14 @@ class QuestionService:
                     "key_keywords": data.get("key_keywords", []),
                     "model_answer": data.get("model_answer", "")
                 }
+        except httpx.RequestError as e:
+            logger.error(f"Failed to connect to Spring 2 for random question: {e}")
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to fetch random question from Spring 2 (HTTP error): {e}")
+            return None
         except Exception as e:
-            logger.error(f"Failed to fetch random question from Spring 2: {e}")
+            logger.error(f"An unexpected error occurred while fetching random question: {e}")
             return None
 
     async def get_question_by_id(self, question_id: int) -> Optional[Dict[str, Any]]:
@@ -102,6 +108,12 @@ class QuestionService:
                     "key_keywords": data.get("key_keywords", []),
                     "model_answer": data.get("model_answer", "")
                 }
+        except httpx.RequestError as e:
+            logger.error(f"Failed to connect to Spring 2 for question {question_id}: {e}")
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to fetch question {question_id} from Spring 2 (HTTP error): {e}")
+            return None
         except Exception as e:
-            logger.error(f"Failed to fetch question {question_id} from Spring 2: {e}")
+            logger.error(f"An unexpected error occurred while fetching question {question_id}: {e}")
             return None
