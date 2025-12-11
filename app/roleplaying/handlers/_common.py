@@ -27,7 +27,7 @@ from app.roleplaying.core.session_message_handler import SessionMessageHandler
 from app.roleplaying.handlers.ws_message_models import (
     AiTextMessage, AiTextStreamingMessage, AiTypingMessage,
     ErrorMessage, FeedbackMessage, FeedbackSectionsMessage, FeedbackStreamingMessage,
-    RetryRequiredMessage, UtteranceSavedMessage
+    RetryRequiredMessage, UtteranceSavedMessage, TtsAudioMessage, TtsVisemeMessage
 )
 
 logger = logging.getLogger(__name__)
@@ -228,6 +228,35 @@ async def _generate_and_stream_ai_response(
     if session_state:
         session_state.current_question_text = full_ai_response
         session_state.reset_retry_count()
+
+    # ========================================
+    # ElevenLabs TTS 호출 및 전송
+    # ========================================
+    try:
+        from app.adapters.tts_adapter import get_tts_adapter
+        
+        tts_adapter = get_tts_adapter()
+        tts_result = await tts_adapter.synthesize_with_viseme(full_ai_response)
+        
+        # 오디오 전송
+        await websocket.send_json(
+            TtsAudioMessage(
+                audio_base64=tts_result['audio_base64']
+            ).model_dump()
+        )
+        
+        # Viseme 데이터 전송
+        for viseme in tts_result['visemes']:
+            await websocket.send_json(
+                TtsVisemeMessage(
+                    start_time=viseme['start_time'],
+                    end_time=viseme['end_time'],
+                    value=viseme['value']
+                ).model_dump()
+            )
+    except Exception as e:
+        logger.error(f"TTS error: {e}", exc_info=True)
+        # TTS 실패해도 세션은 계속 진행
 
     return full_ai_response, is_fixed_question
 

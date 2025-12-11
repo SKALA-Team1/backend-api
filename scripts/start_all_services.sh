@@ -4,13 +4,11 @@
 # 모든 서비스 시작 스크립트
 #
 # Redis, MinIO, FastAPI를 한번에 시작합니다.
-# (선택사항: Ollama도 함께 시작 가능)
 #
 # 사용법:
 #   bash scripts/start_all_services.sh [옵션]
 #
 # 옵션:
-#   --with-ollama    Ollama도 함께 시작
 #   --no-docker      Docker 서비스 스킵 (FastAPI만)
 #   --stop           모든 서비스 중단
 #   --logs           Docker 컨테이너 로그 확인
@@ -18,7 +16,6 @@
 #
 # 예시:
 #   bash scripts/start_all_services.sh
-#   bash scripts/start_all_services.sh --with-ollama
 #   bash scripts/start_all_services.sh --stop
 #
 ##############################################################################
@@ -37,7 +34,6 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # 기본값
-WITH_OLLAMA=true  # Ollama는 무조건 실행
 NO_DOCKER=false
 STOP_SERVICES=false
 SHOW_LOGS=false
@@ -71,10 +67,6 @@ print_warning() {
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --with-ollama)
-                WITH_OLLAMA=true
-                shift
-                ;;
             --no-docker)
                 NO_DOCKER=true
                 shift
@@ -112,11 +104,6 @@ stop_services() {
     print_info "uvicorn 프로세스 중단..."
     pkill -f "uvicorn" || print_warning "uvicorn 프로세스가 실행 중이지 않습니다"
 
-    if [ "$WITH_OLLAMA" = true ]; then
-        print_info "Ollama 중단..."
-        pkill -f "ollama" || print_warning "Ollama가 실행 중이지 않습니다"
-    fi
-
     print_success "모든 서비스가 중단되었습니다"
     exit 0
 }
@@ -150,16 +137,6 @@ check_status() {
         print_success "MinIO 실행 중 (http://localhost:9000)"
     else
         print_error "MinIO 실행 중이지 않습니다"
-    fi
-
-    if [ "$WITH_OLLAMA" = true ]; then
-        echo ""
-        echo "🧠 Ollama:"
-        if curl -s http://localhost:11434 > /dev/null 2>&1; then
-            print_success "Ollama 실행 중 (http://localhost:11434)"
-        else
-            print_error "Ollama 실행 중이지 않습니다"
-        fi
     fi
 
     echo ""
@@ -219,71 +196,6 @@ start_docker_services() {
     return 1
 }
 
-# Ollama 서비스 시작
-start_ollama() {
-    print_header "Ollama 시작"
-
-    if ! command -v ollama &> /dev/null; then
-        print_error "Ollama가 설치되어 있지 않습니다"
-        print_warning "설치: https://ollama.ai"
-        return 1
-    fi
-
-    # Ollama가 이미 실행 중인지 확인
-    if curl -s http://localhost:11434 > /dev/null 2>&1; then
-        print_success "Ollama가 이미 실행 중입니다 (http://localhost:11434)"
-
-        # mistral 모델 확인 및 다운로드
-        if ! ollama list | grep -q "mistral"; then
-            print_warning "mistral 모델이 설치되지 않았습니다. 다운로드 중..."
-            ollama pull mistral
-            print_success "mistral 모델 다운로드 완료"
-        else
-            print_success "mistral 모델이 이미 설치되어 있습니다"
-        fi
-
-        return 0
-    fi
-
-    print_info "Ollama 시작 중..."
-    ollama serve &
-    OLLAMA_PID=$!
-    print_info "Ollama 시작 (PID: $OLLAMA_PID)"
-
-    # Ollama 시작 대기 (최대 60초)
-    local timeout=60
-    local elapsed=0
-    while [ $elapsed -lt $timeout ]; do
-        if curl -s http://localhost:11434 > /dev/null 2>&1; then
-            print_success "Ollama 시작 완료 (http://localhost:11434)"
-            echo ""
-
-            # mistral 모델 자동 다운로드
-            print_info "mistral 모델 확인 중..."
-            if ! ollama list | grep -q "mistral"; then
-                print_warning "mistral 모델을 다운로드합니다 (처음 실행 시 약 5분 소요)..."
-                ollama pull mistral
-                print_success "mistral 모델 다운로드 완료"
-            else
-                print_success "mistral 모델이 이미 설치되어 있습니다"
-            fi
-
-            echo ""
-            echo "📚 현재 사용 가능한 모델:"
-            ollama list | tail -n +2 || echo "  (모델 없음)"
-            echo ""
-            return 0
-        fi
-
-        echo -n "."
-        sleep 1
-        elapsed=$((elapsed + 1))
-    done
-
-    print_error "Ollama 시작 타임아웃 (${timeout}초)"
-    return 1
-}
-
 # FastAPI 서버 시작
 start_fastapi() {
     print_header "FastAPI 서버 시작 (포트 8082)"
@@ -327,7 +239,6 @@ main() {
     echo "📋 시작할 서비스:"
     [ "$NO_DOCKER" != true ] && echo "  ✓ Docker (Redis, MinIO)" || echo "  ✗ Docker 스킵"
     echo "  ✓ FastAPI (포트 8082)"
-    [ "$WITH_OLLAMA" = true ] && echo "  ✓ Ollama (포트 11434)" || echo "  ✗ Ollama 스킵"
     echo ""
 
     # Docker 서비스 시작
@@ -339,13 +250,6 @@ main() {
         fi
     fi
 
-    # Ollama 시작
-    if [ "$WITH_OLLAMA" = true ]; then
-        if ! start_ollama; then
-            print_warning "Ollama 시작 실패 (계속 진행합니다)"
-        fi
-    fi
-
     echo ""
     print_success "모든 서비스 준비 완료!"
     echo ""
@@ -353,7 +257,6 @@ main() {
     echo "  🔴 Redis:  redis://localhost:6379"
     echo "  📦 MinIO:  http://localhost:9000 (minioadmin / minioadmin123)"
     echo "  🚀 FastAPI: http://localhost:8082"
-    [ "$WITH_OLLAMA" = true ] && echo "  🧠 Ollama:  http://localhost:11434"
     echo ""
     echo "📖 다른 터미널에서 음성 테스트 실행:"
     echo "  bash scripts/roleplay_voice_interactive.sh"

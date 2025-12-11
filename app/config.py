@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     deepgram_api_key: Optional[str] = Field(default=None, alias="DEEPGRAM_API_KEY")
 
     # ========================================
+    # ElevenLabs TTS Settings
+    # ========================================
+    ELEVENLABS_API_KEY: Optional[str] = Field(default=None, alias="ELEVENLABS_API_KEY")
+    ELEVENLABS_VOICE_ID: str = Field("21m00Tcm4TlvDq8ikWAM", alias="ELEVENLABS_VOICE_ID")
+
+    # ========================================
     # Azure Speech (발음 평가)
     # ========================================
     AZURE_SPEECH_KEY: Optional[str] = Field(default=None, alias="AZURE_SPEECH_KEY")

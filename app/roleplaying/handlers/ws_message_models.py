@@ -385,6 +385,31 @@ class ErrorMessage(BaseModel):
     code: Optional[str] = Field(None, description="에러 코드 (선택)")
 
 
+class TtsAudioMessage(BaseModel):
+    """
+    TTS 오디오 메시지
+
+    ElevenLabs TTS로 생성된 오디오 데이터를 Base64로 인코딩하여 전송.
+    """
+
+    type: Literal["TTS_AUDIO"] = "TTS_AUDIO"
+    audio_base64: str = Field(..., description="Base64 인코딩된 오디오 데이터")
+
+
+class TtsVisemeMessage(BaseModel):
+    """
+    TTS Viseme 데이터 메시지
+
+    립싱크를 위한 Viseme 타이밍 정보.
+    각 단어의 시작/종료 시간과 입 모양 값(0.0 ~ 1.0)을 포함.
+    """
+
+    type: Literal["TTS_VISEME"] = "TTS_VISEME"
+    start_time: float = Field(..., description="시작 시간 (초)", ge=0)
+    end_time: float = Field(..., description="종료 시간 (초)", ge=0)
+    value: float = Field(..., description="Viseme 값 (0.0 ~ 1.0)", ge=0, le=1)
+
+
 # ========================================
 # 유틸리티 타입
 # ========================================
@@ -407,6 +432,8 @@ OutboundMessage = (
     | RetryRequiredMessage
     | SessionEndedMessage
     | ErrorMessage
+    | TtsAudioMessage
+    | TtsVisemeMessage
 )
 
 
