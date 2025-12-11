@@ -51,11 +51,18 @@ async def chat_with_bot(request: ChatbotMessage):
             current_question_dict = request.current_question.model_dump()
 
         # 챗봇 응답 생성
-        response = await chatbot_service.get_response(
-            user_message=request.user_message,
-            conversation_history=request.conversation_history,
-            current_question=current_question_dict
-        )
+        try:
+            response = await chatbot_service.get_response(
+                user_message=request.user_message,
+                conversation_history=request.conversation_history,
+                current_question=current_question_dict
+            )
+        except Exception as llm_error:
+            logger.error(f"Failed to generate chatbot response: {llm_error}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate chatbot response. Please try again."
+            )
 
         # Spring 2에 대화 저장
         conversation_id = None
@@ -77,6 +84,9 @@ async def chat_with_bot(request: ChatbotMessage):
             conversation_id=conversation_id
         )
 
+    except HTTPException:
+        # HTTPException은 그대로 전파
+        raise
     except Exception as e:
-        logger.error(f"Chatbot request failed: {e}", exc_info=True)
+        logger.error(f"Unexpected error in chatbot endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

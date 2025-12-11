@@ -132,5 +132,5 @@ Provide a professional answer suitable for a job interview (3-4 sentences, with 
 
         except Exception as e:
             logger.error(f"Chatbot response generation failed: {e}", exc_info=True)
-            return "죄송합니다. 오류가 발생했습니다. 다시 시도해 주세요."
+            raise  # 예외를 상위 레이어(API 라우터)로 전파
 
