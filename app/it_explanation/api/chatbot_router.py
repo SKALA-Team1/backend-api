@@ -10,7 +10,6 @@ Endpoints:
 import httpx
 import logging
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
 
 from app.it_explanation.models.schemas import ChatbotMessage, ChatbotResponse
 from app.it_explanation.services.chatbot_service import ChatbotService
@@ -80,69 +79,4 @@ async def chat_with_bot(request: ChatbotMessage):
 
     except Exception as e:
         logger.error(f"Chatbot request failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-@router.post("/chatbot/stream")
-async def chat_with_bot_stream(request: ChatbotMessage):
-    """
-    IT 용어 설명 챗봇 (스트리밍)
-
-    사용자의 질문에 대해 토큰 단위로 실시간 스트리밍 응답을 제공합니다.
-    대화 히스토리를 포함하면 컨텍스트 기반 응답을 받을 수 있습니다.
-
-    Args:
-        request: ChatbotMessage
-            - user_message: 사용자 질문
-            - conversation_history: 대화 히스토리 (선택)
-            - current_question: 현재 연습 중인 질문 컨텍스트 (선택)
-
-    Returns:
-        StreamingResponse: 토큰 단위 스트리밍 응답
-    """
-    try:
-        logger.info(f"💬 [API] POST /it-explanation/chatbot/stream")
-        logger.debug(f"User message: {request.user_message[:100]}...")
-        logger.debug(f"Request data - user_id: {request.user_id}, history: {len(request.conversation_history) if request.conversation_history else 0}, has_question: {request.current_question is not None}")
-
-        # current_question을 dict로 변환
-        current_question_dict = None
-        if request.current_question:
-            current_question_dict = request.current_question.model_dump()
-
-        # 스트리밍 생성기
-        async def generate_stream():
-            full_response = ""
-            try:
-                async for token in chatbot_service.get_response_stream(
-                    user_message=request.user_message,
-                    conversation_history=request.conversation_history,
-                    current_question=current_question_dict
-                ):
-                    full_response += token
-                    yield token
-
-                # 스트리밍 완료 후 Spring 2에 저장
-                try:
-                    await spring2_client.save_chatbot_conversation(
-                        user_id=request.user_id,
-                        user_message=request.user_message,
-                        bot_response=full_response,
-                        context=None
-                    )
-                    logger.info(f"✅ Saved streaming conversation to CRUD2")
-                except (httpx.RequestError, httpx.HTTPStatusError) as save_error:
-                    logger.error(f"⚠️ Failed to save streaming conversation to CRUD2: {save_error}")
-
-            except Exception as e:
-                logger.error(f"Chatbot streaming failed: {e}", exc_info=True)
-                yield "죄송합니다. 오류가 발생했습니다. 다시 시도해 주세요."
-
-        return StreamingResponse(
-            generate_stream(),
-            media_type="text/plain; charset=utf-8"
-        )
-
-    except Exception as e:
-        logger.error(f"Chatbot streaming request failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
