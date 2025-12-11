@@ -17,7 +17,6 @@ sqlalchemy>=2.0.0
 alembic>=1.12.0
 asyncpg>=0.29.0  # PostgreSQL async driver
 psycopg2-binary>=2.9.9  # PostgreSQL sync driver (fallback)
-pymysql>=1.1.0  # MySQL driver
 
 # ========================================
 # HTTP Client
@@ -54,6 +53,11 @@ openai-whisper>=20231117  # Whisper 로컬 STT
 deepgram-sdk>=3.0.0,<4.0.0  # Deepgram STT (실시간 스트리밍) - SDK 3.x API
 # google-cloud-speech>=2.21.0  # Google STT (선택)
 azure-cognitiveservices-speech>=1.38.0  # Azure Speech (발음 평가)
+
+# ========================================
+# TTS (Text-to-Speech)
+# ========================================
+elevenlabs>=1.0.0  # ElevenLabs TTS API
 
 # ========================================
 # Audio Processing

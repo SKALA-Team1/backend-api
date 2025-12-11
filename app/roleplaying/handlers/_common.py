@@ -27,7 +27,7 @@ from app.roleplaying.core.session_message_handler import SessionMessageHandler
 from app.roleplaying.handlers.ws_message_models import (
     AiTextMessage, AiTextStreamingMessage, AiTypingMessage,
     ErrorMessage, FeedbackMessage, FeedbackSectionsMessage, FeedbackStreamingMessage,
-    RetryRequiredMessage, UtteranceSavedMessage
+    RetryRequiredMessage, UtteranceSavedMessage, TtsAudioMessage, TtsVisemeMessage
 )
 
 logger = logging.getLogger(__name__)
@@ -229,7 +229,53 @@ async def _generate_and_stream_ai_response(
         session_state.current_question_text = full_ai_response
         session_state.reset_retry_count()
 
+    # ========================================
+    # ElevenLabs TTS 호출 및 전송
+    # ========================================
+    await _send_tts_audio_and_visemes(websocket, full_ai_response)
+
     return full_ai_response, is_fixed_question
+
+
+# ========================================
+# TTS 오디오 및 Viseme 전송 (공통)
+# ========================================
+
+async def _send_tts_audio_and_visemes(websocket: WebSocket, text: str, context: str = "") -> None:
+    """
+    ElevenLabs TTS를 호출하고 오디오 및 Viseme 데이터를 WebSocket으로 전송
+    
+    Args:
+        websocket: WebSocket 연결
+        text: TTS로 변환할 텍스트
+        context: 에러 로그에 포함할 컨텍스트 정보 (예: "INIT")
+    """
+    try:
+        from app.adapters.tts_adapter import get_tts_adapter
+        
+        tts_adapter = get_tts_adapter()
+        tts_result = await tts_adapter.synthesize_with_viseme(text)
+        
+        # 오디오 전송
+        await websocket.send_json(
+            TtsAudioMessage(
+                audio_base64=tts_result['audio_base64']
+            ).model_dump()
+        )
+        
+        # Viseme 데이터 전송
+        for viseme in tts_result['visemes']:
+            await websocket.send_json(
+                TtsVisemeMessage(
+                    start_time=viseme['start_time'],
+                    end_time=viseme['end_time'],
+                    value=viseme['value']
+                ).model_dump()
+            )
+    except Exception as e:
+        error_context = f" ({context})" if context else ""
+        logger.error(f"TTS error{error_context}: {e}", exc_info=True)
+        # TTS 실패해도 세션은 계속 진행
 
 
 # ========================================

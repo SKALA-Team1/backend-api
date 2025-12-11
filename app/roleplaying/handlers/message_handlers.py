@@ -121,6 +121,12 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
         ai_msg = AiTextMessage(text=first_question, is_fixed_question=True)
         await websocket.send_json(ai_msg.model_dump())
 
+        # ========================================
+        # ElevenLabs TTS 호출 및 전송 (첫 질문)
+        # ========================================
+        from app.roleplaying.handlers._common import _send_tts_audio_and_visemes
+        await _send_tts_audio_and_visemes(websocket, first_question, context="INIT")
+
     except ValueError as e:
         logger.error(f"Session creation failed: {e}")
         await _send_error(websocket, str(e))
