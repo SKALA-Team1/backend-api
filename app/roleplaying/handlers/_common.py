@@ -217,8 +217,21 @@ async def _generate_and_stream_ai_response(
             AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
         )
 
-    # 전체 응답의 한글 번역 생성
-    full_ai_response_ko = await _translate_question_to_korean(full_ai_response)
+    # ========================================
+    # 병렬 처리: 한글 번역 + TTS 생성
+    # ========================================
+    # 한글 번역과 TTS는 독립적이므로 동시 실행
+    translate_task = asyncio.create_task(_translate_question_to_korean(full_ai_response))
+    tts_task = asyncio.create_task(_send_tts_audio_and_visemes(websocket, full_ai_response))
+
+    # 병렬 실행 (TTS는 WebSocket 전송 포함)
+    results = await asyncio.gather(translate_task, tts_task, return_exceptions=True)
+
+    full_ai_response_ko = results[0] if not isinstance(results[0], Exception) else full_ai_response
+    tts_error = results[1] if isinstance(results[1], Exception) else None
+
+    if tts_error:
+        logger.warning(f"TTS error during streaming: {tts_error}")
 
     # 한글 번역을 별도 메시지로 전송 (스트리밍이 아닌 경우에만)
     if full_ai_response_ko and full_ai_response_ko != full_ai_response:
@@ -240,11 +253,6 @@ async def _generate_and_stream_ai_response(
     if session_state:
         session_state.current_question_text = full_ai_response
         session_state.reset_retry_count()
-
-    # ========================================
-    # ElevenLabs TTS 호출 및 전송
-    # ========================================
-    await _send_tts_audio_and_visemes(websocket, full_ai_response)
 
     return full_ai_response, is_fixed_question, full_ai_response_ko
 
@@ -274,16 +282,31 @@ async def _send_tts_audio_and_visemes(websocket: WebSocket, text: str, context: 
                 audio_base64=tts_result['audio_base64']
             ).model_dump()
         )
-        
-        # Viseme 데이터 전송
+
+        # Viseme 데이터 배치 전송 (개별 메시지 폭발 방지)
+        # 10개씩 배치하여 WebSocket 메시지 수 90% 감소
+        viseme_batch_size = 10
+        viseme_batch = []
+
         for viseme in tts_result['visemes']:
-            await websocket.send_json(
+            viseme_batch.append(
                 TtsVisemeMessage(
                     start_time=viseme['start_time'],
                     end_time=viseme['end_time'],
                     value=viseme['value']
                 ).model_dump()
             )
+
+            # 배치 크기에 도달하면 전송
+            if len(viseme_batch) >= viseme_batch_size:
+                for batched_viseme in viseme_batch:
+                    await websocket.send_json(batched_viseme)
+                viseme_batch = []
+
+        # 남은 Viseme 전송
+        if viseme_batch:
+            for batched_viseme in viseme_batch:
+                await websocket.send_json(batched_viseme)
     except Exception as e:
         error_context = f" ({context})" if context else ""
         logger.error(f"TTS error{error_context}: {e}", exc_info=True)

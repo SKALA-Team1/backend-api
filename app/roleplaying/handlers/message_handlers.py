@@ -97,12 +97,32 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
 
         first_ai_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
 
-        # 한글 번역 생성
-        from app.roleplaying.handlers._common import _save_question_with_keywords, _translate_question_to_korean
-        first_question_ko = await _translate_question_to_korean(first_question)
+        # ========================================
+        # 병렬 처리: 한글 번역 + TTS 생성
+        # ========================================
+        # 한글 번역과 TTS는 독립적이므로 동시 실행
+        import asyncio
+        from app.roleplaying.handlers._common import (
+            _save_question_with_keywords,
+            _translate_question_to_korean,
+            _send_tts_audio_and_visemes,
+        )
+
+        translate_task = asyncio.create_task(_translate_question_to_korean(first_question))
+        tts_task = asyncio.create_task(
+            _send_tts_audio_and_visemes(websocket, first_question, context="INIT")
+        )
+
+        # 병렬 실행
+        results = await asyncio.gather(translate_task, tts_task, return_exceptions=True)
+
+        first_question_ko = results[0] if not isinstance(results[0], Exception) else first_question
+        tts_error = results[1] if isinstance(results[1], Exception) else None
+
+        if tts_error:
+            logger.warning(f"TTS error during init: {tts_error}")
 
         # Spring 2 저장 (첫 질문은 고정 질문이므로 한글 + 키워드 포함해야 함)
-        import asyncio
         try:
             await _save_question_with_keywords(
                 session_id=session_id,
@@ -123,12 +143,6 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
         # 클라이언트에 전송 (영문 + 한글)
         ai_msg = AiTextMessage(text=first_question, text_ko=first_question_ko, is_fixed_question=True)
         await websocket.send_json(ai_msg.model_dump())
-
-        # ========================================
-        # ElevenLabs TTS 호출 및 전송 (첫 질문)
-        # ========================================
-        from app.roleplaying.handlers._common import _send_tts_audio_and_visemes
-        await _send_tts_audio_and_visemes(websocket, first_question, context="INIT")
 
     except ValueError as e:
         logger.error(f"Session creation failed: {e}")
