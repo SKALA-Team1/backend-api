@@ -12,7 +12,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from deepgram import DeepgramClient
+from deepgram import DeepgramClient, PrerecordedOptions, BufferSource
 
 from app.config import settings
 from app.roleplaying.services.stt.audio_converter import AudioConverter
@@ -94,11 +94,19 @@ class BatchSTTEngine:
             인식된 텍스트
         """
         try:
-            response = self.client.listen.v1.media.transcribe_file(
-                request=wav_audio,
+            # Deepgram SDK 3.x API 사용
+            # BufferSource로 바이너리 데이터를 래핑
+            buffer_source = BufferSource(buffer=wav_audio)
+            
+            options = PrerecordedOptions(
                 model=settings.DEEPGRAM_MODEL,
                 language=settings.DEEPGRAM_LANGUAGE,
                 smart_format=settings.DEEPGRAM_SMART_FORMAT,
+            )
+            
+            response = self.client.listen.rest.v("1").transcribe_file(
+                source=buffer_source,
+                options=options
             )
 
             # 결과 추출
