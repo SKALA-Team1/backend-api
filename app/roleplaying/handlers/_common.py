@@ -510,6 +510,9 @@ async def _translate_question_to_korean(question_en: str) -> str:
     """
     영문 질문을 한글로 번역
 
+    QuestionTranslatorImpl 싱글톤 인스턴스를 사용하여
+    LLM 클라이언트를 재사용하고 성능을 최적화합니다.
+
     Args:
         question_en: 영문 질문
 
@@ -517,31 +520,9 @@ async def _translate_question_to_korean(question_en: str) -> str:
         한글 번역 (번역 실패 시 영문 반환)
     """
     try:
-        from app.roleplaying.services.llm.llm_base import LLMServiceBase
-        from app.roleplaying.prompts.constants import QUESTION_BILINGUAL_PROMPT
-        import json
+        from app.roleplaying.services.llm.llm_question_translator import question_translator
 
-        llm = LLMServiceBase(
-            api_key=settings.openai_api_key,
-            model_name=settings.OPENAI_MODEL_FEEDBACK,
-            temperature=0.3
-        ).llm
-
-        translation_prompt = QUESTION_BILINGUAL_PROMPT.format(
-            english_question=question_en
-        )
-        translation_response = await llm.invoke(translation_prompt)
-
-        question_ko = question_en
-        try:
-            json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', translation_response, re.DOTALL)
-            if json_match:
-                parsed = json.loads(json_match.group(0))
-                question_ko = parsed.get("korean_question", question_en)
-        except Exception as e:
-            logger.warning(f"Failed to parse Korean translation: {e}")
-
-        return question_ko
+        return await question_translator.translate_question(question_en)
     except Exception as e:
         logger.warning(f"Failed to translate question to Korean: {e}")
         return question_en  # Fallback: return English question
