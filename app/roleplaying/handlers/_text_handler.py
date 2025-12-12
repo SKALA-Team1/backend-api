@@ -217,6 +217,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
                 session_state=session_state,
                 slack_message=None,
                 is_fixed_question=is_fixed_question,
+                question_ko=full_ai_response_ko,  # ✅ 이미 생성된 번역을 재사용 (중복 생성 방지)
             )
         except Exception as e:
             logger.error(f"Failed to save AI question: session={session_id}, error={e}", exc_info=True)

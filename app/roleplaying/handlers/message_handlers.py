@@ -115,6 +115,7 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
                 session_state=session_state,
                 slack_message=None,
                 is_fixed_question=True,  # ✅ 고정 질문임을 명시
+                question_ko=first_question_ko,  # ✅ 이미 생성된 번역을 재사용 (중복 생성 방지)
             )
         except Exception as e:
             logger.error(f"Failed to save first fixed question: {e}", exc_info=True)

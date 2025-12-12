@@ -563,13 +563,14 @@ async def _save_question_with_keywords(
     session_state=None,
     slack_message: Optional[str] = None,
     is_fixed_question: bool = False,
+    question_ko: Optional[str] = None,
 ) -> None:
     """
     AI 질문을 Spring 2에 저장 (영문 + 한글 + 추천 키워드 포함)
 
     흐름:
     1. 추천 키워드 생성 (RECOMMENDED_KEYWORDS_PROMPT 사용)
-    2. 한글 번역 생성 (QUESTION_BILINGUAL_PROMPT 사용)
+    2. 한글 번역 (question_ko가 없으면 생성, 있으면 재사용)
     3. Spring 2에 저장 (save_utterance() API 호출)
 
     Args:
@@ -579,13 +580,13 @@ async def _save_question_with_keywords(
         user_role: 사용자 역할
         ai_role: AI 역할
         scenario_context: 시나리오 배경
+        session_state: 세션 상태
         slack_message: 원본 Slack 메시지 (선택사항)
         is_fixed_question: 고정 질문 여부
+        question_ko: 한글 번역 (선택사항, 없으면 자동 생성)
     """
     try:
         from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
-        from app.roleplaying.services.llm.llm_base import LLMServiceBase
-        from app.roleplaying.prompts.constants import QUESTION_BILINGUAL_PROMPT
         import json
 
         keywords = await keyword_generator.generate_recommended_keywords(
@@ -597,25 +598,9 @@ async def _save_question_with_keywords(
             conversation_summary=""
         )
 
-        llm = LLMServiceBase(
-            api_key=settings.openai_api_key,
-            model_name=settings.OPENAI_MODEL_FEEDBACK,
-            temperature=0.3
-        ).llm
-
-        translation_prompt = QUESTION_BILINGUAL_PROMPT.format(
-            english_question=question_en
-        )
-        translation_response = await llm.invoke(translation_prompt)
-
-        question_ko = question_en
-        try:
-            json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', translation_response, re.DOTALL)
-            if json_match:
-                parsed = json.loads(json_match.group(0))
-                question_ko = parsed.get("korean_question", question_en)
-        except Exception as e:
-            logger.warning(f"Failed to parse Korean translation: {e}")
+        # 한글 번역: 매개변수로 전달된 것이 있으면 사용, 없으면 생성
+        if not question_ko:
+            question_ko = await _translate_question_to_korean(question_en)
 
         await spring2_client.save_utterance(
             session_id=session_id,
