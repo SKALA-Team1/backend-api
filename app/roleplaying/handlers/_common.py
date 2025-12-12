@@ -25,7 +25,7 @@ from app.integrations.clients.spring2_client import spring2_client
 from app.roleplaying.core.session_state_manager import session_manager
 from app.roleplaying.core.session_message_handler import SessionMessageHandler
 from app.roleplaying.handlers.ws_message_models import (
-    AiTextMessage, AiTextStreamingMessage, AiTypingMessage,
+    AiTextMessage, AiTextStreamingMessage, AiTextKoreanMessage, AiTypingMessage,
     ErrorMessage, FeedbackMessage, FeedbackSectionsMessage, FeedbackStreamingMessage,
     RetryRequiredMessage, UtteranceSavedMessage, TtsAudioMessage, TtsVisemeMessage
 )
@@ -185,12 +185,12 @@ async def _generate_and_stream_ai_response(
     session_id: str,
     session_state,
     user_text: str,
-) -> Tuple[str, bool]:
+) -> Tuple[str, bool, str]:
     """
     AI 응답 생성 및 스트리밍 전송
 
     Returns:
-        (full_ai_response, is_fixed_question)
+        (full_ai_response, is_fixed_question, full_ai_response_ko)
     """
     from app.roleplaying.services.business.ai_tutor_service import ai_tutor_service
 
@@ -217,6 +217,31 @@ async def _generate_and_stream_ai_response(
             AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
         )
 
+    # ========================================
+    # 병렬 처리: 한글 번역 + TTS 생성
+    # ========================================
+    # 한글 번역과 TTS는 독립적이므로 동시 실행
+    translate_task = asyncio.create_task(_translate_question_to_korean(full_ai_response))
+    tts_task = asyncio.create_task(_send_tts_audio_and_visemes(websocket, full_ai_response))
+
+    # 병렬 실행 (TTS는 WebSocket 전송 포함)
+    results = await asyncio.gather(translate_task, tts_task, return_exceptions=True)
+
+    full_ai_response_ko = results[0] if not isinstance(results[0], Exception) else full_ai_response
+    tts_error = results[1] if isinstance(results[1], Exception) else None
+
+    if tts_error:
+        logger.warning(f"TTS error during streaming: {tts_error}")
+
+    # 한글 번역을 별도 메시지로 전송 (스트리밍이 아닌 경우에만)
+    if full_ai_response_ko and full_ai_response_ko != full_ai_response:
+        try:
+            await websocket.send_json(
+                AiTextKoreanMessage(text_ko=full_ai_response_ko, is_fixed_question=is_fixed_question).model_dump()
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send Korean translation: {e}")
+
     # 히스토리와 세션 상태 업데이트
     await SessionMessageHandler.append_message_async(
         session_id=session_id,
@@ -229,12 +254,7 @@ async def _generate_and_stream_ai_response(
         session_state.current_question_text = full_ai_response
         session_state.reset_retry_count()
 
-    # ========================================
-    # ElevenLabs TTS 호출 및 전송
-    # ========================================
-    await _send_tts_audio_and_visemes(websocket, full_ai_response)
-
-    return full_ai_response, is_fixed_question
+    return full_ai_response, is_fixed_question, full_ai_response_ko
 
 
 # ========================================
@@ -262,16 +282,31 @@ async def _send_tts_audio_and_visemes(websocket: WebSocket, text: str, context: 
                 audio_base64=tts_result['audio_base64']
             ).model_dump()
         )
-        
-        # Viseme 데이터 전송
+
+        # Viseme 데이터 배치 전송 (개별 메시지 폭발 방지)
+        # 10개씩 배치하여 WebSocket 메시지 수 90% 감소
+        viseme_batch_size = 10
+        viseme_batch = []
+
         for viseme in tts_result['visemes']:
-            await websocket.send_json(
+            viseme_batch.append(
                 TtsVisemeMessage(
                     start_time=viseme['start_time'],
                     end_time=viseme['end_time'],
                     value=viseme['value']
                 ).model_dump()
             )
+
+            # 배치 크기에 도달하면 전송
+            if len(viseme_batch) >= viseme_batch_size:
+                for batched_viseme in viseme_batch:
+                    await websocket.send_json(batched_viseme)
+                viseme_batch = []
+
+        # 남은 Viseme 전송
+        if viseme_batch:
+            for batched_viseme in viseme_batch:
+                await websocket.send_json(batched_viseme)
     except Exception as e:
         error_context = f" ({context})" if context else ""
         logger.error(f"TTS error{error_context}: {e}", exc_info=True)
@@ -389,12 +424,22 @@ async def _send_feedback_messages(
         await websocket.send_json(retry_msg.model_dump())
 
         if session_state.current_question_text:
+            # 재시도 질문 전송
             await websocket.send_json(
                 AiTextMessage(
                     text=session_state.current_question_text,
                     is_fixed_question=False
                 ).model_dump()
             )
+            # 재시도 질문의 한글 번역 생성 및 별도 전송
+            question_ko = await _translate_question_to_korean(session_state.current_question_text)
+            if question_ko and question_ko != session_state.current_question_text:
+                try:
+                    await websocket.send_json(
+                        AiTextKoreanMessage(text_ko=question_ko, is_fixed_question=False).model_dump()
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send Korean translation for retry: {e}")
         return True  # Early return - 재시도 필요
 
     else:
@@ -480,6 +525,33 @@ async def _save_utterance_with_feedback(
 
 
 # ========================================
+# AI 질문 번역 (한글)
+# ========================================
+
+
+async def _translate_question_to_korean(question_en: str) -> str:
+    """
+    영문 질문을 한글로 번역
+
+    QuestionTranslatorImpl 싱글톤 인스턴스를 사용하여
+    LLM 클라이언트를 재사용하고 성능을 최적화합니다.
+
+    Args:
+        question_en: 영문 질문
+
+    Returns:
+        한글 번역 (번역 실패 시 영문 반환)
+    """
+    try:
+        from app.roleplaying.services.llm.llm_question_translator import question_translator
+
+        return await question_translator.translate_question(question_en)
+    except Exception as e:
+        logger.warning(f"Failed to translate question to Korean: {e}")
+        return question_en  # Fallback: return English question
+
+
+# ========================================
 # AI 질문 저장 (바이링궐 + 추천 키워드)
 # ========================================
 
@@ -495,13 +567,14 @@ async def _save_question_with_keywords(
     session_state=None,
     slack_message: Optional[str] = None,
     is_fixed_question: bool = False,
+    question_ko: Optional[str] = None,
 ) -> None:
     """
     AI 질문을 Spring 2에 저장 (영문 + 한글 + 추천 키워드 포함)
 
     흐름:
     1. 추천 키워드 생성 (RECOMMENDED_KEYWORDS_PROMPT 사용)
-    2. 한글 번역 생성 (QUESTION_BILINGUAL_PROMPT 사용)
+    2. 한글 번역 (question_ko가 없으면 생성, 있으면 재사용)
     3. Spring 2에 저장 (save_utterance() API 호출)
 
     Args:
@@ -511,13 +584,13 @@ async def _save_question_with_keywords(
         user_role: 사용자 역할
         ai_role: AI 역할
         scenario_context: 시나리오 배경
+        session_state: 세션 상태
         slack_message: 원본 Slack 메시지 (선택사항)
         is_fixed_question: 고정 질문 여부
+        question_ko: 한글 번역 (선택사항, 없으면 자동 생성)
     """
     try:
         from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
-        from app.roleplaying.services.llm.llm_base import LLMServiceBase
-        from app.roleplaying.prompts.constants import QUESTION_BILINGUAL_PROMPT
         import json
 
         keywords = await keyword_generator.generate_recommended_keywords(
@@ -529,25 +602,9 @@ async def _save_question_with_keywords(
             conversation_summary=""
         )
 
-        llm = LLMServiceBase(
-            api_key=settings.openai_api_key,
-            model_name=settings.OPENAI_MODEL_FEEDBACK,
-            temperature=0.3
-        ).llm
-
-        translation_prompt = QUESTION_BILINGUAL_PROMPT.format(
-            english_question=question_en
-        )
-        translation_response = await llm.invoke(translation_prompt)
-
-        question_ko = question_en
-        try:
-            json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', translation_response, re.DOTALL)
-            if json_match:
-                parsed = json.loads(json_match.group(0))
-                question_ko = parsed.get("korean_question", question_en)
-        except Exception as e:
-            logger.warning(f"Failed to parse Korean translation: {e}")
+        # 한글 번역: 매개변수로 전달된 것이 있으면 사용, 없으면 생성
+        if not question_ko:
+            question_ko = await _translate_question_to_korean(question_en)
 
         await spring2_client.save_utterance(
             session_id=session_id,

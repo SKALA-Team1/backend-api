@@ -187,10 +187,21 @@ class AiTextMessage(BaseModel):
     질문 타입:
     - 턴 1, 4, 7: 고정 질문 사용
     - 나머지 턴: LLM이 동적으로 생성
+
+    예시:
+    {
+        "type": "AI_TEXT",
+        "text": "Can you walk me through...",
+        "text_ko": "당신이 걸어가면서...",
+        "is_fixed_question": true
+    }
     """
 
     type: Literal["AI_TEXT"] = "AI_TEXT"
-    text: str = Field(..., description="AI 응답 텍스트", min_length=1)
+    text: str = Field(..., description="AI 응답 텍스트 (영문)", min_length=1)
+    text_ko: Optional[str] = Field(
+        default=None, description="AI 응답 한글 번역 (선택사항)"
+    )
     is_fixed_question: bool = Field(
         default=False, description="고정 질문 여부 (턴 1, 4, 7)"
     )
@@ -205,11 +216,44 @@ class AiTextStreamingMessage(BaseModel):
 
     사용:
     - 동적 질문 생성 중 청크 전송
-    - 고정 질문은 한 번에 전송 (is_fixed_question=True일 때)
+    - 한글 번역은 스트리밍 완료 후 AiTextMessage로 별도 전송
+
+    예시:
+    {
+        "type": "AI_TEXT_STREAMING",
+        "chunk": "Can you walk",
+        "is_fixed_question": false
+    }
     """
 
     type: Literal["AI_TEXT_STREAMING"] = "AI_TEXT_STREAMING"
-    chunk: str = Field(..., description="스트리밍 청크 (한 단어 또는 여러 단어)")
+    chunk: str = Field(..., description="스트리밍 청크 (영문)")
+    is_fixed_question: bool = Field(
+        default=False, description="고정 질문 여부 (턴 1, 4, 7)"
+    )
+
+
+class AiTextKoreanMessage(BaseModel):
+    """
+    AI 응답 한글 번역 메시지
+
+    AI 스트리밍 응답이 완료된 후, 전체 응답의 한글 번역을 전송.
+    클라이언트는 스트리밍된 영문 응답을 받은 후 이 메시지로 한글 번역을 받게 됨.
+
+    순서:
+    1. AI_TEXT_STREAMING (청크 단위, 영문만)
+    2. AI_TEXT_KOREAN (완성된 한글 번역)
+
+    예시:
+    {
+        "type": "AI_TEXT_KOREAN",
+        "text_ko": "당신이 이 특정 평가 관련 컬럼과 인덱스를...",
+        "is_fixed_question": false
+    }
+    """
+
+    type: Literal["AI_TEXT_KOREAN"] = "AI_TEXT_KOREAN"
+    text_ko: str = Field(..., description="AI 응답 한글 번역 (완성된 전체 번역)", min_length=1)
     is_fixed_question: bool = Field(
         default=False, description="고정 질문 여부 (턴 1, 4, 7)"
     )
@@ -422,6 +466,7 @@ OutboundMessage = (
     AckMessage
     | AiTextMessage
     | AiTextStreamingMessage
+    | AiTextKoreanMessage
     | SttPartialMessage
     | SttFinalMessage
     | UtteranceSavedMessage
