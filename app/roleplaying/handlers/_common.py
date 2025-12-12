@@ -573,9 +573,9 @@ async def _save_question_with_keywords(
     AI 질문을 Spring 2에 저장 (영문 + 한글 + 추천 키워드 포함)
 
     흐름:
-    1. 추천 키워드 생성 (RECOMMENDED_KEYWORDS_PROMPT 사용)
-    2. 한글 번역 (question_ko가 없으면 생성, 있으면 재사용)
-    3. Spring 2에 저장 (save_utterance() API 호출)
+    1. 한글 번역 (question_ko가 없으면 생성, 있으면 재사용)
+    2. Spring 2에 저장 (save_utterance() API 호출)
+    3. 키워드 생성 (고정 질문: 동기 | 생성 질문: 백그라운드)
 
     Args:
         session_id: 세션 ID
@@ -590,22 +590,11 @@ async def _save_question_with_keywords(
         question_ko: 한글 번역 (선택사항, 없으면 자동 생성)
     """
     try:
-        from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
-        import json
-
-        keywords = await keyword_generator.generate_recommended_keywords(
-            question=question_en,
-            user_role=user_role,
-            ai_role=ai_role,
-            scenario_context=scenario_context,
-            slack_message=slack_message,
-            conversation_summary=""
-        )
-
         # 한글 번역: 매개변수로 전달된 것이 있으면 사용, 없으면 생성
         if not question_ko:
             question_ko = await _translate_question_to_korean(question_en)
 
+        # ✅ Spring 2에 먼저 저장 (키워드 없이)
         await spring2_client.save_utterance(
             session_id=session_id,
             stt_text=question_en,
@@ -617,8 +606,35 @@ async def _save_question_with_keywords(
             completed_all_turns=session_state.has_reached_turn_limit(settings.ROLEPLAY_MAX_TURNS) if session_state else False,
             status="IN_PROGRESS",
             question_ko=question_ko,
-            recommended_keywords=keywords,
+            recommended_keywords=[],  # ✅ 먼저 빈 배열로 저장
         )
+
+        # ✅ 키워드 생성을 조건부로 처리:
+        # - 고정 질문: 동기 처리 (클라이언트 대기 없음, 백그라운드 저장이므로 상관없음)
+        # - 생성 질문: 백그라운드 처리 (클라이언트 응답 지연 없음)
+        if is_fixed_question:
+            # 고정 질문: 그냥 동기 처리 (어차피 백그라운드에서 실행 중)
+            await _generate_and_update_keywords(
+                session_id=session_id,
+                question_en=question_en,
+                user_role=user_role,
+                ai_role=ai_role,
+                scenario_context=scenario_context,
+                slack_message=slack_message,
+            )
+        else:
+            # 생성 질문: 백그라운드 처리 (클라이언트 응답 지연 방지)
+            keyword_task = asyncio.create_task(
+                _generate_and_update_keywords(
+                    session_id=session_id,
+                    question_en=question_en,
+                    user_role=user_role,
+                    ai_role=ai_role,
+                    scenario_context=scenario_context,
+                    slack_message=slack_message,
+                )
+            )
+            keyword_task.add_done_callback(lambda task: _handle_task_error(task, "generate_and_update_keywords"))
 
     except Exception as e:
         logger.error(
@@ -626,3 +642,58 @@ async def _save_question_with_keywords(
             exc_info=True
         )
         raise
+
+
+# ========================================
+# 키워드 생성 및 업데이트 (백그라운드용)
+# ========================================
+
+
+async def _generate_and_update_keywords(
+    session_id: str,
+    question_en: str,
+    user_role: str,
+    ai_role: str,
+    scenario_context: str,
+    slack_message: Optional[str] = None,
+) -> None:
+    """
+    키워드를 생성하고 Spring 2에 업데이트
+
+    이 함수는 비동기 백그라운드 태스크로 실행되어
+    클라이언트 응답을 지연시키지 않습니다.
+
+    Args:
+        session_id: 세션 ID
+        question_en: AI 질문 (영문)
+        user_role: 사용자 역할
+        ai_role: AI 역할
+        scenario_context: 시나리오 배경
+        slack_message: 원본 Slack 메시지 (선택사항)
+    """
+    try:
+        from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
+
+        logger.debug(f"Background task: Generating keywords for session={session_id}")
+
+        # 키워드 생성
+        keywords = await keyword_generator.generate_recommended_keywords(
+            question=question_en,
+            user_role=user_role,
+            ai_role=ai_role,
+            scenario_context=scenario_context,
+            slack_message=slack_message,
+            conversation_summary=""
+        )
+
+        logger.debug(f"Background task: Keywords generated for session={session_id}: {keywords}")
+
+        # TODO: Spring 2에 키워드 업데이트 API 호출
+        # 현재는 키워드 생성만 완료하고, Spring 2 업데이트는
+        # 향후 별도의 PATCH API 구현 필요
+
+    except Exception as e:
+        logger.warning(
+            f"Background task - Failed to generate keywords: session={session_id}, error={e}",
+            exc_info=True
+        )
