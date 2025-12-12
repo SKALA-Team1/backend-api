@@ -19,6 +19,14 @@ User's Answer: "{user_answer}"
 Key Keywords: {key_keywords}
 Model Answer (for reference): "{model_answer}"
 
+**CRITICAL FIRST CHECK - Language Validation:**
+1. Analyze if the user's answer is written in ENGLISH or KOREAN
+2. If the answer contains ANY Korean characters (한글) or is primarily in Korean:
+   - Return IMMEDIATELY with all scores as 0
+   - Provide feedback: "영어로 답변해 주세요. 영어 면접 준비를 위해 영어로만 평가가 가능합니다."
+   - Do NOT proceed to evaluate content
+3. Only if the answer is in English, proceed to evaluate on the THREE criteria below
+
 Evaluate the answer on THREE criteria (0-100 each):
 
 1. **Clarity (명확성)**
@@ -27,43 +35,48 @@ Evaluate the answer on THREE criteria (0-100 each):
    - Are there specific examples?
    - Is it concise without unnecessary repetition?
 
-   Scoring Guide:
-   - 90-100: Perfect structure, clear explanation, concrete examples
-   - 70-89: Generally clear but some ambiguity
-   - 50-69: Has structure but unclear explanation
-   - 30-49: Weak logical flow, hard to understand
-   - 0-29: Failed to convey meaning
+   Scoring Guide (LENIENT - be generous with scores):
+   - 85-100: Clear explanation with reasonable flow (doesn't need to be perfect)
+   - 70-84: Understandable answer, minor issues are OK
+   - 55-69: Basic understanding shown, even if simple
+   - 40-54: Some confusion but attempted to explain
+   - 0-39: Completely unclear or off-topic
 
 2. **Technical Accuracy (기술적 정확성)**
-   - Does it cover all key keywords: {key_keywords}?
-   - Are there any factual errors?
-   - Does it address core technical aspects?
-   - Is it superficial or does it show depth?
+   - Does it mention at least SOME of the key keywords: {key_keywords}?
+   - Are there major factual errors? (minor mistakes are acceptable)
+   - Does it show basic understanding of the concept?
 
-   Scoring Guide:
-   - 90-100: All key concepts covered, accurate and in-depth
-   - 70-89: Main concepts covered, some details missing
-   - 50-69: Partial coverage, key points missing
-   - 30-49: Inaccurate information or major omissions
-   - 0-29: Mostly incorrect or off-topic
+   Scoring Guide (LENIENT - reward effort and partial correctness):
+   - 85-100: Core concept understood, mentions key terms (all keywords NOT required)
+   - 70-84: Shows understanding even if missing some details
+   - 55-69: Basic grasp of concept, even if incomplete
+   - 40-54: Attempted but with some inaccuracies
+   - 0-39: Fundamentally wrong or completely off-topic
 
 3. **Terminology (전문용어 사용)**
-   - Are IT terms used correctly?
-   - Is professional vocabulary used (not casual)?
-   - Are terms used naturally (not forced)?
-   - Expected terms: {key_keywords}
+   - Are ANY relevant IT terms used?
+   - Is professional vocabulary attempted (casual is OK for learners)?
+   - Give credit for trying to use technical terms
 
-   Scoring Guide:
-   - 90-100: Professional terms used accurately and naturally
-   - 70-89: Mostly appropriate but some awkwardness
-   - 50-69: Basic terms only, lacks professionalism
-   - 30-49: Terms misused or avoided
-   - 0-29: Almost no technical terms or severe misuse
+   Scoring Guide (LENIENT - encourage term usage):
+   - 85-100: Uses technical terms reasonably well
+   - 70-84: Attempts to use professional vocabulary
+   - 55-69: Uses some basic IT terms
+   - 40-54: Few technical terms but shows effort
+   - 0-39: No technical terminology attempted
+
+**Scoring Philosophy:**
+- This is for LEARNERS - be encouraging and generous
+- Reward partial correctness and effort
+- Don't expect perfection - give credit for understanding core concepts
+- Focus on whether they can communicate the idea, not perfect accuracy
+- Most reasonable answers should score 70-85 range
 
 Provide:
 - Scores for each criterion
-- **Brief feedback in KOREAN (2-3 sentences)** highlighting strengths and areas for improvement
-- Use encouraging tone suitable for learners
+- **Brief feedback in KOREAN (2-3 sentences)** highlighting strengths and specific areas to improve
+- Use encouraging, constructive tone
 
 Output in strict JSON format:
 {{
@@ -73,7 +86,10 @@ Output in strict JSON format:
   "feedback": "<한국어로 작성된 피드백>"
 }}
 
-IMPORTANT: The "feedback" field MUST be in Korean. Do not include any other text, explanations, or commentary outside the JSON.
+IMPORTANT:
+- If answer is in Korean, return {{ "clarity_score": 0, "technical_accuracy_score": 0, "terminology_score": 0, "feedback": "영어로 답변해 주세요. 영어 면접 준비를 위해 영어로만 평가가 가능합니다." }}
+- Otherwise, the "feedback" field MUST be in Korean
+- Do not include any other text, explanations, or commentary outside the JSON
 """
 
 # ============================================
