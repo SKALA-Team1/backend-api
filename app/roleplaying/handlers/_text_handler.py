@@ -205,25 +205,28 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
         ai_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
         turn_number = session_state.get_ai_turn_number() if session_state else 1
 
-        try:
-            await _save_question_with_keywords(
-                session_id=session_id,
-                question_en=full_ai_response,
-                turn_number=turn_number,
-                utterance_index=ai_index,
-                user_role=session_state.my_role if session_state else "User",
-                ai_role=session_state.ai_role if session_state else "AI",
-                scenario_context=session_state.subject_id if session_state else "",
-                session_state=session_state,
-                slack_message=None,
-                is_fixed_question=is_fixed_question,
-                question_ko=full_ai_response_ko,  # ✅ 이미 생성된 번역을 재사용 (중복 생성 방지)
-            )
-        except Exception as e:
-            logger.error(f"Failed to save AI question: session={session_id}, error={e}", exc_info=True)
-            await websocket.send_json(
-                ErrorMessage(message="Failed to save AI question", code="AI_SAVE_ERROR").model_dump()
-            )
+        # ✅ Background task: Spring 2 저장 (응답 후 비동기 처리)
+        async def save_question_background():
+            try:
+                await _save_question_with_keywords(
+                    session_id=session_id,
+                    question_en=full_ai_response,
+                    turn_number=turn_number,
+                    utterance_index=ai_index,
+                    user_role=session_state.my_role if session_state else "User",
+                    ai_role=session_state.ai_role if session_state else "AI",
+                    scenario_context=session_state.subject_id if session_state else "",
+                    session_state=session_state,
+                    slack_message=None,
+                    is_fixed_question=is_fixed_question,
+                    question_ko=full_ai_response_ko,  # ✅ 이미 생성된 번역을 재사용 (중복 생성 방지)
+                )
+            except Exception as e:
+                logger.error(f"Background task - Failed to save AI question: session={session_id}, error={e}", exc_info=True)
+
+        # 백그라운드 태스크로 실행 (응답을 기다리지 않음)
+        save_task = asyncio.create_task(save_question_background())
+        save_task.add_done_callback(lambda task: _handle_task_error(task, "save_question_background"))
 
     except Exception as e:
         logger.error(f"User text handler error: {e}", exc_info=True)

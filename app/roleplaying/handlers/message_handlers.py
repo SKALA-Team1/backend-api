@@ -15,6 +15,7 @@ handler 시그니처:
 - _common.py: 공통 유틸리티 및 공유 로직
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -24,7 +25,7 @@ from fastapi import WebSocket, status
 from app.config import settings
 from app.integrations.clients.spring2_client import spring2_client
 from app.roleplaying.core.session_state_manager import session_manager, SessionMessageHandler
-from app.roleplaying.handlers._common import _send_error
+from app.roleplaying.handlers._common import _send_error, _handle_task_error, _save_question_with_keywords
 from app.roleplaying.handlers._text_handler import handle_user_text
 from app.roleplaying.handlers._audio_handler import handle_utterance_end
 from app.roleplaying.handlers.ws_message_models import (
@@ -122,27 +123,32 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
         if tts_error:
             logger.warning(f"TTS error during init: {tts_error}")
 
-        # Spring 2 저장 (첫 질문은 고정 질문이므로 한글 + 키워드 포함해야 함)
-        try:
-            await _save_question_with_keywords(
-                session_id=session_id,
-                question_en=first_question,
-                turn_number=1,
-                utterance_index=first_ai_index,
-                user_role=init_msg.myRole,
-                ai_role=init_msg.aiRole,
-                scenario_context=init_msg.subjectId,
-                session_state=session_state,
-                slack_message=None,
-                is_fixed_question=True,  # ✅ 고정 질문임을 명시
-                question_ko=first_question_ko,  # ✅ 이미 생성된 번역을 재사용 (중복 생성 방지)
-            )
-        except Exception as e:
-            logger.error(f"Failed to save first fixed question: {e}", exc_info=True)
-
-        # 클라이언트에 전송 (영문 + 한글)
+        # 클라이언트에 전송 (영문 + 한글) - 먼저 전송
         ai_msg = AiTextMessage(text=first_question, text_ko=first_question_ko, is_fixed_question=True)
         await websocket.send_json(ai_msg.model_dump())
+
+        # ✅ Background task: Spring 2 저장 (응답 후 비동기 처리)
+        async def save_first_question_background():
+            try:
+                await _save_question_with_keywords(
+                    session_id=session_id,
+                    question_en=first_question,
+                    turn_number=1,
+                    utterance_index=first_ai_index,
+                    user_role=init_msg.myRole,
+                    ai_role=init_msg.aiRole,
+                    scenario_context=init_msg.subjectId,
+                    session_state=session_state,
+                    slack_message=None,
+                    is_fixed_question=True,  # ✅ 고정 질문임을 명시
+                    question_ko=first_question_ko,  # ✅ 이미 생성된 번역을 재사용 (중복 생성 방지)
+                )
+            except Exception as e:
+                logger.error(f"Background task - Failed to save first fixed question: {e}", exc_info=True)
+
+        # 백그라운드 태스크로 실행 (응답을 기다리지 않음)
+        save_task = asyncio.create_task(save_first_question_background())
+        save_task.add_done_callback(lambda task: _handle_task_error(task, "save_first_question_background"))
 
     except ValueError as e:
         logger.error(f"Session creation failed: {e}")
