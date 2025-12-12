@@ -97,10 +97,12 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
 
         first_ai_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
 
+        # 한글 번역 생성
+        from app.roleplaying.handlers._common import _save_question_with_keywords, _translate_question_to_korean
+        first_question_ko = await _translate_question_to_korean(first_question)
+
         # Spring 2 저장 (첫 질문은 고정 질문이므로 한글 + 키워드 포함해야 함)
         import asyncio
-        from app.roleplaying.handlers._common import _save_question_with_keywords
-
         try:
             await _save_question_with_keywords(
                 session_id=session_id,
@@ -117,8 +119,8 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
         except Exception as e:
             logger.error(f"Failed to save first fixed question: {e}", exc_info=True)
 
-        # 클라이언트에 전송
-        ai_msg = AiTextMessage(text=first_question, is_fixed_question=True)
+        # 클라이언트에 전송 (영문 + 한글)
+        ai_msg = AiTextMessage(text=first_question, text_ko=first_question_ko, is_fixed_question=True)
         await websocket.send_json(ai_msg.model_dump())
 
         # ========================================

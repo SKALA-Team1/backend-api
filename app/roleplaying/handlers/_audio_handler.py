@@ -218,7 +218,7 @@ async def handle_utterance_end(router, websocket: WebSocket, session_id: str, me
 
         await websocket.send_json(AiTypingMessage().model_dump())
 
-        full_ai_response, is_fixed_question = await _generate_and_stream_ai_response(
+        full_ai_response, is_fixed_question, full_ai_response_ko = await _generate_and_stream_ai_response(
             websocket=websocket,
             session_id=session_id,
             session_state=session_state,

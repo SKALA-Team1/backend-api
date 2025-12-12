@@ -25,7 +25,7 @@ from app.integrations.clients.spring2_client import spring2_client
 from app.roleplaying.core.session_state_manager import session_manager
 from app.roleplaying.core.session_message_handler import SessionMessageHandler
 from app.roleplaying.handlers.ws_message_models import (
-    AiTextMessage, AiTextStreamingMessage, AiTypingMessage,
+    AiTextMessage, AiTextStreamingMessage, AiTextKoreanMessage, AiTypingMessage,
     ErrorMessage, FeedbackMessage, FeedbackSectionsMessage, FeedbackStreamingMessage,
     RetryRequiredMessage, UtteranceSavedMessage, TtsAudioMessage, TtsVisemeMessage
 )
@@ -185,12 +185,12 @@ async def _generate_and_stream_ai_response(
     session_id: str,
     session_state,
     user_text: str,
-) -> Tuple[str, bool]:
+) -> Tuple[str, bool, str]:
     """
     AI 응답 생성 및 스트리밍 전송
 
     Returns:
-        (full_ai_response, is_fixed_question)
+        (full_ai_response, is_fixed_question, full_ai_response_ko)
     """
     from app.roleplaying.services.business.ai_tutor_service import ai_tutor_service
 
@@ -217,6 +217,18 @@ async def _generate_and_stream_ai_response(
             AiTextStreamingMessage(chunk=full_ai_response, is_fixed_question=False).model_dump()
         )
 
+    # 전체 응답의 한글 번역 생성
+    full_ai_response_ko = await _translate_question_to_korean(full_ai_response)
+
+    # 한글 번역을 별도 메시지로 전송 (스트리밍이 아닌 경우에만)
+    if full_ai_response_ko and full_ai_response_ko != full_ai_response:
+        try:
+            await websocket.send_json(
+                AiTextKoreanMessage(text_ko=full_ai_response_ko, is_fixed_question=is_fixed_question).model_dump()
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send Korean translation: {e}")
+
     # 히스토리와 세션 상태 업데이트
     await SessionMessageHandler.append_message_async(
         session_id=session_id,
@@ -234,7 +246,7 @@ async def _generate_and_stream_ai_response(
     # ========================================
     await _send_tts_audio_and_visemes(websocket, full_ai_response)
 
-    return full_ai_response, is_fixed_question
+    return full_ai_response, is_fixed_question, full_ai_response_ko
 
 
 # ========================================
@@ -389,12 +401,22 @@ async def _send_feedback_messages(
         await websocket.send_json(retry_msg.model_dump())
 
         if session_state.current_question_text:
+            # 재시도 질문 전송
             await websocket.send_json(
                 AiTextMessage(
                     text=session_state.current_question_text,
                     is_fixed_question=False
                 ).model_dump()
             )
+            # 재시도 질문의 한글 번역 생성 및 별도 전송
+            question_ko = await _translate_question_to_korean(session_state.current_question_text)
+            if question_ko and question_ko != session_state.current_question_text:
+                try:
+                    await websocket.send_json(
+                        AiTextKoreanMessage(text_ko=question_ko, is_fixed_question=False).model_dump()
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send Korean translation for retry: {e}")
         return True  # Early return - 재시도 필요
 
     else:
@@ -477,6 +499,52 @@ async def _save_utterance_with_feedback(
     except Exception as e:
         logger.error(f"Failed to save utterance: session={session_id}, error={e}", exc_info=True)
         return None
+
+
+# ========================================
+# AI 질문 번역 (한글)
+# ========================================
+
+
+async def _translate_question_to_korean(question_en: str) -> str:
+    """
+    영문 질문을 한글로 번역
+
+    Args:
+        question_en: 영문 질문
+
+    Returns:
+        한글 번역 (번역 실패 시 영문 반환)
+    """
+    try:
+        from app.roleplaying.services.llm.llm_base import LLMServiceBase
+        from app.roleplaying.prompts.constants import QUESTION_BILINGUAL_PROMPT
+        import json
+
+        llm = LLMServiceBase(
+            api_key=settings.openai_api_key,
+            model_name=settings.OPENAI_MODEL_FEEDBACK,
+            temperature=0.3
+        ).llm
+
+        translation_prompt = QUESTION_BILINGUAL_PROMPT.format(
+            english_question=question_en
+        )
+        translation_response = await llm.invoke(translation_prompt)
+
+        question_ko = question_en
+        try:
+            json_match = re.search(r'\{[^{}]*"korean_question"[^{}]*\}', translation_response, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+                question_ko = parsed.get("korean_question", question_en)
+        except Exception as e:
+            logger.warning(f"Failed to parse Korean translation: {e}")
+
+        return question_ko
+    except Exception as e:
+        logger.warning(f"Failed to translate question to Korean: {e}")
+        return question_en  # Fallback: return English question
 
 
 # ========================================
