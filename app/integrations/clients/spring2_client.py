@@ -205,7 +205,13 @@ class Spring2Client:
             if recommended_keywords:
                 payload["recommended_keywords"] = recommended_keywords
 
-            logger.info(f"📤 [Spring2] Sending payload: {payload}")
+            # 로그용 payload 생성 (오디오 데이터 제외)
+            log_payload = payload.copy()
+            if "audio" in log_payload:
+                audio_len = len(log_payload["audio"]) if log_payload["audio"] else 0
+                log_payload["audio"] = f"<base64_audio_data:{audio_len}_bytes>" if audio_len > 0 else None
+            
+            logger.info(f"📤 [Spring2] Sending payload: {log_payload}")
 
             response = await client.post(url, json=payload)
 

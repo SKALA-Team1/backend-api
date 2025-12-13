@@ -35,6 +35,7 @@ from app.roleplaying.handlers._common import (
 )
 from app.roleplaying.handlers.ws_message_models import (
     AiTypingMessage,
+    AiTextStreamingMessage,
     ErrorMessage,
     UtteranceSavedMessage,
     UserTextMessage,

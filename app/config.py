@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     # ========================================
     ELEVENLABS_API_KEY: Optional[str] = Field(default=None, alias="ELEVENLABS_API_KEY")
     ELEVENLABS_VOICE_ID: str = Field("ErXwobaYiN019PkySvjV", alias="ELEVENLABS_VOICE_ID")  # Antoni (남자 목소리)
+    ELEVENLABS_MODEL_ID: str = Field("eleven_turbo_v2", alias="ELEVENLABS_MODEL_ID")  # Turbo v2 (0.5 credits/char, English only, fastest)
 
     # ========================================
     # Azure Speech (발음 평가)
