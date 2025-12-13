@@ -19,6 +19,7 @@ class ElevenLabsTTSAdapter:
             raise ValueError("ELEVENLABS_API_KEY is not set")
         self.client = ElevenLabs(api_key=settings.ELEVENLABS_API_KEY)
         self.voice_id = settings.ELEVENLABS_VOICE_ID
+        self.model_id = settings.ELEVENLABS_MODEL_ID
     
     async def synthesize_with_viseme(
         self, 
@@ -34,10 +35,11 @@ class ElevenLabsTTSAdapter:
             }
         """
         try:
-            # ElevenLabs API 호출
+            # ElevenLabs API 호출 (저렴한 모델 사용)
             response = self.client.text_to_speech.convert_with_timestamps(
                 voice_id=self.voice_id,
-                text=text
+                text=text,
+                model_id=self.model_id
             )
             
             # Pydantic 모델이므로 model_dump()로 딕셔너리 변환 후 접근

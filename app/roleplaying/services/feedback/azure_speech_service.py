@@ -22,11 +22,12 @@ from azure.cognitiveservices.speech import (
     SpeechConfig,
     SpeechRecognizer,
     PronunciationAssessmentConfig,
+    PronunciationAssessmentGradingSystem,
+    PronunciationAssessmentGranularity,
     ResultReason,
-    CancellationReason,
+    PropertyId,
 )
-from azure.cognitiveservices.speech.audio import AudioConfig
-import io
+from azure.cognitiveservices.speech.audio import AudioConfig, PushAudioInputStream
 
 from app.config import settings
 
@@ -150,8 +151,8 @@ class AzureSpeechService:
             평가 결과 딕셔너리
         """
         try:
-            # 오디오 데이터를 스트림으로 변환
-            audio_stream = io.BytesIO(audio_data)
+            # Azure Speech SDK용 Push 오디오 스트림 생성
+            audio_stream = PushAudioInputStream()
 
             # AudioConfig에 오디오 스트림 설정
             audio_config = AudioConfig(stream=audio_stream)
@@ -166,14 +167,23 @@ class AzureSpeechService:
             # Pronunciation Assessment 설정
             pronunciation_config = PronunciationAssessmentConfig(
                 reference_text=reference_text,
-                grading_system="HundredMark",
-                granularity="Phoneme",
+                grading_system=PronunciationAssessmentGradingSystem.HundredMark,
+                granularity=PronunciationAssessmentGranularity.Phoneme,
                 enable_miscue=True
             )
             pronunciation_config.apply_to(speech_recognizer)
 
+            # 오디오 데이터를 스트림에 작성 (recognize_once 호출 전)
+            audio_stream.write(audio_data)
+            audio_stream.close()
+
             # 발음 평가 실행
             result = speech_recognizer.recognize_once()
+
+            # 결과 상태 로깅
+            logger.error(f"Recognition result reason: {result.reason}")
+            logger.error(f"Recognition result text: {result.text if hasattr(result, 'text') else 'N/A'}")
+            logger.error(f"Result properties keys: {list(result.properties.keys()) if hasattr(result, 'properties') else 'N/A'}")
 
             # 결과 분석
             if result.reason == ResultReason.RecognizedSpeech:
@@ -218,10 +228,24 @@ class AzureSpeechService:
             정규화된 결과 딕셔너리
         """
         try:
-            # JSON 결과 파싱
-            pronunciation_result = json.loads(result.properties.get(
-                "SpeechServiceResponse_JsonResult"
-            ))
+            # JSON 결과 파싱 (PropertyId enum 사용)
+            json_result = result.properties.get(PropertyId.SpeechServiceResponse_JsonResult)
+
+            if not json_result:
+                available_props = list(result.properties.keys()) if hasattr(result, 'properties') else []
+                result_text = result.text if hasattr(result, 'text') else 'N/A'
+                logger.error(f"No JSON result in response. Result text: {result_text}")
+                logger.error(f"Available properties: {available_props}")
+                return {
+                    "success": False,
+                    "error_message": "No pronunciation assessment data in response",
+                    "debug_info": {
+                        "recognized_text": result_text,
+                        "available_properties": available_props
+                    }
+                }
+
+            pronunciation_result = json.loads(json_result)
 
             # 최상위 점수 추출
             nbest = pronunciation_result.get("NBest", [{}])[0]
