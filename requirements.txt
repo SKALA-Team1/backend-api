@@ -40,7 +40,7 @@ langchain-ollama>=0.1.0  # LangChain Ollama 통합
 # ========================================
 # STT (Speech-to-Text)
 # ========================================
-openai-whisper>=20231117  # Whisper 로컬 STT
+# openai-whisper>=20231117  # Whisper 로컬 STT
 deepgram-sdk>=3.0.0,<4.0.0  # Deepgram STT (실시간 스트리밍) - SDK 3.x API
 azure-cognitiveservices-speech>=1.38.0  # Azure Speech (발음 평가)
 
