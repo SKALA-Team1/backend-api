@@ -11,7 +11,8 @@ IT 연습 세션 저장 서비스
 import logging
 from typing import Optional, Dict, Any
 import httpx
-import os
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class SessionService:
 
     def __init__(self):
         """세션 서비스 초기화"""
-        self.spring2_base_url = os.getenv("SPRING2_BASE_URL", "http://localhost:8081")
+        self.spring2_base_url = settings.SPRING2_BASE_URL
         logger.info(f"SessionService initialized (Spring2: {self.spring2_base_url})")
 
     async def create_session(

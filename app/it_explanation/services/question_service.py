@@ -11,7 +11,8 @@ import logging
 import json
 from typing import Optional, Dict, Any, List
 import httpx
-import os
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class QuestionService:
 
     def __init__(self):
         """질문 서비스 초기화"""
-        self.spring2_base_url = os.getenv("SPRING2_BASE_URL", "http://localhost:8081")
+        self.spring2_base_url = settings.SPRING2_BASE_URL
         logger.info(f"QuestionService initialized (Spring2: {self.spring2_base_url})")
 
     async def get_random_question(self) -> Optional[Dict[str, Any]]:

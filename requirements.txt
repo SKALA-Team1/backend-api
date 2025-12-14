@@ -29,21 +29,12 @@ httpx>=0.25.0  # Spring 2 통신용
 redis[asyncio]>=5.0.0  # 세션 검증용
 
 # ========================================
-# S3 / MinIO
-# ========================================
-boto3>=1.28.0  # AWS S3 클라이언트 (MinIO 호환)
-botocore>=1.31.0
-
-# ========================================
 # LLM & AI
 # ========================================
-ollama>=0.1.0  # Slack 시나리오 생성용
 openai>=1.0.0  # OpenAI API (선택)
-anthropic>=0.7.0  # Anthropic Claude API (선택)
 langchain>=0.1.0  # LangChain 프레임워크 (에이전트)
 langchain-community>=0.0.20  # LangChain 커뮤니티 (Ollama 통합)
 langchain-openai>=0.0.10  # LangChain OpenAI 통합
-langsmith>=0.1.0  # LangSmith - LLM 토큰 사용량 추적 및 모니터링
 langchain-ollama>=0.1.0  # LangChain Ollama 통합
 
 # ========================================
@@ -51,7 +42,6 @@ langchain-ollama>=0.1.0  # LangChain Ollama 통합
 # ========================================
 openai-whisper>=20231117  # Whisper 로컬 STT
 deepgram-sdk>=3.0.0,<4.0.0  # Deepgram STT (실시간 스트리밍) - SDK 3.x API
-# google-cloud-speech>=2.21.0  # Google STT (선택)
 azure-cognitiveservices-speech>=1.38.0  # Azure Speech (발음 평가)
 
 # ========================================
@@ -62,29 +52,11 @@ elevenlabs>=1.0.0  # ElevenLabs TTS API
 # ========================================
 # Audio Processing
 # ========================================
-librosa>=0.10.0  # 오디오 분석
 sounddevice>=0.4.6  # 실시간 오디오 입력/출력
 soundfile>=0.12.0  # 오디오 파일 I/O
-pynput>=1.7.6  # 마이크 컨트롤용 키보드 입력
 
 # ========================================
 # Utilities
 # ========================================
 python-dotenv>=1.0.0  # .env 파일 로딩
 python-multipart>=0.0.6  # multipart/form-data 처리
-
-# ========================================
-# Testing & Development
-# ========================================
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
-black>=23.0.0  # 코드 포매터
-isort>=5.12.0  # import 정렬
-mypy>=1.5.0  # 타입 체킹
-flake8>=6.1.0  # 린팅
-
-# ========================================
-# Production
-# ========================================
-gunicorn>=21.2.0  # WSGI 서버 (프로덕션)
