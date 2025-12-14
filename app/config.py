@@ -6,15 +6,15 @@ Application-wide configuration helpers built on Pydantic Settings.
 
 역할:
     - 환경변수(.env) 기반 설정값을 중앙에서 관리
-    - Redis, S3(MinIO/AWS S3), Spring2 API, Database, OpenAI 등
+    - Redis, Spring2 API, Database, OpenAI 등
       SKALA FastAPI가 필요로 하는 모든 설정을 단일 클래스로 관리
     - Settings 인스턴스를 전역에서 재사용하도록 캐싱 처리
+    - 환경별 .env 파일 자동 선택 (local: .env.local, production: 환경변수)
 
 사용예시:
     from app.config import settings
 
     print(settings.REDIS_URL)
-    print(settings.S3_BUCKET_NAME)
     print(settings.database_url)
     if settings.debug:
         print("Running in development mode")
@@ -22,15 +22,32 @@ Application-wide configuration helpers built on Pydantic Settings.
 --------------------------------------------------------------
 Author: 정도현
 Created: 2025-11-12
-Modified: 2025-11-17
+Modified: 2025-12-14
 --------------------------------------------------------------
 """
 
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _get_env_file() -> Optional[str]:
+    """
+    환경에 따라 .env 파일 경로를 반환합니다.
+
+    Returns:
+        - local 환경: .env.local 파일 경로
+        - 그 외: None (환경변수만 사용)
+    """
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env == "local":
+        env_file = Path(__file__).parent.parent / ".env.local"
+        return str(env_file) if env_file.exists() else None
+    return None
 
 
 class Settings(BaseSettings):
@@ -47,7 +64,7 @@ class Settings(BaseSettings):
     # Base Config
     # -------------------------------------
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_get_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -95,15 +112,6 @@ class Settings(BaseSettings):
     # Redis
     # -------------------------------------
     REDIS_URL: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
-
-    # -------------------------------------
-    # S3 (MinIO 또는 AWS S3)
-    # -------------------------------------
-    S3_ENDPOINT_URL: str = Field(default="http://localhost:9000", alias="S3_ENDPOINT_URL")
-    S3_ACCESS_KEY: str = Field(default="minioadmin", alias="S3_ACCESS_KEY")
-    S3_SECRET_KEY: str = Field(default="minioadmin123", alias="S3_SECRET_KEY")
-    S3_BUCKET_NAME: str = Field(default="skala", alias="S3_BUCKET_NAME")
-    S3_REGION: str = Field(default="us-east-1", alias="S3_REGION")
 
     # -------------------------------------
     # Spring 2 Backend
@@ -239,7 +247,6 @@ class Settings(BaseSettings):
         URL 및 데이터베이스 URL 형식 검증 (엄격한 스킴 검증)
 
         ✅ 각 URL 필드에 맞는 스킴만 허용하여 설정 오류 조기 방지:
-        - S3_ENDPOINT_URL: http://, https://만 허용
         - SPRING2_BASE_URL: http://, https://만 허용
         - WS_BASE_URL: ws://, wss://만 허용
         - REDIS_URL: redis://, rediss://만 허용
@@ -247,7 +254,6 @@ class Settings(BaseSettings):
         """
         # ✅ 각 URL에 맞는 스킴 정의 (허용된 스킴만 명시)
         url_validations = {
-            "S3_ENDPOINT_URL": (self.S3_ENDPOINT_URL, ("http://", "https://")),
             "SPRING2_BASE_URL": (self.SPRING2_BASE_URL, ("http://", "https://")),
             "WS_BASE_URL": (self.WS_BASE_URL, ("ws://", "wss://")),
             "REDIS_URL": (self.REDIS_URL, ("redis://", "rediss://")),

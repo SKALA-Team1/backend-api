@@ -13,7 +13,7 @@ env:
   AWS_REGION: ap-northeast-2
   ECR_REPOSITORY: skuseme/fastapi
   ECS_SERVICE: skuseme-fastapi-service
-  ECS_CLUSTER: skuseme-cluster
+  ECS_CLUSTER: skuseme_cluster
   ECS_TASK_DEFINITION_FAMILY: skuseme-fastapi-task
   CONTAINER_NAME: fastapi
 
@@ -35,37 +35,53 @@ jobs:
           pip install -r requirements.txt
           pip install flake8 mypy pytest pytest-asyncio
 
-      # 테스트는 생략하거나 필요에 따라 주석 해제하여 사용
       # - name: Run tests
       #   run: pytest tests/ -v || true
 
+      # --- 아래 단계부터는 Push(Merge) 이벤트일 때만 실행 ---
+
       - name: Configure AWS credentials
+        if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set up QEMU
+        if: github.event_name == 'push'
+        uses: docker/setup-qemu-action@v3 # 멀티 플랫폼 빌드 지원
+
+      - name: Set up Docker Buildx
+        if: github.event_name == 'push'
+        uses: docker/setup-buildx-action@v3 # 멀티 플랫폼 빌드 지원
+
       - name: Login to Amazon ECR
+        if: github.event_name == 'push'
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build, tag, and push image to Amazon ECR
+      - name: Build, tag, and push image to Amazon ECR (ARM64)
+        if: github.event_name == 'push'
         id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker buildx build --platform linux/arm64 -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest --push .
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
       - name: Download Task Definition
+        if: github.event_name == 'push'
         run: |
           aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION_FAMILY }} \
-          --query taskDefinition > task-definition.json
+          --query taskDefinition > task-definition-full.json
+          
+          # Remove fields that cause errors when registering a new task definition
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .enableFaultInjection)' task-definition-full.json > task-definition.json
 
       - name: Fill in the new image ID in the Amazon ECS task definition
+        if: github.event_name == 'push'
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
@@ -73,10 +89,18 @@ jobs:
           container-name: ${{ env.CONTAINER_NAME }}
           image: ${{ steps.build-image.outputs.image }}
 
-      - name: Deploy Amazon ECS task definition
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
+      - name: Register new Task Definition
+        if: github.event_name == 'push'
+        id: register-task-def
+        run: |
+          NEW_TASK_DEF=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "NEW_TASK_DEF_ARN=$NEW_TASK_DEF" >> $GITHUB_ENV
+
+      - name: Update ECS Service
+        if: github.event_name == 'push'
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }}
+            --service ${{ env.ECS_SERVICE }}
+            --task-definition ${{ env.NEW_TASK_DEF_ARN }}
+            --force-new-deployment

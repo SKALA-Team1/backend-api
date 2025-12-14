@@ -39,8 +39,9 @@ async def lifespan(app: FastAPI):
 
     try:
         # Redis 클라이언트 초기화 (필요시)
-        from app.integrations.clients.redis_client import redis_validator
-        logger.info("Redis validator initialized")
+        from app.integrations.clients.redis_client import get_redis_client
+        await get_redis_client()
+        logger.info("Redis client initialized")
     except Exception as e:
         logger.warning(f"Failed to initialize Redis: {e}")
 
