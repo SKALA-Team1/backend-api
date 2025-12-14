@@ -68,7 +68,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker buildx build --platform linux/arm64 -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest --push .
+          docker buildx build --platform linux/amd64 -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest --push .
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
       - name: Download Task Definition
@@ -77,8 +77,8 @@ jobs:
           aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION_FAMILY }} \
           --query taskDefinition > task-definition-full.json
           
-          # Remove fields that cause errors when registering a new task definition
-          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .enableFaultInjection)' task-definition-full.json > task-definition.json
+          # Remove conflicting fields and ensure runtimePlatform is X86_64
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .enableFaultInjection) | .runtimePlatform = { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" }' task-definition-full.json > task-definition.json
 
       - name: Fill in the new image ID in the Amazon ECS task definition
         if: github.event_name == 'push'
@@ -100,7 +100,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
           aws ecs update-service \
-            --cluster ${{ env.ECS_CLUSTER }}
-            --service ${{ env.ECS_SERVICE }}
-            --task-definition ${{ env.NEW_TASK_DEF_ARN }}
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --task-definition ${{ env.NEW_TASK_DEF_ARN }} \
             --force-new-deployment
