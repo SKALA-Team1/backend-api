@@ -75,6 +75,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
           aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION_FAMILY }} \
+          --region ${{ env.AWS_REGION }} \
           --query taskDefinition > task-definition-full.json
           
           # Remove conflicting fields and ensure runtimePlatform is X86_64
@@ -93,7 +94,7 @@ jobs:
         if: github.event_name == 'push'
         id: register-task-def
         run: |
-          NEW_TASK_DEF=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          NEW_TASK_DEF=$(aws ecs register-task-definition --cli-input-json file://task-definition.json --region ${{ env.AWS_REGION }} --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "NEW_TASK_DEF_ARN=$NEW_TASK_DEF" >> $GITHUB_ENV
 
       - name: Update ECS Service
@@ -103,4 +104,5 @@ jobs:
             --cluster ${{ env.ECS_CLUSTER }} \
             --service ${{ env.ECS_SERVICE }} \
             --task-definition ${{ env.NEW_TASK_DEF_ARN }} \
+            --region ${{ env.AWS_REGION }} \
             --force-new-deployment
