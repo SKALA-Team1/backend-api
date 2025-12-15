@@ -83,12 +83,9 @@ jobs:
 
       - name: Fill in the new image ID in the Amazon ECS task definition
         if: github.event_name == 'push'
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: task-definition.json
-          container-name: ${{ env.CONTAINER_NAME }}
-          image: ${{ steps.build-image.outputs.image }}
+        run: |
+          jq ".containerDefinitions[0].image = \"${{ steps.build-image.outputs.image }}\"" task-definition.json > task-definition-updated.json
+          mv task-definition-updated.json task-definition.json
 
       - name: Register new Task Definition
         if: github.event_name == 'push'
