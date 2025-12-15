@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import setup_logging
@@ -79,6 +80,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Backend Skeleton", lifespan=lifespan)
+
+# CORS 설정 추가
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://skuseme.vercel.app",
+        "https://*.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 register_exception_handlers(app)
 
 app.include_router(health_router, tags=["health"])
