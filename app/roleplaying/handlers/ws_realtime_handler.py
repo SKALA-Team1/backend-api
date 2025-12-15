@@ -329,8 +329,8 @@ async def _cleanup_session(session_id: str, reason: str) -> None:
             # 종합 피드백 생성 Hook 호출
             try:
                 import httpx
-                # WS_BASE_URL을 HTTP로 변환 (ws://localhost:8001 -> http://localhost:8001)
-                feedback_base_url = settings.WS_BASE_URL.replace("ws://", "http://").replace("wss://", "https://")
+                # FastAPI 내부에서 직접 호출하므로 localhost 사용 (외부 네트워크 루프 방지)
+                feedback_base_url = "http://localhost:8082"
                 feedback_hook_url = f"{feedback_base_url}/feedback/sessions/{session_id}/end-hook"
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     await client.post(feedback_hook_url)
