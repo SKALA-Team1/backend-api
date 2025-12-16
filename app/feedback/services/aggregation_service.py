@@ -102,6 +102,7 @@ async def generate_comprehensive_feedback(
                 "grammar_feedback_ko": grammar_feedback_ko,
                 "relevance_score": utt.get("relevance_score"),
                 "relevance_feedback_ko": relevance_feedback_ko,
+                "retry_count": utt.get("retry_count", 0),
             }
 
             utterances.append(utterance)
@@ -226,7 +227,8 @@ def _fetch_utterances_from_db(session_id: str, db: Session) -> List[Dict]:
                 pronunciation_score,
                 grammar_score,
                 relevance_score,
-                feedback_sections
+                feedback_sections,
+                retry_count
             FROM scenario_message
             WHERE session_id = :session_id
               AND speaker = 'user'
@@ -244,7 +246,8 @@ def _fetch_utterances_from_db(session_id: str, db: Session) -> List[Dict]:
                 "pronunciation_score": row.pronunciation_score,
                 "grammar_score": row.grammar_score,
                 "relevance_score": row.relevance_score,
-                "feedback_sections": row.feedback_sections
+                "feedback_sections": row.feedback_sections,
+                "retry_count": row.retry_count if row.retry_count is not None else 0
             })
 
         logger.info(f"📥 DB 조회 완료: {len(utterances)}개 발화")
