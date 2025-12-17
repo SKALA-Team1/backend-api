@@ -981,9 +981,7 @@ class FeedbackOrchestratorImpl:
             if section_type == "pronunciation":
                 audio_data = config.get("audio_data")
                 if not audio_data:
-                    logger.debug(f"No audio data for pronunciation, using fallback")
-                    for token in config["fallback"].split():
-                        yield token + " "
+                    logger.debug(f"No audio data for pronunciation, skipping feedback")
                     return
 
                 async for token in evaluator.evaluate_pronunciation_stream(audio_data, user_text):
@@ -1006,9 +1004,8 @@ class FeedbackOrchestratorImpl:
 
         except Exception as e:
             logger.error(f"Failed to stream {section_type} feedback: {e}", exc_info=True)
-            # Fallback: 오류 발생 시 fallback 텍스트 사용
-            for token in config["fallback"].split():
-                yield token + " "
+            # 오류 발생 시 아무것도 반환하지 않음 (fallback 메시지 제거)
+            return
 
     async def _translate_feedback(self, feedback_en: str) -> Optional[str]:
         """LLM을 사용하여 영문 피드백을 한글로 번역"""
