@@ -99,7 +99,7 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
         first_ai_index = await SessionMessageHandler.increment_utterance_index_async(session_id)
 
         # ========================================
-        # 병렬 처리: 한글 번역 + TTS 생성
+        # 병렬 처리: 한글 번역 + TTS 생성 + 키워드 생성
         # ========================================
         # 한글 번역과 TTS는 독립적이므로 동시 실행
         import asyncio
@@ -107,24 +107,34 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
             _save_question_with_keywords,
             _translate_question_to_korean,
             _send_tts_audio_and_visemes,
+            _generate_recommended_keywords_task
         )
 
         translate_task = asyncio.create_task(_translate_question_to_korean(first_question))
         tts_task = asyncio.create_task(
             _send_tts_audio_and_visemes(websocket, first_question, context="INIT")
         )
+        keywords_task = asyncio.create_task(
+             _generate_recommended_keywords_task(first_question, session_state)
+        )
 
         # 병렬 실행
-        results = await asyncio.gather(translate_task, tts_task, return_exceptions=True)
+        results = await asyncio.gather(translate_task, tts_task, keywords_task, return_exceptions=True)
 
         first_question_ko = results[0] if not isinstance(results[0], Exception) else first_question
         tts_error = results[1] if isinstance(results[1], Exception) else None
+        keywords = results[2] if not isinstance(results[2], Exception) else []
 
         if tts_error:
             logger.warning(f"TTS error during init: {tts_error}")
 
-        # 클라이언트에 전송 (영문 + 한글) - 먼저 전송
-        ai_msg = AiTextMessage(text=first_question, text_ko=first_question_ko, is_fixed_question=True)
+        # 클라이언트에 전송 (영문 + 한글 + 키워드) - 먼저 전송
+        ai_msg = AiTextMessage(
+            text=first_question, 
+            text_ko=first_question_ko, 
+            is_fixed_question=True,
+            recommended_keywords=keywords
+        )
         await websocket.send_json(ai_msg.model_dump())
 
         # ✅ Background task: Spring 2 저장 (응답 후 비동기 처리)
@@ -142,6 +152,7 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
                     slack_message=None,
                     is_fixed_question=True,  # ✅ 고정 질문임을 명시
                     question_ko=first_question_ko,  # ✅ 이미 생성된 번역을 재사용 (중복 생성 방지)
+                    keywords=keywords # ✅ 이미 생성된 키워드 재사용
                 )
             except Exception as e:
                 logger.error(f"Background task - Failed to save first fixed question: {e}", exc_info=True)

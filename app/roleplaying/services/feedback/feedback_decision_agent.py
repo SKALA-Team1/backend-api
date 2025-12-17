@@ -109,6 +109,26 @@ class FeedbackDecisionAgentImpl:
                 f"🤖 [ReAct] Starting decision: user_text='{user_text[:30]}...', retry={retry_count}"
             )
 
+            # Step 0: 영어(비한글) 여부 확인 (주로 한글 포함 시 무조건 재시도)
+            if self._is_mostly_korean(user_text):
+                logger.info(f"🇰🇷 [ReAct] Mostly Korean text detected: '{user_text}'. Forcing RETRY.")
+                return {
+                    "action": "FEEDBACK",
+                    "feedback_result": {
+                        "primary_issue": "language_mismatch",
+                        "needs_correction": True,
+                        "feedback_text": "Please respond in English.",
+                        "scores": {"pronunciation_score": 0, "grammar_score": 0, "relevance_score": 0, "overall_score": 0}, # 점수 0점 처리
+                        "pronunciation_score": 0,
+                        "grammar_score": 0,
+                        "relevance_score": 0,
+                        "overall_score": 0,
+                        "user_text": user_text,
+                    },
+                    "reasoning": "Mostly Korean text detected. User must speak English.",
+                    "confidence": 1.0,
+                }
+
             # Step 1: 평가 실행 (Tool)
             logger.info("🔧 [ReAct] Step 1: Evaluating response...")
 
@@ -272,6 +292,29 @@ class FeedbackDecisionAgentImpl:
                 f"retry={retry_count}"
             )
 
+            # Step 0: 영어(비한글) 여부 확인 (주로 한글 포함 시 무조건 재시도)
+            user_text = evaluation_result.get("user_text", "")
+            if self._is_mostly_korean(user_text):
+                logger.info(f"🇰🇷 [ReAct-Optimized] Mostly Korean text detected: '{user_text}'. Forcing RETRY.")
+                
+                # 평가 결과를 강제로 실패로 수정
+                evaluation_result["primary_issue"] = "language_mismatch"
+                evaluation_result["needs_correction"] = True
+                evaluation_result["feedback_text"] = "Please respond in English."
+                
+                # 점수 0점 처리
+                zero_scores = {"pronunciation_score": 0, "grammar_score": 0, "relevance_score": 0, "overall_score": 0}
+                evaluation_result.update(zero_scores)
+                if "scores" in evaluation_result:
+                    evaluation_result["scores"].update(zero_scores)
+
+                return {
+                    "action": "FEEDBACK",
+                    "feedback_result": evaluation_result,
+                    "reasoning": "Mostly Korean text detected. User must speak English.",
+                    "confidence": 1.0,
+                }
+
             # Step 1: 재시도 컨텍스트 분석만 수행 (평가는 재수행하지 않음)
             logger.info("🔧 [ReAct-Optimized] Step 1: Analyzing retry context...")
 
@@ -345,6 +388,27 @@ class FeedbackDecisionAgentImpl:
                 "reasoning": "Fallback: Using evaluation result directly",
                 "confidence": 0.5,
             }
+
+    def _is_mostly_korean(self, text: str) -> bool:
+        """
+        주로 한국어인지 확인 (한글이 영어 알파벳 수의 30%를 초과하면 True)
+        """
+        if not text:
+            return False
+            
+        korean_count = len(re.findall("[가-힣]", text))
+        english_count = len(re.findall("[a-zA-Z]", text))
+        
+        if korean_count == 0: # 한글이 없으면 무조건 영어로 간주
+            return False
+            
+        # 한글이 영어 알파벳 수의 30%를 초과하면 주로 한국어로 판단
+        # 예: "I live in 서울" (한글 2, 영어 9 -> 2/9 = 0.22 < 0.3) -> False (통과)
+        # 예: "My name is 홍길동" (한글 3, 영어 8 -> 3/8 = 0.37 > 0.3) -> True (재시도)
+        # 예: "서울은 beautiful해요" (한글 5, 영어 9 -> 5/9 = 0.55 > 0.3) -> True (재시도)
+        
+        return korean_count > english_count * 0.3
+
 
     def _format_decision_prompt(
         self,

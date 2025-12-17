@@ -185,12 +185,12 @@ async def _generate_and_stream_ai_response(
     session_id: str,
     session_state,
     user_text: str,
-) -> Tuple[str, bool, str]:
+) -> Tuple[str, bool, str, list]:
     """
     AI 응답 생성 및 스트리밍 전송
 
     Returns:
-        (full_ai_response, is_fixed_question, full_ai_response_ko)
+        (full_ai_response, is_fixed_question, full_ai_response_ko, keywords)
     """
     from app.roleplaying.services.business.ai_tutor_service import ai_tutor_service
 
@@ -218,29 +218,54 @@ async def _generate_and_stream_ai_response(
         )
 
     # ========================================
-    # 병렬 처리: 한글 번역 + TTS 생성
+    # 병렬 처리: 한글 번역 + TTS 생성 + 키워드 생성
     # ========================================
-    # 한글 번역과 TTS는 독립적이므로 동시 실행
+    # 한글 번역, TTS, 키워드 생성은 독립적이므로 동시 실행
     translate_task = asyncio.create_task(_translate_question_to_korean(full_ai_response))
     tts_task = asyncio.create_task(_send_tts_audio_and_visemes(websocket, full_ai_response))
+    
+    # 키워드 생성 태스크 추가
+    keywords_task = asyncio.create_task(_generate_recommended_keywords_task(
+        question=full_ai_response,
+        session_state=session_state
+    ))
 
     # 병렬 실행 (TTS는 WebSocket 전송 포함)
-    results = await asyncio.gather(translate_task, tts_task, return_exceptions=True)
+    results = await asyncio.gather(translate_task, tts_task, keywords_task, return_exceptions=True)
 
     full_ai_response_ko = results[0] if not isinstance(results[0], Exception) else full_ai_response
     tts_error = results[1] if isinstance(results[1], Exception) else None
+    keywords = results[2] if not isinstance(results[2], Exception) else []
 
     if tts_error:
         logger.warning(f"TTS error during streaming: {tts_error}")
 
-    # 한글 번역을 별도 메시지로 전송 (스트리밍이 아닌 경우에만)
+    # 한글 번역과 키워드를 별도 메시지로 전송 (스트리밍이 아닌 경우에만)
     if full_ai_response_ko and full_ai_response_ko != full_ai_response:
         try:
+            # 키워드 포함하여 전송
             await websocket.send_json(
-                AiTextKoreanMessage(text_ko=full_ai_response_ko, is_fixed_question=is_fixed_question).model_dump()
+                AiTextKoreanMessage(
+                    text_ko=full_ai_response_ko, 
+                    is_fixed_question=is_fixed_question,
+                    recommended_keywords=keywords
+                ).model_dump()
             )
         except Exception as e:
             logger.warning(f"Failed to send Korean translation: {e}")
+    elif keywords:
+        # 한글 번역이 없더라도 키워드가 있으면 전송 (드문 경우)
+        try:
+             await websocket.send_json(
+                AiTextKoreanMessage(
+                    text_ko=full_ai_response, # 영문 그대로
+                    is_fixed_question=is_fixed_question,
+                    recommended_keywords=keywords
+                ).model_dump()
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send keywords: {e}")
+
 
     # 히스토리와 세션 상태 업데이트
     await SessionMessageHandler.append_message_async(
@@ -254,7 +279,7 @@ async def _generate_and_stream_ai_response(
         session_state.current_question_text = full_ai_response
         session_state.reset_retry_count()
 
-    return full_ai_response, is_fixed_question, full_ai_response_ko
+    return full_ai_response, is_fixed_question, full_ai_response_ko, keywords
 
 
 # ========================================
@@ -551,6 +576,32 @@ async def _translate_question_to_korean(question_en: str) -> str:
         return question_en  # Fallback: return English question
 
 
+async def _generate_recommended_keywords_task(
+    question: str,
+    session_state
+) -> list:
+    """
+    추천 키워드 생성 (비동기 태스크용)
+    """
+    if not session_state:
+        return []
+
+    try:
+        from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
+        
+        return await keyword_generator.generate_recommended_keywords(
+            question=question,
+            user_role=session_state.my_role,
+            ai_role=session_state.ai_role,
+            scenario_context=f"Subject ID: {session_state.subject_id}",
+            slack_message=None,
+            conversation_summary="" # 필요시 추가
+        )
+    except Exception as e:
+        logger.error(f"Failed to generate keywords task: {e}")
+        return []
+
+
 # ========================================
 # AI 질문 저장 (바이링궐 + 추천 키워드)
 # ========================================
@@ -568,13 +619,14 @@ async def _save_question_with_keywords(
     slack_message: Optional[str] = None,
     is_fixed_question: bool = False,
     question_ko: Optional[str] = None,
+    keywords: Optional[list] = None,  # ✅ 이미 생성된 키워드가 있으면 받음
 ) -> None:
     """
     AI 질문을 Spring 2에 저장 (영문 + 한글 + 추천 키워드 포함)
 
     흐름:
-    1. 추천 키워드 생성 (RECOMMENDED_KEYWORDS_PROMPT 사용)
-    2. 한글 번역 (question_ko가 없으면 생성, 있으면 재사용)
+    1. 추천 키워드 생성 (keywords가 없으면 생성)
+    2. 한글 번역 (question_ko가 없으면 생성)
     3. Spring 2에 저장 (save_utterance() API 호출)
 
     Args:
@@ -588,19 +640,21 @@ async def _save_question_with_keywords(
         slack_message: 원본 Slack 메시지 (선택사항)
         is_fixed_question: 고정 질문 여부
         question_ko: 한글 번역 (선택사항, 없으면 자동 생성)
+        keywords: 추천 키워드 리스트 (선택사항, 없으면 자동 생성)
     """
     try:
         from app.roleplaying.services.llm.llm_keyword_generator import keyword_generator
-        import json
-
-        keywords = await keyword_generator.generate_recommended_keywords(
-            question=question_en,
-            user_role=user_role,
-            ai_role=ai_role,
-            scenario_context=scenario_context,
-            slack_message=slack_message,
-            conversation_summary=""
-        )
+        
+        # 키워드가 전달되지 않았으면 생성
+        if keywords is None:
+            keywords = await keyword_generator.generate_recommended_keywords(
+                question=question_en,
+                user_role=user_role,
+                ai_role=ai_role,
+                scenario_context=scenario_context,
+                slack_message=slack_message,
+                conversation_summary=""
+            )
 
         # 한글 번역: 매개변수로 전달된 것이 있으면 사용, 없으면 생성
         if not question_ko:
