@@ -49,10 +49,12 @@ def build_comprehensive_feedback_prompt(
         grammar_feedback = utt.get("grammar_feedback_ko", "")
         relevance_score = utt.get("relevance_score")
         relevance_feedback = utt.get("relevance_feedback_ko", "")
+        retry_count = utt.get("retry_count", 0)
 
         utterances_text += f"""
 ### 발화 {idx}
 - **사용자가 말한 내용**: "{user_text}"
+- **재시도 횟수**: {retry_count}번 {'⚠️ (어려웠던 문장!)' if retry_count > 0 else '✅'}
 - **발음 점수**: {pronunciation_score}/100 {'(없음)' if pronunciation_score is None else ''}
 - **발음 피드백**: {pronunciation_feedback if pronunciation_feedback else '(없음)'}
 - **문법 점수**: {grammar_score}/100 {'(없음)' if grammar_score is None else ''}
