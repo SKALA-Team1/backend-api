@@ -202,6 +202,9 @@ class AiTextMessage(BaseModel):
     text_ko: Optional[str] = Field(
         default=None, description="AI 응답 한글 번역 (선택사항)"
     )
+    recommended_keywords: Optional[List[str]] = Field(
+        default=None, description="추천 키워드 리스트 (최대 3개)"
+    )
     is_fixed_question: bool = Field(
         default=False, description="고정 질문 여부 (턴 1, 4, 7)"
     )
@@ -254,6 +257,9 @@ class AiTextKoreanMessage(BaseModel):
 
     type: Literal["AI_TEXT_KOREAN"] = "AI_TEXT_KOREAN"
     text_ko: str = Field(..., description="AI 응답 한글 번역 (완성된 전체 번역)", min_length=1)
+    recommended_keywords: Optional[List[str]] = Field(
+        default=None, description="추천 키워드 리스트 (최대 3개)"
+    )
     is_fixed_question: bool = Field(
         default=False, description="고정 질문 여부 (턴 1, 4, 7)"
     )
