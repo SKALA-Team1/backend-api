@@ -43,7 +43,7 @@ def _get_env_file() -> Optional[str]:
         - local 환경: .env.local 파일 경로
         - 그 외: None (환경변수만 사용)
     """
-    env = os.getenv("ENVIRONMENT", "development").lower()
+    env = os.getenv("ENVIRONMENT", "local").lower()
     if env == "local":
         env_file = Path(__file__).parent.parent / ".env.local"
         return str(env_file) if env_file.exists() else None
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     # DB 환경변수
     # -------------------------------------
     database_url: str = Field(..., alias="DATABASE_URL")
-    environment: str = Field("development", alias="ENVIRONMENT")
+    environment: str = Field("local", alias="ENVIRONMENT")
 
     # -------------------------------------
     # OpenAI

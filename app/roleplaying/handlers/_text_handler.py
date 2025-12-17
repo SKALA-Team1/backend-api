@@ -196,7 +196,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
 
         await websocket.send_json(AiTypingMessage().model_dump())
 
-        full_ai_response, is_fixed_question, full_ai_response_ko = await _generate_and_stream_ai_response(
+        full_ai_response, is_fixed_question, full_ai_response_ko, keywords = await _generate_and_stream_ai_response(
             websocket=websocket,
             session_id=session_id,
             session_state=session_state,
@@ -221,6 +221,7 @@ async def handle_user_text(router, websocket: WebSocket, session_id: str, messag
                     slack_message=None,
                     is_fixed_question=is_fixed_question,
                     question_ko=full_ai_response_ko,  # ✅ 이미 생성된 번역을 재사용 (중복 생성 방지)
+                    keywords=keywords, # ✅ 이미 생성된 키워드 재사용
                 )
             except Exception as e:
                 logger.error(f"Background task - Failed to save AI question: session={session_id}, error={e}", exc_info=True)
