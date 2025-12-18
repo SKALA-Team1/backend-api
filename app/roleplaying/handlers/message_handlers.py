@@ -64,6 +64,9 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
         expires_at_str = session_data.get("expiresAt")
         expires_at = datetime.fromisoformat(expires_at_str) if expires_at_str else None
 
+        # Redis에서 voiceId 가져오기
+        voice_id = session_data.get("voiceId")
+
         # SessionManager에 세션 생성
         session_manager.create_session(
             session_id=session_id,
@@ -74,6 +77,7 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
             fixed_questions=init_msg.fixedQuestions,
             expires_at=expires_at,
             interaction_mode=init_msg.interactionMode,  # Pass interaction mode
+            voice_id=voice_id  # Pass voice ID
         )
 
         # ACK 전송
@@ -112,7 +116,10 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
 
         translate_task = asyncio.create_task(_translate_question_to_korean(first_question))
         tts_task = asyncio.create_task(
-            _send_tts_audio_and_visemes(websocket, first_question, context="INIT")
+            _send_tts_audio_and_visemes(websocket, first_question, context="INIT", session_id=session_id)
+        )
+        keywords_task = asyncio.create_task(
+             _generate_recommended_keywords_task(first_question, session_state)
         )
         keywords_task = asyncio.create_task(
              _generate_recommended_keywords_task(first_question, session_state)

@@ -71,7 +71,8 @@ class RedisSessionRepository(SessionRepository):
         session_id: str,
         user_id: int,
         expires_at: Optional[datetime] = None,
-        interaction_mode: str = "default"  # Add interaction mode
+        interaction_mode: str = "default",  # Add interaction mode
+        voice_id: Optional[str] = None  # ElevenLabs Voice ID
     ) -> None:
         """
         세션 저장
@@ -81,6 +82,7 @@ class RedisSessionRepository(SessionRepository):
             user_id: 사용자 ID
             expires_at: 만료 시각 (기본값: 현재 + 2시간)
             interaction_mode: 상호작용 모드 (default, handsfree)
+            voice_id: ElevenLabs Voice ID (선택적)
         """
         redis_client = await self._get_redis_client()
 
@@ -98,7 +100,8 @@ class RedisSessionRepository(SessionRepository):
             "scenarioType": "ROLEPLAYING",
             "startedAt": datetime.utcnow().isoformat() + "Z",
             "expiresAt": expires_at.isoformat() + "Z",
-            "interactionMode": interaction_mode  # Store interaction mode
+            "interactionMode": interaction_mode,  # Store interaction mode
+            "voiceId": voice_id  # Store voice ID
         }
 
         # TTL 계산
