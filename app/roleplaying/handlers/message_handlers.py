@@ -121,6 +121,9 @@ async def handle_init(router, websocket: WebSocket, session_id: str, message: di
         keywords_task = asyncio.create_task(
              _generate_recommended_keywords_task(first_question, session_state)
         )
+        keywords_task = asyncio.create_task(
+             _generate_recommended_keywords_task(first_question, session_state)
+        )
 
         # 병렬 실행
         results = await asyncio.gather(translate_task, tts_task, keywords_task, return_exceptions=True)
