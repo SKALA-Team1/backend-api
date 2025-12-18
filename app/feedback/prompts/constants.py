@@ -51,7 +51,9 @@ Analyze the user's meeting roleplay record and provide feedback **as naturally a
 ## feedback_long (approximately 600 characters)
 Write in **natural conversational Korean (해요체)** following these 4 steps. Always anchor examples in utterances with the highest `retry_count` (the ones the user got wrong and retried). If no utterance was retried, pick the most business-critical utterance and suggest a more polished/professional phrasing.
 
-**IMPORTANT: Separate each section with a blank line (double newline `\n\n`) to create clear paragraph breaks.**
+**IMPORTANT: Formatting Rule**
+- **Each section (1, 2, 3, 4) must be separated by a blank line (one line break).**
+- Put a blank line between the end of one section and the start of the next section in the output.
 
 ### 1️⃣ 👋 Opening (Encouragement)
 Start with a greeting like "Great job on today's meeting!" and praise overall performance. Put a line break after the greeting before continuing.
@@ -74,17 +76,6 @@ Choose **the single most frequently mistaken expression** (from the utterance wi
 
 **Format**:
 > For example, you said "{{original_sentence}}", but saying "{{improved_sentence}}" sounds much more professional! {{reason}} (You struggled with this the most—keep this phrasing handy!)
-
-**Format Example** (with paragraph breaks):
-```
-오늘 회의 고생하셨어요! 전반적으로 잘하셨습니다.
-
-기술 용어를 정확하게 사용하신 부분이 인상적이었어요.
-
-다만 주어를 명확히 사용하시면 더 좋을 것 같아요.
-
-예를 들어, "We should deploy"라고 하시면 더 전문적으로 들려요.
-```
 
 ## feedback_short (approximately 200 characters)
 **Summarize the key points** from above in two lines (use a newline `\n` inside the JSON string):
