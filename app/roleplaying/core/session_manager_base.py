@@ -62,7 +62,8 @@ class SessionManager:
         ai_role: str,
         fixed_questions: List[str],
         expires_at: Optional[datetime] = None,
-        interaction_mode: str = "default"  # Add interaction mode
+        interaction_mode: str = "default",  # Add interaction mode
+        voice_id: Optional[str] = None  # ElevenLabs Voice ID
     ) -> SessionState:
         """
         새 세션 생성
@@ -76,6 +77,7 @@ class SessionManager:
             fixed_questions: 고정 질문 3개
             expires_at: 세션 만료 시각 (옵션)
             interaction_mode: 상호작용 모드 (default, handsfree)
+            voice_id: ElevenLabs Voice ID (선택적)
 
         Returns:
             생성된 SessionState
@@ -97,7 +99,8 @@ class SessionManager:
             ai_role=ai_role,
             fixed_questions=fixed_questions,
             expires_at=expires_at,
-            interaction_mode=interaction_mode  # Pass interaction mode
+            interaction_mode=interaction_mode,  # Pass interaction mode
+            voice_id=voice_id  # Pass voice ID
         )
 
         self._sessions[session_id] = session

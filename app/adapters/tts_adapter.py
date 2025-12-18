@@ -23,10 +23,15 @@ class ElevenLabsTTSAdapter:
     
     async def synthesize_with_viseme(
         self, 
-        text: str
+        text: str,
+        voice_id: Optional[str] = None
     ) -> Dict:
         """
         TTS 생성 및 간단한 Viseme 데이터 계산
+        
+        Args:
+            text: TTS로 변환할 텍스트
+            voice_id: ElevenLabs Voice ID (선택적, 없으면 기본 voice_id 사용)
         
         Returns:
             {
@@ -35,9 +40,12 @@ class ElevenLabsTTSAdapter:
             }
         """
         try:
+            # voice_id가 제공되면 사용, 없으면 기본 voice_id 사용
+            use_voice_id = voice_id if voice_id else self.voice_id
+            
             # ElevenLabs API 호출 (저렴한 모델 사용)
             response = self.client.text_to_speech.convert_with_timestamps(
-                voice_id=self.voice_id,
+                voice_id=use_voice_id,
                 text=text,
                 model_id=self.model_id
             )

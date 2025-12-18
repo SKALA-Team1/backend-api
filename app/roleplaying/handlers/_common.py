@@ -222,7 +222,7 @@ async def _generate_and_stream_ai_response(
     # ========================================
     # 한글 번역, TTS, 키워드 생성은 독립적이므로 동시 실행
     translate_task = asyncio.create_task(_translate_question_to_korean(full_ai_response))
-    tts_task = asyncio.create_task(_send_tts_audio_and_visemes(websocket, full_ai_response))
+    tts_task = asyncio.create_task(_send_tts_audio_and_visemes(websocket, full_ai_response, context="", session_id=session_id))
     
     # 키워드 생성 태스크 추가
     keywords_task = asyncio.create_task(_generate_recommended_keywords_task(
@@ -286,7 +286,7 @@ async def _generate_and_stream_ai_response(
 # TTS 오디오 및 Viseme 전송 (공통)
 # ========================================
 
-async def _send_tts_audio_and_visemes(websocket: WebSocket, text: str, context: str = "") -> None:
+async def _send_tts_audio_and_visemes(websocket: WebSocket, text: str, context: str = "", session_id: str = None) -> None:
     """
     ElevenLabs TTS를 호출하고 오디오 및 Viseme 데이터를 WebSocket으로 전송
     
@@ -294,12 +294,21 @@ async def _send_tts_audio_and_visemes(websocket: WebSocket, text: str, context: 
         websocket: WebSocket 연결
         text: TTS로 변환할 텍스트
         context: 에러 로그에 포함할 컨텍스트 정보 (예: "INIT")
+        session_id: 세션 ID (voice_id 조회용, 선택적)
     """
     try:
         from app.adapters.tts_adapter import get_tts_adapter
+        from app.roleplaying.core.session_state_manager import session_manager
+        
+        # 세션에서 voice_id 가져오기
+        voice_id = None
+        if session_id:
+            session_state = session_manager.get_session(session_id)
+            if session_state and session_state.voice_id:
+                voice_id = session_state.voice_id
         
         tts_adapter = get_tts_adapter()
-        tts_result = await tts_adapter.synthesize_with_viseme(text)
+        tts_result = await tts_adapter.synthesize_with_viseme(text, voice_id=voice_id)
         
         # 오디오 전송
         await websocket.send_json(

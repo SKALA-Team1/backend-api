@@ -44,7 +44,7 @@ Roleplaying Schemas
 """
 
 from datetime import date, datetime
-from typing import List, Literal
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -314,6 +314,9 @@ class InternalSessionSetupRequest(BaseModel):
     # 상호작용 모드 (예: "default", "handsfree")
     # Spring 1에서 전달
     interactionMode: Literal["default", "handsfree"] = Field("default", description="상호작용 모드 (default, handsfree)")
+    # ElevenLabs Voice ID (선택적)
+    # 사용자가 선택한 억양에 해당하는 voice ID
+    voiceId: Optional[str] = Field(None, description="ElevenLabs Voice ID (억양 선택)")
 
 
 class InternalSessionSetupResponse(BaseModel):

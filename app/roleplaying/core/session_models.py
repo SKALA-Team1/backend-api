@@ -93,6 +93,7 @@ class SessionState:
     ai_role: str
     fixed_questions: List[str]
     interaction_mode: str = "default"  # Add interaction mode
+    voice_id: Optional[str] = None  # ElevenLabs Voice ID
     history: List[Turn] = field(default_factory=list)
     status: SessionStatus = SessionStatus.ACTIVE
     created_at: datetime = field(default_factory=_get_utc_now)  # ✅ timezone-aware UTC

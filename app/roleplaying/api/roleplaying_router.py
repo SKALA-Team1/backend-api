@@ -328,7 +328,8 @@ async def internal_setup_session(
             user_id=request.userId,         # 사용자 DB PK
             scenario_id=request.scenarioId,  # 선택된 시나리오 DB PK
             db=db,                          # 시나리오 정보 조회용
-            interaction_mode=request.interactionMode  # Pass interaction mode
+            interaction_mode=request.interactionMode,  # Pass interaction mode
+            voice_id=request.voiceId  # ElevenLabs Voice ID (선택적)
         )
 
         # WebSocket 연결 URL 생성
