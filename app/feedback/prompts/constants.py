@@ -51,6 +51,10 @@ Analyze the user's meeting roleplay record and provide feedback **as naturally a
 ## feedback_long (approximately 600 characters)
 Write in **natural conversational Korean (해요체)** following these 4 steps. Always anchor examples in utterances with the highest `retry_count` (the ones the user got wrong and retried). If no utterance was retried, pick the most business-critical utterance and suggest a more polished/professional phrasing.
 
+**IMPORTANT: Formatting Rule**
+- **Each section (1, 2, 3, 4) must be separated by a blank line (one line break).**
+- Put a blank line between the end of one section and the start of the next section in the output.
+
 ### 1️⃣ 👋 Opening (Encouragement)
 Start with a greeting like "Great job on today's meeting!" and praise overall performance. Put a line break after the greeting before continuing.
 
