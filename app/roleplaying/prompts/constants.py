@@ -126,25 +126,21 @@ Return valid JSON only.
 GRAMMAR_EVALUATION_PROMPT = """
 Grammar Evaluation Target: "{user_text}"
 
-Evaluation Principles (only mention issues actually present):
-- Verb tense consistency in technical explanations or process descriptions
-- Subject-verb agreement
-- Article usage (especially in technical nouns like "API", "server", "deployment")
-- Preposition accuracy in common IT expressions ("on the server", "in production", "for testing")
-- Sentence clarity and structure (avoid ambiguity in requirements, tasks, or steps)
+Evaluation Task:
+Identify the most critical grammar issue and provide feedback in exactly two parts:
+1. Cause: Briefly state what is wrong.
+2. Solution: Briefly state how to fix it.
 
-For each issue found:
-- Briefly explain why it is an issue (1 sentence)
-- Do NOT provide improved versions or examples (they will be provided separately)
+Constraints:
+- Total length must NOT exceed 3 sentences.
+- Separate Cause and Solution with a newline (\\n).
+- Use a professional yet encouraging tone.
 
-Include positive reinforcement:
-- If the sentence has strengths (clarity, vocabulary, structure), mention them briefly.
-
-If no grammatical or clarity issues exist, explicitly return:
+If no issues exist, return:
 "No grammatical issues detected. Clear and effective communication."
 
 Strict JSON format:
-{{"score": int (0-100), "feedback": "specific issues only OR 'No grammatical issues detected. Clear and effective communication.'"}}
+{{"score": int (0-100), "feedback": "Cause: [cause]\\nSolution: [solution]"}}
 """
 
 RELEVANCE_EVALUATION_PROMPT = """
@@ -153,22 +149,20 @@ Context Relevance Evaluation for IT English Training
 Question: "{context}"
 User Response: "{user_text}"
 
-Evaluation Criteria (mention only actual issues found):
-- Understanding: Did the user clearly understand the technical intention of the question?
-- Directness: Did the response stay on-topic and avoid unrelated details?
-- Specificity: Did the response include concrete examples (systems, tasks, tools, processes)?
-- Completeness: Did the response cover all components of the question (e.g., cause, action, result)?
-- Communication Quality: Would this response be effective in an actual workplace discussion?
+Evaluation Task:
+Identify the most significant contextual gap and provide feedback in two parts:
+1. Missing: What key technical or business information is absent.
+2. Action: What specific detail or process the user should include.
 
-For each shortcoming:
-- Explain why it matters in real developer communication
-- Do NOT provide examples of improvements (they will be provided separately)
+Constraints:
+- Total length must NOT exceed 3 sentences.
+- Separate Missing and Action with a newline (\\n).
 
-If the response is strong and workplace-ready, return:
+If the response is strong, return:
 "Response adequately, specifically, and professionally addresses the question."
 
 Strict JSON format:
-{{"score": int (0-100), "feedback": "specific shortcomings only OR 'Response adequately, specifically, and professionally addresses the question.'"}}
+{{"score": int (0-100), "feedback": "Missing: [issue]\\nAction: [tip]"}}
 """
 
 PRONUNCIATION_FEEDBACK_PROMPT = """
@@ -176,32 +170,30 @@ Pronunciation Evaluation for IT English Training
 
 User Text: "{user_text}"
 
-Pronunciation Scores (from Azure Speech Service):
-- Pronunciation Score: {pronunciation_score}/100 (overall quality)
-- Accuracy Score: {accuracy_score}/100 (correct phonemes)
-- Fluency Score: {fluency_score}/100 (smoothness and rhythm)
-- Completeness Score: {completeness_score}/100 (all phonemes present)
+Pronunciation Scores:
+- Pronunciation Score: {pronunciation_score}/100
+- Accuracy Score: {accuracy_score}/100
+- Fluency Score: {fluency_score}/100
+- Completeness Score: {completeness_score}/100
 - Words with Errors: {error_words}
 
 Evaluation Task:
-Based on the pronunciation scores above, provide constructive feedback that:
-1. Identifies the main pronunciation issues (if any)
-2. Explains why clear pronunciation matters in professional IT communication
-3. Provides specific, actionable guidance for improvement
-4. Does NOT include corrected examples (they will be provided separately)
+Identify the primary pronunciation hurdle and provide feedback in two parts:
+1. Issue: Which sounds or words are most problematic.
+2. Tip: How to improve clarity or rhythm.
 
-Guidelines:
-- If pronunciation_score >= 80: Acknowledge good performance
-- If pronunciation_score < 80: Identify areas for improvement (accuracy, fluency, completeness)
-- Focus on clarity and professionalism for IT domain communication
-- Keep feedback concise and encouraging
+Constraints:
+- Total length must NOT exceed 3 sentences.
+- Separate Issue and Tip with a newline (\\n).
 
-If pronunciation is strong and professional, return:
+If pronunciation is strong, return:
 "Pronunciation is clear and professional. Well done!"
 
 Strict JSON format:
-{{"score": int (0-100), "feedback": "specific issues only OR 'Pronunciation is clear and professional. Well done!'"}}
+{{"score": int (0-100), "feedback": "Issue: [issue]\\nTip: [tip]"}}
 """
+
+
 
 # ============================================
 # 시나리오/상황 생성 프롬프트
@@ -299,16 +291,16 @@ Decision Criteria (in priority order):
    - If retry_count >= 3 → NEXT_QUESTION (force pass after 3 attempts)
 
 3. **Critical pronunciation issues?**
-   - If pronunciation_score < 65 AND pronunciation_score is not None → FEEDBACK (pronunciation priority)
+   - If pronunciation_score < {pron_threshold} AND pronunciation_score is not None → FEEDBACK (pronunciation priority)
 
 4. **Significant grammar errors?**
-   - If grammar_score < 70 AND pronunciation issues not found → FEEDBACK (grammar priority)
+   - If grammar_score < {gram_threshold} AND pronunciation issues not found → FEEDBACK (grammar priority)
 
 5. **Response doesn't address the question?**
-   - If relevance_score < 75 AND no grammar/pronunciation issues → FEEDBACK (relevance priority)
+   - If relevance_score < {relev_threshold} AND no grammar/pronunciation issues → FEEDBACK (relevance priority)
 
 6. **Learner has done well enough?**
-   - If all scores >= 70 OR no major issues detected → NEXT_QUESTION (encourage progress)
+   - If all scores >= {gram_threshold} OR no major issues detected → NEXT_QUESTION (encourage progress)
 
 Context:
 - User Role: {my_role}
@@ -363,17 +355,24 @@ Provide ONLY the Korean translation, no other text.
 FEEDBACK_BILINGUAL_PROMPT = """
 You are a translator specializing in IT English learning materials.
 
-Translate the provided English feedback to Korean while maintaining:
-1. Professional tone appropriate for IT professionals
-2. Technical accuracy
-3. Learning guidance clarity
+Translate the provided English feedback to Korean while strictly following these formatting rules:
+
+1. Label Mapping:
+   - "Issue:" or "Cause:" -> "문제점:"
+   - "Missing:" -> "누락된 내용:"
+   - "Solution:" or "Tip:" -> "팁:"
+   - "Action:" -> "조치:"
+
+2. Structure:
+   - You MUST put a newline (\\n) between the first part (Issue/Cause/Missing) and the second part (Solution/Tip/Action).
+   - This is CRITICAL for display formatting.
 
 English Feedback:
 "{english_feedback}"
 
 Provide the response in JSON format ONLY:
 {{
-    "korean_feedback": "Korean translation of the feedback"
+    "korean_feedback": "문제점(또는 누락된 내용): [내용]\\n팁(또는 조치): [내용]"
 }}
 
 Do not include explanations or other text.

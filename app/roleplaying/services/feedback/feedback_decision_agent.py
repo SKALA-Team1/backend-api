@@ -21,6 +21,13 @@ from app.roleplaying.services.feedback.agent_tools import (
     analyze_retry_context_tool,
 )
 
+from app.roleplaying.services.utils.service_utils import (
+    extract_json_from_response,
+    normalize_score,
+    normalize_score_from_string,
+)
+from app.roleplaying.prompts.constants import FEEDBACK_DECISION_AGENT_SYSTEM_PROMPT
+
 logger = logging.getLogger(__name__)
 
 
@@ -205,6 +212,12 @@ class FeedbackDecisionAgentImpl:
                     full_feedback_text,
                     primary_issue
                 )
+
+                # ✅ 에이전트의 지능적 판단 근거(Reasoning)를 피드백 텍스트에 추가
+                # 프론트엔드 수정을 피하기 위해 기존 feedback_text 필드에 병합합니다.
+                reasoning = parsed_decision.get("reasoning", "")
+                if reasoning:
+                    filtered_feedback = f"{filtered_feedback}\n\n💡 Why retry: {reasoning}"
 
                 # 점수 추출 (최상위 레벨에도 추가 필요)
                 pronunciation_score = evaluation_result.get("pronunciation_score")
@@ -418,38 +431,27 @@ class FeedbackDecisionAgentImpl:
         retry_count: int,
     ) -> str:
         """
-        LLM 최종 판단용 프롬프트 구성
+        LLM 최종 판단용 프롬프트 구성 (constants.py의 템플릿 사용)
         """
-        prompt = f"""Based on the evaluation results and context, decide whether to provide FEEDBACK or proceed to NEXT_QUESTION.
+        # 점수 정보 (None 처리)
+        p_score = evaluation_result.get('pronunciation_score')
+        g_score = evaluation_result.get('grammar_score')
+        r_score = evaluation_result.get('relevance_score')
+        o_score = evaluation_result.get('overall_score')
 
-Evaluation Results:
-- Pronunciation Score: {evaluation_result.get('pronunciation_score')}
-- Grammar Score: {evaluation_result.get('grammar_score')}
-- Relevance Score: {evaluation_result.get('relevance_score')}
-- Overall Score: {evaluation_result.get('overall_score')}
-- Primary Issue: {evaluation_result.get('primary_issue')}
-
-Retry Context:
-- Current Retry Count: {retry_context['retry_count']}/{retry_context['max_retries']}
-- Max Retries Exceeded: {retry_context['is_max_retries_exceeded']}
-- Conversation Turn: {retry_context['conversation_turn']}
-- Learning Progress: {retry_context['estimated_learning_progress']}
-
-Decision Criteria:
-1. If all evaluations failed → NEXT_QUESTION
-2. If max retries exceeded → NEXT_QUESTION (force pass)
-3. If pronunciation < {settings.FEEDBACK_PRONUNCIATION_THRESHOLD} → FEEDBACK (pronunciation issue)
-4. If grammar < {settings.FEEDBACK_GRAMMAR_THRESHOLD} → FEEDBACK (grammar issue)
-5. If relevance < {settings.FEEDBACK_RELEVANCE_THRESHOLD} → FEEDBACK (relevance issue)
-6. Otherwise → NEXT_QUESTION (learner doing well)
-
-Respond in JSON format ONLY (no other text):
-{{
-    "action": "FEEDBACK" or "NEXT_QUESTION",
-    "reasoning": "Brief 1-2 sentence explanation",
-    "confidence": <float 0.0-1.0>
-}}"""
-        return prompt
+        return FEEDBACK_DECISION_AGENT_SYSTEM_PROMPT.format(
+            my_role=session_state.my_role if session_state else "User",
+            ai_role=session_state.ai_role if session_state else "AI",
+            current_question=session_state.current_question_text if session_state else "Unknown Question",
+            retry_count=retry_count,
+            pronunciation_score=p_score if p_score is not None else "None",
+            grammar_score=g_score if g_score is not None else "None",
+            relevance_score=r_score if r_score is not None else "None",
+            overall_score=o_score if o_score is not None else "None",
+            pron_threshold=settings.FEEDBACK_PRONUNCIATION_THRESHOLD,
+            gram_threshold=settings.FEEDBACK_GRAMMAR_THRESHOLD,
+            relev_threshold=settings.FEEDBACK_RELEVANCE_THRESHOLD
+        )
 
     def _filter_feedback_text(self, feedback_text: str, primary_issue: str) -> str:
         """
