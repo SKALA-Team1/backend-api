@@ -458,15 +458,24 @@ async def _send_feedback_messages(
         await websocket.send_json(retry_msg.model_dump())
 
         if session_state.current_question_text:
-            # 재시도 질문 전송
+            # 재시도 질문 전송 (영문)
             await websocket.send_json(
                 AiTextMessage(
                     text=session_state.current_question_text,
-                    is_fixed_question=False
+                    is_fixed_question=False,
+                    is_retry_question=True # 프론트엔드에서 TTS 재생 타이밍 조절을 위해 추가
                 ).model_dump()
             )
-            # 재시도 질문의 한글 번역 생성 및 별도 전송
-            question_ko = await _translate_question_to_korean(session_state.current_question_text)
+            
+            # 재시도 질문의 한글 번역 생성 및 TTS 생성을 병렬로 처리
+            translate_task = asyncio.create_task(_translate_question_to_korean(session_state.current_question_text))
+            tts_task = asyncio.create_task(
+                _send_tts_audio_and_visemes(websocket, session_state.current_question_text, context="RETRY", session_id=session_id)
+            )
+            
+            results = await asyncio.gather(translate_task, tts_task, return_exceptions=True)
+            question_ko = results[0] if not isinstance(results[0], Exception) else session_state.current_question_text
+            
             if question_ko and question_ko != session_state.current_question_text:
                 try:
                     await websocket.send_json(

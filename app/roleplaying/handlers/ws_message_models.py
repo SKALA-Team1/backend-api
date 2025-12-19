@@ -208,6 +208,9 @@ class AiTextMessage(BaseModel):
     is_fixed_question: bool = Field(
         default=False, description="고정 질문 여부 (턴 1, 4, 7)"
     )
+    is_retry_question: bool = Field(
+        default=False, description="재시도 질문 여부"
+    )
 
 
 class AiTextStreamingMessage(BaseModel):
