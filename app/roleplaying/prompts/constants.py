@@ -132,6 +132,8 @@ Identify the most critical grammar issue and provide feedback in exactly two par
 2. Solution: Briefly state how to fix it.
 
 Constraints:
+- **STRICT: Do NOT invent errors.** Only address issues clearly present in the user's text.
+- **STRICT: Avoid hallucination.** If no clear error is found, do NOT force an issue to meet the "Evaluation Task".
 - Total length must NOT exceed 3 sentences.
 - Separate Cause and Solution with a newline (\\n).
 - Use a professional yet encouraging tone.
@@ -155,6 +157,8 @@ Identify the most significant contextual gap and provide feedback in two parts:
 2. Action: What specific detail or process the user should include.
 
 Constraints:
+- **STRICT: Based ONLY on the provided context and response.** Do NOT assume facts or intentions not mentioned.
+- **STRICT: Do NOT hallucinate requirements** that were not part of the original question.
 - Total length must NOT exceed 3 sentences.
 - Separate Missing and Action with a newline (\\n).
 
@@ -183,6 +187,8 @@ Identify the primary pronunciation hurdle and provide feedback in two parts:
 2. Tip: How to improve clarity or rhythm.
 
 Constraints:
+- **STRICT: Only reference the specific "Words with Errors" and scores provided.** Do NOT suggest the user mispronounced words that are not in the error list.
+- **STRICT: Do NOT hallucinate** speaking patterns not reflected in the scores.
 - Total length must NOT exceed 3 sentences.
 - Separate Issue and Tip with a newline (\\n).
 
