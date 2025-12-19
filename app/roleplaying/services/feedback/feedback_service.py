@@ -879,7 +879,7 @@ class FeedbackOrchestratorImpl:
                 "section_type": "pronunciation",
                 "evaluation": pronunciation,
                 "score": pronunciation_score,
-                "fallback": "Pronunciation feedback is unavailable.",
+                "fallback": "문제점: 발음 평가 데이터를 분석할 수 없습니다.\n팁: 마이크 설정을 확인하거나 조금 더 명확하게 말씀해 주세요.",
                 "evaluator": self.pronunciation_evaluator,
                 "user_text": user_text,
                 "audio_data": audio_data,
@@ -890,7 +890,7 @@ class FeedbackOrchestratorImpl:
                 "section_type": "grammar",
                 "evaluation": grammar,
                 "score": grammar_score,
-                "fallback": "Grammar feedback is unavailable.",
+                "fallback": "문제점: 문법 평가 결과를 생성할 수 없습니다.\n팁: 잠시 후 다시 시도해 주세요.",
                 "evaluator": self.grammar_evaluator,
                 "user_text": user_text,
                 "audio_data": None,
@@ -901,7 +901,7 @@ class FeedbackOrchestratorImpl:
                 "section_type": "relevance",
                 "evaluation": relevance,
                 "score": relevance_score,
-                "fallback": "Relevance feedback is unavailable.",
+                "fallback": "문제점: 맥락 관련성 평가가 불가능합니다.\n팁: 질문의 의도에 맞춰 다시 답변해 보세요.",
                 "evaluator": self.relevance_evaluator,
                 "user_text": user_text,
                 "audio_data": None,
@@ -1008,31 +1008,32 @@ class FeedbackOrchestratorImpl:
             return
 
     async def _translate_feedback(self, feedback_en: str) -> Optional[str]:
-        """LLM을 사용하여 영문 피드백을 한글로 번역"""
+        """LLM을 사용하여 영문 피드백을 한글로 번역 (더욱 견고한 버전)"""
         try:
+            # 이미 한글이면 번역 불필요 (fallback 메시지 등)
+            if any(ord('가') <= ord(char) <= ord('힣') for char in feedback_en):
+                return feedback_en
+
             from app.roleplaying.prompts.constants import FEEDBACK_BILINGUAL_PROMPT
 
             prompt = FEEDBACK_BILINGUAL_PROMPT.format(english_feedback=feedback_en)
             response = await self.llm.invoke(prompt)
+            response_text = response if isinstance(response, str) else str(response)
 
             # JSON에서 korean_feedback 추출 시도
             try:
-                json_match = re.search(r'\{[^{}]*"korean_feedback"[^{}]*\}', response, re.DOTALL)
+                json_match = re.search(r'\{[^{}]*"korean_feedback"[^{}]*\}', response_text, re.DOTALL)
                 if json_match:
                     parsed = json.loads(json_match.group(0))
                     korean_feedback = parsed.get("korean_feedback")
                     if korean_feedback and korean_feedback.strip():
-                        logger.debug(f"✅ [번역 완료] {feedback_en[:30]}... → {korean_feedback[:30]}...")
+                        # 번역 결과 반환 (한글 검사 로직 제거: 프롬프트가 예문 보존을 위해 영어를 포함할 수 있음)
                         return korean_feedback
             except Exception as e:
-                logger.warning(f"Failed to parse Korean feedback translation: {e}")
+                logger.warning(f"Failed to parse Korean feedback JSON: {e}")
 
-            # JSON 파싱 실패 시 전체 응답 사용 (간단한 번역 결과일 수 있음)
-            if response and response.strip():
-                logger.debug(f"✅ [번역 완료 (파싱)] {feedback_en[:30]}... → {response[:30]}...")
-                return response.strip()
-
-            return None
+            # JSON 파싱 실패 시, 전체 응답 반환 (최후의 수단)
+            return response_text.strip()
 
         except Exception as e:
             logger.error(f"Feedback translation failed: {e}")

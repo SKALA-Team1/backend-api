@@ -30,6 +30,7 @@ from azure.cognitiveservices.speech import (
 from azure.cognitiveservices.speech.audio import AudioConfig, PushAudioInputStream
 
 from app.config import settings
+from app.roleplaying.services.stt.audio_converter import AudioConverter
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class AzureSpeechService:
 
     def __init__(self):
         """Azure Speech Service 초기화"""
+        self.converter = AudioConverter()
         if not settings.AZURE_SPEECH_KEY:
             logger.warning("AZURE_SPEECH_KEY not configured. Pronunciation assessment disabled.")
             self.enabled = False
@@ -173,8 +175,11 @@ class AzureSpeechService:
             )
             pronunciation_config.apply_to(speech_recognizer)
 
-            # 오디오 데이터를 스트림에 작성 (recognize_once 호출 전)
-            audio_stream.write(audio_data)
+            # PCM → WAV 변환 (Azure 안정성 확보)
+            wav_audio = self.converter.pcm_to_wav(audio_data)
+
+            # 오디오 데이터를 스트림에 작성
+            audio_stream.write(wav_audio)
             audio_stream.close()
 
             # 발음 평가 실행

@@ -361,27 +361,32 @@ Provide ONLY the Korean translation, no other text.
 FEEDBACK_BILINGUAL_PROMPT = """
 You are a translator specializing in IT English learning materials.
 
-Translate the provided English feedback to Korean while strictly following these formatting rules:
+Translate the provided English feedback to **KOREAN**, following these rules strictly:
 
-1. Label Mapping:
+1. **Labels (MUST use Korean):**
    - "Issue:" or "Cause:" -> "문제점:"
    - "Missing:" -> "누락된 내용:"
    - "Solution:" or "Tip:" -> "팁:"
    - "Action:" -> "조치:"
 
-2. Structure:
-   - You MUST put a newline (\\n) between the first part (Issue/Cause/Missing) and the second part (Solution/Tip/Action).
-   - This is CRITICAL for display formatting.
+2. **Content Translation:**
+   - Translate the *explanations* and *descriptions* into natural, professional Korean.
+   - **DO NOT return the explanation in English.**
+
+3. **Exceptions (Keep English):**
+   - **English example sentences, specific words, or corrected phrases MUST remain in English.**
+   - Example: "The word 'apple' is wrong." -> "'apple'이라는 단어는 틀렸습니다."
+
+4. **Formatting:**
+   - Use a newline (\\n) between the two sections.
 
 English Feedback:
 "{english_feedback}"
 
 Provide the response in JSON format ONLY:
 {{
-    "korean_feedback": "문제점(또는 누락된 내용): [내용]\\n팁(또는 조치): [내용]"
+    "korean_feedback": "문제점(또는 누락된 내용): [한국어 설명]\\n팁(또는 조치): [한국어 설명]"
 }}
-
-Do not include explanations or other text.
 """
 
 QUESTION_BILINGUAL_PROMPT = """
